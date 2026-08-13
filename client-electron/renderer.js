@@ -15,6 +15,11 @@ const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:relay.metered.ca:80' },
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -33,6 +38,11 @@ const rtcConfig = {
   ]
 };
 
+// Global variables
+let localStream = null;
+let peerConnection = null;
+let roomId = '';
+
 // Generate random 6-digit access code
 function generateRoomId() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -47,7 +57,7 @@ function updateStatus(status, text) {
   statusText.innerText = text;
 }
 
-// Load screen and window sources
+// Load available screen and window sources into select dropdown
 async function loadSources() {
   try {
     const sources = await window.electronAPI.getScreenSources();
@@ -103,19 +113,13 @@ btnStart.addEventListener('click', async () => {
   if (!sourceId) return;
 
   try {
-    // Capture desktop screen track
+    // Capture desktop screen track without rigid resolution constraints
     localStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
         mandatory: {
           chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          minWidth: 1280,
-          maxWidth: 1920,
-          minHeight: 720,
-          maxHeight: 1080,
-          minFrameRate: 30,
-          maxFrameRate: 60
+          chromeMediaSourceId: sourceId
         }
       }
     });
