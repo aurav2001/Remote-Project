@@ -179,33 +179,42 @@ async function createPeerConnection() {
 }
 
 let pendingIceCandidates = [];
+let isInitiatingOffer = false;
 
 const isValidCandidate = (cand) => {
   return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
 };
 
 async function handleControllerJoined() {
-  console.log('Controller connected! Initiating SDP offer.');
-  updateStatus('connecting', 'Establishing connection...');
-  pendingIceCandidates = [];
-  
-  await createPeerConnection();
+  if (isInitiatingOffer) return;
+  isInitiatingOffer = true;
 
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
+  try {
+    console.log('Controller connected! Initiating SDP offer.');
+    updateStatus('connecting', 'Establishing connection...');
+    pendingIceCandidates = [];
+    
+    await createPeerConnection();
 
-  window.electronAPI.emitSocket('webrtc-offer', {
-    roomId,
-    offer: {
-      type: offer.type || 'offer',
-      sdp: offer.sdp
-    }
-  });
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    window.electronAPI.emitSocket('webrtc-offer', {
+      roomId,
+      offer: {
+        type: offer.type || 'offer',
+        sdp: offer.sdp
+      }
+    });
+  } catch (err) {
+    console.error('Error initiating WebRTC offer:', err);
+  } finally {
+    isInitiatingOffer = false;
+  }
 }
 
 // When controller is ready, initiate connection with WebRTC Offer
 window.electronAPI.onSocket('ready', handleControllerJoined);
-window.electronAPI.onSocket('controller-joined', handleControllerJoined);
 
 // Receive WebRTC SDP Answer from controller
 window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {

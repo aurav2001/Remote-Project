@@ -51,7 +51,6 @@ io.on('connection', (socket) => {
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
       io.to(roomId).emit('ready', { host: room.host, controller: room.controller });
-      io.to(room.host).emit('controller-joined');
       console.log(`Room ${roomId} is ready for WebRTC connection`);
     }
   });
