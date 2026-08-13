@@ -9,3 +9,11 @@ services:
     envVars:
       - key: PORT
         value: 5000
+
+  - type: static
+    name: remoteg-portal
+    env: static
+    plan: free
+    rootDir: controller-web
+    buildCommand: npm install && npm run build
+    publishPath: dist
