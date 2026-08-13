@@ -10,8 +10,13 @@ services:
       - key: PORT
         value: 5000
 
-  - type: static
+  - type: web
     name: remoteg-portal
+    runtime: node
+    plan: free
     rootDir: controller-web
-    buildCommand: npm install && npm run build
-    publishPath: dist
+    buildCommand: npm install && npm run build && npm install -g serve
+    startCommand: serve dist -s -l $PORT
+    envVars:
+      - key: PORT
+        value: 3000
