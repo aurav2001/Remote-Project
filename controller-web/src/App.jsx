@@ -172,11 +172,14 @@ function App() {
     // Receive screen track
     pc.ontrack = (event) => {
       console.log('Received remote video track! Opening full-screen stream.');
-      if (event.streams && event.streams[0]) {
-        remoteStreamRef.current = event.streams[0];
-        if (videoRef.current) {
-          videoRef.current.srcObject = event.streams[0];
-        }
+      const stream = (event.streams && event.streams[0])
+        ? event.streams[0]
+        : new MediaStream([event.track]);
+
+      remoteStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => console.warn('Video play warning:', e));
       }
       setStatus('connected');
     };

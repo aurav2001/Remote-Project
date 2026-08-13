@@ -150,8 +150,14 @@ async function createPeerConnection() {
 
   peerConnection = new RTCPeerConnection(rtcConfig);
 
+  if (!localStream) {
+    console.error('No localStream available to share!');
+    return;
+  }
+
   // Add all local screen tracks to peer connection
   localStream.getTracks().forEach(track => {
+    track.enabled = true;
     peerConnection.addTrack(track, localStream);
   });
 
