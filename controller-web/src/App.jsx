@@ -44,11 +44,12 @@ function App() {
     };
   }, []);
 
-  // Guarantee that whenever status becomes 'connected', the video tag receives the stream
+  // Guarantee that whenever status becomes 'connected', the video tag receives the stream and plays
   useEffect(() => {
     if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
-      console.log('Binding remote stream to video element srcObject');
+      console.log('Binding remote stream to video element srcObject and invoking play()');
       videoRef.current.srcObject = remoteStreamRef.current;
+      videoRef.current.play().catch(err => console.warn('Video autoplay warning:', err));
     }
   }, [status]);
 
@@ -363,6 +364,7 @@ function App() {
               ref={videoRef}
               autoPlay
               playsInline
+              muted
               onLoadedMetadata={handleLoadedMetadata}
               onMouseMove={handleMouseMove}
               onMouseDown={handleMouseDown}
