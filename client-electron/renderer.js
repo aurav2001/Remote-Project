@@ -188,7 +188,10 @@ async function handleControllerJoined() {
 
   window.electronAPI.emitSocket('webrtc-offer', {
     roomId,
-    offer
+    offer: {
+      type: offer.type || 'offer',
+      sdp: offer.sdp
+    }
   });
 }
 
@@ -199,8 +202,12 @@ window.electronAPI.onSocket('controller-joined', handleControllerJoined);
 // Receive WebRTC SDP Answer from controller
 window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {
   console.log('Received WebRTC answer from controller.');
-  if (peerConnection) {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+  if (peerConnection && answer) {
+    const sdpAnswer = new RTCSessionDescription({
+      type: answer.type || 'answer',
+      sdp: answer.sdp || (typeof answer === 'string' ? answer : answer.answer?.sdp)
+    });
+    await peerConnection.setRemoteDescription(sdpAnswer);
     // Flush queued ICE candidates
     while (pendingIceCandidates.length > 0) {
       const candidate = pendingIceCandidates.shift();

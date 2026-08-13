@@ -152,7 +152,11 @@ function App() {
     };
 
     // Set remote description (SDP Offer)
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const sdpOffer = new RTCSessionDescription({
+      type: offer?.type || 'offer',
+      sdp: offer?.sdp || (typeof offer === 'string' ? offer : offer?.offer?.sdp)
+    });
+    await pc.setRemoteDescription(sdpOffer);
 
     // Flush queued ICE candidates
     while (pendingCandidatesRef.current.length > 0) {
@@ -171,7 +175,10 @@ function App() {
     // Send SDP Answer to Host
     socketRef.current.emit('webrtc-answer', {
       roomId: targetRoomId.trim(),
-      answer
+      answer: {
+        type: answer.type || 'answer',
+        sdp: answer.sdp
+      }
     });
   };
 
