@@ -27,6 +27,10 @@ function startInputHelper() {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
+  inputHelperProcess.on('error', (err) => {
+    console.error('Failed to start input helper process:', err);
+  });
+
   inputHelperProcess.stdout.on('data', (data) => {
     console.log(`[InputHelper Stdout]: ${data.toString().trim()}`);
   });
