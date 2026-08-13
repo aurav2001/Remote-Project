@@ -363,7 +363,6 @@ function App() {
             onClick={focusControl}
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
-            style={{ aspectRatio: aspectRatio }}
           >
             <video
               ref={videoRef}
@@ -376,7 +375,7 @@ function App() {
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
-              style={{ objectFit: 'fill', width: '100%', height: '100%' }}
+              style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block' }}
             />
           </div>
           
