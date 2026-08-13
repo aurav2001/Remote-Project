@@ -63,6 +63,9 @@ async function loadSources() {
       return;
     }
 
+    // Prioritize physical screen sources over window sources
+    sources.sort((a, b) => (a.id.startsWith('screen') ? -1 : 1));
+
     sources.forEach(source => {
       const option = document.createElement('option');
       option.value = source.id;

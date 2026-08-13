@@ -97,8 +97,8 @@ ipcMain.handle('get-screen-sources', async () => {
   try {
     console.log('[Main Process]: Invoking desktopCapturer.getSources...');
     const sources = await desktopCapturer.getSources({ 
-      types: ['window', 'screen'],
-      thumbnailSize: { width: 0, height: 0 }
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 150, height: 150 }
     });
     console.log('[Main Process]: Found sources count:', sources.length);
     const mapped = sources.map(source => ({
