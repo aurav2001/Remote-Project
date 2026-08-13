@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const SIGNALING_SERVER = 'http://localhost:5000';
+const SIGNALING_SERVER = 'https://remote-desktop-signaling-syj4.onrender.com';
 
 const rtcConfig = {
   iceServers: [

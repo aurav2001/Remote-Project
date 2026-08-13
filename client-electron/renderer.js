@@ -5,7 +5,7 @@ const statusText = document.getElementById('status-text');
 const roomIdText = document.getElementById('room-id');
 const btnCopy = document.getElementById('btn-copy');
 
-const SIGNALING_SERVER = 'http://localhost:5000';
+const SIGNALING_SERVER = 'https://remote-desktop-signaling-syj4.onrender.com';
 let localStream = null;
 let peerConnection = null;
 let roomId = '';
