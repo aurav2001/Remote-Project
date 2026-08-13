@@ -61,12 +61,13 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: false // Disable sandbox to allow preload script to require third-party modules like socket.io-client
     }
   });
 
   mainWindow.loadFile('index.html');
-  // mainWindow.webContents.openDevTools(); // Uncomment for development debugging
+  mainWindow.webContents.openDevTools(); // Open DevTools to view console logs and WebRTC logs
 }
 
 app.whenReady().then(() => {
