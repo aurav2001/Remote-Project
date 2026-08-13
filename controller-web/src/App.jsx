@@ -35,6 +35,7 @@ function App() {
   const peerConnectionRef = useRef(null);
   const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const remoteStreamRef = useRef(null);
 
   // Clean up WebRTC and socket on unmount
   useEffect(() => {
@@ -43,7 +44,16 @@ function App() {
     };
   }, []);
 
+  // Guarantee that whenever status becomes 'connected', the video tag receives the stream
+  useEffect(() => {
+    if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
+      console.log('Binding remote stream to video element srcObject');
+      videoRef.current.srcObject = remoteStreamRef.current;
+    }
+  }, [status]);
+
   const cleanup = () => {
+    remoteStreamRef.current = null;
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
@@ -147,7 +157,8 @@ function App() {
       console.log('WebRTC State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      } else if (pc.connectionState === 'failed') {
+        console.warn('WebRTC connection failed. Cleaning up...');
         cleanup();
       }
     };
@@ -155,10 +166,13 @@ function App() {
     // Receive screen track
     pc.ontrack = (event) => {
       console.log('Received remote video track! Opening full-screen stream.');
-      setStatus('connected');
-      if (videoRef.current && event.streams && event.streams[0]) {
-        videoRef.current.srcObject = event.streams[0];
+      if (event.streams && event.streams[0]) {
+        remoteStreamRef.current = event.streams[0];
+        if (videoRef.current) {
+          videoRef.current.srcObject = event.streams[0];
+        }
       }
+      setStatus('connected');
     };
 
     // Set remote description (SDP Offer)

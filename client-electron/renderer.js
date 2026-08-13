@@ -172,7 +172,7 @@ async function createPeerConnection() {
     console.log(`Connection state: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'connected') {
       updateStatus('connected', 'Connected & Streaming');
-    } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+    } else if (peerConnection.connectionState === 'failed') {
       updateStatus('connecting', 'Controller Disconnected. Waiting...');
     }
   };
