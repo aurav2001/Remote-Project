@@ -15,8 +15,8 @@ services:
     runtime: node
     plan: free
     rootDir: controller-web
-    buildCommand: npm install && npm run build && npm install -g serve
-    startCommand: serve dist -s -l $PORT
+    buildCommand: npm install && npm install serve && npm run build
+    startCommand: npx serve dist -s -l $PORT
     envVars:
       - key: PORT
         value: 3000
