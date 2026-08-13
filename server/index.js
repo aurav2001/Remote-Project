@@ -16,7 +16,9 @@ const io = new Server(server, {
   cors: {
     origin: '*', // Allow all origins for development
     methods: ['GET', 'POST']
-  }
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 // Track rooms and their peers

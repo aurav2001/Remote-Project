@@ -82,7 +82,10 @@ function App() {
     pendingCandidatesRef.current = [];
 
     // Connect to Signaling Server
-    const socket = io(SIGNALING_SERVER);
+    const socket = io(SIGNALING_SERVER, {
+      pingTimeout: 60000,
+      pingInterval: 25000
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -166,6 +169,14 @@ function App() {
       } else if (pc.connectionState === 'failed') {
         console.warn('WebRTC connection failed. Cleaning up...');
         cleanup();
+      }
+    };
+
+    // Monitor ICE state
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE State Change:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed') {
+        console.error('WebRTC ICE connection failed!');
       }
     };
 
