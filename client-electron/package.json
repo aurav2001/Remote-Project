@@ -15,8 +15,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.antigravity.remote",
-    "productName": "AntigravityRemote",
+    "appId": "com.remoteg.remote",
+    "productName": "RemoteG",
     "directories": {
       "output": "dist-build"
     },

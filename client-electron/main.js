@@ -5,7 +5,7 @@ const fs = require('fs');
 
 // Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
 try {
-  const localUserData = path.join(app.getPath('temp'), 'antigravity-remote-desktop-data');
+  const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {
     fs.mkdirSync(localUserData, { recursive: true });
   }

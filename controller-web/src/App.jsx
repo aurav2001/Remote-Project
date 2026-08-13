@@ -238,7 +238,7 @@ function App() {
           
           <div className="login-card">
             <div className="card-header">
-              <h1>Antigravity Control</h1>
+              <h1>RemoteG Control</h1>
               <p>Connect to a Remote System Node</p>
             </div>
 
