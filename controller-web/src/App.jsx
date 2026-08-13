@@ -55,12 +55,15 @@ function App() {
     setStatus('disconnected');
   };
 
+  const pendingCandidatesRef = useRef([]);
+
   const handleConnect = (e) => {
     e.preventDefault();
     if (!targetRoomId.trim()) return;
 
     setStatus('connecting');
     setRoomId(targetRoomId.trim());
+    pendingCandidatesRef.current = [];
 
     // Connect to Signaling Server
     const socket = io(SIGNALING_SERVER);
@@ -96,12 +99,14 @@ function App() {
 
     // Receive ICE Candidates from Host
     socket.on('ice-candidate', async ({ candidate }) => {
-      if (peerConnectionRef.current) {
+      if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
         try {
           await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
           console.error('Error adding received ICE candidate:', e);
         }
+      } else {
+        pendingCandidatesRef.current.push(candidate);
       }
     });
 
@@ -148,6 +153,16 @@ function App() {
 
     // Set remote description (SDP Offer)
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    // Flush queued ICE candidates
+    while (pendingCandidatesRef.current.length > 0) {
+      const cand = pendingCandidatesRef.current.shift();
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (e) {
+        console.error('Error adding queued ICE candidate:', e);
+      }
+    }
 
     // Create SDP Answer
     const answer = await pc.createAnswer();

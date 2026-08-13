@@ -174,10 +174,12 @@ async function createPeerConnection() {
   };
 }
 
-// When controller is ready, initiate connection with WebRTC Offer
-window.electronAPI.onSocket('ready', async () => {
+let pendingIceCandidates = [];
+
+async function handleControllerJoined() {
   console.log('Controller connected! Initiating SDP offer.');
   updateStatus('connecting', 'Establishing connection...');
+  pendingIceCandidates = [];
   
   await createPeerConnection();
 
@@ -188,25 +190,40 @@ window.electronAPI.onSocket('ready', async () => {
     roomId,
     offer
   });
-});
+}
+
+// When controller is ready, initiate connection with WebRTC Offer
+window.electronAPI.onSocket('ready', handleControllerJoined);
+window.electronAPI.onSocket('controller-joined', handleControllerJoined);
 
 // Receive WebRTC SDP Answer from controller
 window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {
   console.log('Received WebRTC answer from controller.');
   if (peerConnection) {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    // Flush queued ICE candidates
+    while (pendingIceCandidates.length > 0) {
+      const candidate = pendingIceCandidates.shift();
+      try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error('Error adding queued ICE candidate:', e);
+      }
+    }
   }
 });
 
 // Receive WebRTC ICE Candidate from controller
 window.electronAPI.onSocket('ice-candidate', async ({ candidate }) => {
   console.log('Received ICE candidate from controller.');
-  if (peerConnection) {
+  if (peerConnection && peerConnection.remoteDescription) {
     try {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
       console.error('Error adding ICE candidate:', e);
     }
+  } else {
+    pendingIceCandidates.push(candidate);
   }
 });
 

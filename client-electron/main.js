@@ -62,12 +62,17 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false // Disable sandbox to allow preload script to require third-party modules like socket.io-client
+      sandbox: false
     }
   });
 
   mainWindow.loadFile('index.html');
-  mainWindow.webContents.openDevTools(); // Open DevTools to view console logs and WebRTC logs
+  mainWindow.webContents.openDevTools();
+  
+  // Relay renderer console.log to main process terminal
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer Console]: ${message}`);
+  });
 }
 
 app.whenReady().then(() => {
