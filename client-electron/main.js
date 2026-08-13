@@ -1,6 +1,18 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const fs = require('fs');
+
+// Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
+try {
+  const localUserData = path.join(app.getPath('temp'), 'antigravity-remote-desktop-data');
+  if (!fs.existsSync(localUserData)) {
+    fs.mkdirSync(localUserData, { recursive: true });
+  }
+  app.setPath('userData', localUserData);
+} catch (err) {
+  console.error('Failed to set local userData path:', err);
+}
 
 let inputHelperProcess = null;
 
