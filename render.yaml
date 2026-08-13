@@ -10,7 +10,7 @@ services:
       - key: PORT
         value: 5000
 
-  - type: static
+  - type: web
     name: remoteg-portal
     env: static
     plan: free
