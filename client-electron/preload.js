@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const io = require('socket.io-client');
 
 let socket = null;
+const pendingListeners = []; // Queue listeners registered before socket exists
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
@@ -11,6 +12,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   connectSocket: (url) => {
     socket = io(url);
     
+    // Attach any listeners that were registered before socket was created
+    pendingListeners.forEach(({ event, callback }) => {
+      socket.on(event, (data) => callback(data));
+    });
+    console.log(`[Preload] Attached ${pendingListeners.length} pending socket listeners.`);
+    pendingListeners.length = 0; // Clear the queue
+
     // Register basic connection event relays
     socket.on('connect', () => {
       window.dispatchEvent(new Event('socket-connected'));
@@ -25,6 +33,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSocket: (event, callback) => {
     if (socket) {
       socket.on(event, (data) => callback(data));
+    } else {
+      // Socket doesn't exist yet — queue the listener for later
+      pendingListeners.push({ event, callback });
     }
   },
   emitSocket: (event, data) => {
