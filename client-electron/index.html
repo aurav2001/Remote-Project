@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Desktop Client - Host</title>
+  <!-- Google Fonts: Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      --glass-bg: rgba(255, 255, 255, 0.03);
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      
+      --color-primary: #818cf8;
+      --color-primary-glow: rgba(129, 140, 248, 0.4);
+      --color-success: #34d399;
+      --color-success-glow: rgba(52, 211, 153, 0.4);
+      --color-error: #f87171;
+      --color-error-glow: rgba(248, 113, 113, 0.4);
+      --color-text: #f8fafc;
+      --color-text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-gradient);
+      color: var(--color-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 20px;
+    }
+
+    .container {
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow);
+      border-radius: 24px;
+      padding: 40px;
+      width: 100%;
+      max-width: 500px;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+      transition: all 0.3s ease;
+    }
+
+    .container::before {
+      content: '';
+      position: absolute;
+      top: -2px;
+      left: -2px;
+      right: -2px;
+      bottom: -2px;
+      background: linear-gradient(135deg, var(--color-primary), transparent, var(--color-success));
+      border-radius: 26px;
+      z-index: -1;
+      opacity: 0.15;
+      transition: opacity 0.5s ease;
+    }
+
+    .container:hover::before {
+      opacity: 0.3;
+    }
+
+    /* Decorative background glowing spheres */
+    .glow-sphere {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      z-index: 0;
+      opacity: 0.15;
+      pointer-events: none;
+    }
+
+    .sphere-1 {
+      top: 10%;
+      left: 10%;
+      width: 300px;
+      height: 300px;
+      background: var(--color-primary);
+      animation: float 8s ease-in-out infinite alternate;
+    }
+
+    .sphere-2 {
+      bottom: 10%;
+      right: 10%;
+      width: 250px;
+      height: 250px;
+      background: var(--color-success);
+      animation: float 10s ease-in-out infinite alternate-reverse;
+    }
+
+    @keyframes float {
+      0% { transform: translateY(0) scale(1); }
+      100% { transform: translateY(-20px) scale(1.05); }
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #fff 30%, var(--color-primary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header p {
+      color: var(--color-text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 30px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--glass-border);
+      margin-bottom: 24px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--color-error);
+      box-shadow: 0 0 10px var(--color-error-glow);
+    }
+
+    .status-dot.connecting {
+      background-color: var(--color-primary);
+      box-shadow: 0 0 10px var(--color-primary-glow);
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-dot.connected {
+      background-color: var(--color-success);
+      box-shadow: 0 0 10px var(--color-success-glow);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .room-card {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .room-card-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--color-text-muted);
+      margin-bottom: 8px;
+    }
+
+    .room-id-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .room-id {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: var(--color-primary);
+      text-shadow: 0 0 12px var(--color-primary-glow);
+    }
+
+    .btn-copy {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--glass-border);
+      color: var(--color-text);
+      border-radius: 8px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-copy:hover {
+      background: var(--color-primary);
+      color: #000;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 10px var(--color-primary-glow);
+    }
+
+    .input-group {
+      text-align: left;
+      margin-bottom: 24px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .select-screen {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--glass-border);
+      color: var(--color-text);
+      padding: 12px 16px;
+      border-radius: 12px;
+      outline: none;
+      font-family: inherit;
+      font-size: 0.95rem;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      background-size: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .select-screen:hover, .select-screen:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 10px rgba(129, 140, 248, 0.15);
+    }
+
+    .select-screen option {
+      background-color: #0f172a;
+      color: var(--color-text);
+    }
+
+    .btn-start {
+      width: 100%;
+      background: linear-gradient(135deg, var(--color-primary) 0%, #6366f1 100%);
+      color: #ffffff;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 15px rgba(129, 140, 248, 0.3);
+    }
+
+    .btn-start:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(129, 140, 248, 0.45);
+    }
+
+    .btn-start:active {
+      transform: translateY(0);
+    }
+
+    .btn-start:disabled {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--color-text-muted);
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* Secret local video preview (optional layout element) */
+    #local-video {
+      display: none;
+      width: 100%;
+      border-radius: 12px;
+      margin-top: 20px;
+      border: 1px solid var(--glass-border);
+    }
+
+    .info-footer {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Decorative background spheres -->
+  <div class="glow-sphere sphere-1"></div>
+  <div class="glow-sphere sphere-2"></div>
+
+  <div class="container">
+    <div class="header">
+      <h1>Antigravity Remote</h1>
+      <p>System Agent Node</p>
+    </div>
+
+    <div class="status-badge">
+      <div id="status-dot" class="status-dot"></div>
+      <span id="status-text">Disconnected</span>
+    </div>
+
+    <div class="room-card">
+      <div class="room-card-label">Target Access Code</div>
+      <div class="room-id-container">
+        <span id="room-id" class="room-id">------</span>
+        <button id="btn-copy" class="btn-copy" title="Copy code">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="input-group">
+      <label for="screen-select">Select Monitor / Window to Stream</label>
+      <select id="screen-select" class="select-screen">
+        <option value="">Loading sources...</option>
+      </select>
+    </div>
+
+    <button id="btn-start" class="btn-start" disabled>Initialize Sharing</button>
+    
+    <video id="local-video" autoplay playsinline muted></video>
+
+    <div class="info-footer">
+      Keep this application open to allow controllers to connect to this machine.
+    </div>
+  </div>
+
+  <!-- Load renderer script -->
+  <script src="renderer.js"></script>
+</body>
+</html>

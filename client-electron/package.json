@@ -1,0 +1,43 @@
+{
+  "name": "remote-desktop-client",
+  "version": "1.0.0",
+  "description": "Electron client for Web-Based Remote Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder build --win"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^28.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.antigravity.remote",
+    "productName": "AntigravityRemote",
+    "directories": {
+      "output": "dist-build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "input-helper.exe"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "input-helper.exe"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true
+    }
+  }
+}
