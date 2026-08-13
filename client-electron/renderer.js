@@ -38,11 +38,6 @@ const rtcConfig = {
   ]
 };
 
-// Global variables
-let localStream = null;
-let peerConnection = null;
-let roomId = '';
-
 // Generate random 6-digit access code
 function generateRoomId() {
   return Math.floor(100000 + Math.random() * 900000).toString();
