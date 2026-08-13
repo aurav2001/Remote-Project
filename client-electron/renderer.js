@@ -153,12 +153,16 @@ async function createPeerConnection() {
     peerConnection.addTrack(track, localStream);
   });
 
+  const isValidCandidate = (cand) => {
+    return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
+  };
+
   // Handle ICE Candidates generated locally
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
+    if (event.candidate && isValidCandidate(event.candidate)) {
       window.electronAPI.emitSocket('ice-candidate', {
         roomId,
-        candidate: event.candidate
+        candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
       });
     }
   };
@@ -175,6 +179,10 @@ async function createPeerConnection() {
 }
 
 let pendingIceCandidates = [];
+
+const isValidCandidate = (cand) => {
+  return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
+};
 
 async function handleControllerJoined() {
   console.log('Controller connected! Initiating SDP offer.');
@@ -211,10 +219,12 @@ window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {
     // Flush queued ICE candidates
     while (pendingIceCandidates.length > 0) {
       const candidate = pendingIceCandidates.shift();
-      try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (e) {
-        console.error('Error adding queued ICE candidate:', e);
+      if (isValidCandidate(candidate)) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          console.warn('Skipping queued candidate:', e);
+        }
       }
     }
   }
@@ -223,11 +233,12 @@ window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {
 // Receive WebRTC ICE Candidate from controller
 window.electronAPI.onSocket('ice-candidate', async ({ candidate }) => {
   console.log('Received ICE candidate from controller.');
+  if (!isValidCandidate(candidate)) return;
   if (peerConnection && peerConnection.remoteDescription) {
     try {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
-      console.error('Error adding ICE candidate:', e);
+      console.warn('Skipping candidate error:', e);
     }
   } else {
     pendingIceCandidates.push(candidate);

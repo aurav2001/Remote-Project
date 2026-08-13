@@ -97,13 +97,18 @@ function App() {
       }
     });
 
+    const isValidCandidate = (cand) => {
+      return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
+    };
+
     // Receive ICE Candidates from Host
     socket.on('ice-candidate', async ({ candidate }) => {
+      if (!isValidCandidate(candidate)) return;
       if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
         try {
           await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
-          console.error('Error adding received ICE candidate:', e);
+          console.warn('Skipping candidate error:', e);
         }
       } else {
         pendingCandidatesRef.current.push(candidate);
@@ -123,12 +128,16 @@ function App() {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnectionRef.current = pc;
 
+    const isValidCandidate = (cand) => {
+      return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
+    };
+
     // Send local ICE candidates to host
     pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current) {
+      if (event.candidate && isValidCandidate(event.candidate) && socketRef.current) {
         socketRef.current.emit('ice-candidate', {
           roomId: targetRoomId.trim(),
-          candidate: event.candidate
+          candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
         });
       }
     };
@@ -145,7 +154,8 @@ function App() {
 
     // Receive screen track
     pc.ontrack = (event) => {
-      console.log('Received remote video track');
+      console.log('Received remote video track! Opening full-screen stream.');
+      setStatus('connected');
       if (videoRef.current && event.streams && event.streams[0]) {
         videoRef.current.srcObject = event.streams[0];
       }
@@ -161,10 +171,12 @@ function App() {
     // Flush queued ICE candidates
     while (pendingCandidatesRef.current.length > 0) {
       const cand = pendingCandidatesRef.current.shift();
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(cand));
-      } catch (e) {
-        console.error('Error adding queued ICE candidate:', e);
+      if (isValidCandidate(cand)) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.warn('Skipping queued candidate error:', e);
+        }
       }
     }
 
