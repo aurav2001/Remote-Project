@@ -201,4 +201,8 @@ window.electronAPI.onSocket('control-event', (data) => {
 });
 
 // Load screen sources on startup
-window.addEventListener('DOMContentLoaded', loadSources);
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', loadSources);
+} else {
+  loadSources();
+}

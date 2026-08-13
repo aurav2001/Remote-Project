@@ -87,17 +87,22 @@ app.on('window-all-closed', () => {
 
 // IPC Handler to get screen sources
 ipcMain.handle('get-screen-sources', async () => {
+  console.log('[Main Process]: get-screen-sources IPC handler invoked!');
   try {
+    console.log('[Main Process]: Invoking desktopCapturer.getSources...');
     const sources = await desktopCapturer.getSources({ 
       types: ['window', 'screen'],
       thumbnailSize: { width: 0, height: 0 }
     });
-    return sources.map(source => ({
+    console.log('[Main Process]: Found sources count:', sources.length);
+    const mapped = sources.map(source => ({
       id: source.id,
       name: source.name
     }));
+    console.log('[Main Process]: Returning mapped sources:', JSON.stringify(mapped));
+    return mapped;
   } catch (error) {
-    console.error('Error fetching screen sources:', error);
+    console.error('[Main Process]: Error fetching screen sources:', error);
     return [];
   }
 });
