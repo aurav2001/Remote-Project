@@ -1,4 +1,4 @@
-"const btnStart = document.getElementById('btn-start');
+const btnStart = document.getElementById('btn-start');
 const screenSelect = document.getElementById('screen-select');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
@@ -76,11 +76,15 @@ function resetPermanentCode() {
 
 // Update connection status indicator
 function updateStatus(status, text) {
-  statusDot.className = 'status-dot';
-  if (status) {
-    statusDot.classList.add(status);
+  if (statusDot) {
+    statusDot.className = 'status-dot';
+    if (status) {
+      statusDot.classList.add(status);
+    }
   }
-  statusText.innerText = text;
+  if (statusText) {
+    statusText.innerText = text;
+  }
 }
 
 // Core function to start screen sharing
@@ -100,12 +104,18 @@ async function startSharing(sourceId) {
     });
 
     const localVideo = document.getElementById('local-video');
-    localVideo.srcObject = localStream;
-    localVideo.style.display = 'block';
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      localVideo.style.display = 'block';
+    }
 
-    btnStart.innerText = 'Streaming Screen (Auto-Started)';
-    btnStart.disabled = true;
-    screenSelect.disabled = false; // Allow user to switch monitor if they want
+    if (btnStart) {
+      btnStart.innerText = 'Streaming Screen (Auto-Started)';
+      btnStart.disabled = true;
+    }
+    if (screenSelect) {
+      screenSelect.disabled = false; // Allow user to switch monitor if they want
+    }
     isSharingStarted = true;
 
     // Connect to Signaling Server
@@ -120,24 +130,28 @@ async function startSharing(sourceId) {
 async function loadSources() {
   try {
     const sources = await window.electronAPI.getScreenSources();
-    screenSelect.innerHTML = '';
-    
-    if (sources.length === 0) {
-      screenSelect.innerHTML = '<option value=\"\">No screens found</option>';
-      return;
+    if (screenSelect) {
+      screenSelect.innerHTML = '';
+      
+      if (sources.length === 0) {
+        screenSelect.innerHTML = '<option value="">No screens found</option>';
+        return;
+      }
+
+      // Prioritize physical screen sources over window sources
+      sources.sort((a, b) => (a.id.startsWith('screen') ? -1 : 1));
+
+      sources.forEach(source => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.text = source.name;
+        screenSelect.appendChild(option);
+      });
     }
 
-    // Prioritize physical screen sources over window sources
-    sources.sort((a, b) => (a.id.startsWith('screen') ? -1 : 1));
-
-    sources.forEach(source => {
-      const option = document.createElement('option');
-      option.value = source.id;
-      option.text = source.name;
-      screenSelect.appendChild(option);
-    });
-    
-    btnStart.disabled = false;
+    if (btnStart) {
+      btnStart.disabled = false;
+    }
 
     // AUTO-START Screen Share on App Launch (Direct Unattended Access)
     if (!isSharingStarted && sources.length > 0) {
@@ -147,23 +161,27 @@ async function loadSources() {
     }
   } catch (error) {
     console.error('Error loading sources:', error);
-    screenSelect.innerHTML = '<option value=\"\">Failed to load screens</option>';
+    if (screenSelect) {
+      screenSelect.innerHTML = '<option value="">Failed to load screens</option>';
+    }
   }
 }
 
 // Copy Code to Clipboard
-btnCopy.addEventListener('click', () => {
-  if (roomId) {
-    navigator.clipboard.writeText(roomId);
-    
-    // Quick copy indicator
-    const originalSVG = btnCopy.innerHTML;
-    btnCopy.innerHTML = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"></polyline></svg>`;
-    setTimeout(() => {
-      btnCopy.innerHTML = originalSVG;
-    }, 2000);
-  }
-});
+if (btnCopy) {
+  btnCopy.addEventListener('click', () => {
+    if (roomId) {
+      navigator.clipboard.writeText(roomId);
+      
+      // Quick copy indicator
+      const originalSVG = btnCopy.innerHTML;
+      btnCopy.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+      setTimeout(() => {
+        btnCopy.innerHTML = originalSVG;
+      }, 2000);
+    }
+  });
+}
 
 // Regenerate/Reset Code Button
 if (btnResetCode) {
@@ -187,22 +205,28 @@ window.addEventListener('socket-disconnected', () => {
 });
 
 // Manual Start button click (if user wants to manually re-share or switch)
-btnStart.addEventListener('click', () => {
-  const sourceId = screenSelect.value;
-  startSharing(sourceId);
-});
+if (btnStart) {
+  btnStart.addEventListener('click', () => {
+    if (screenSelect) {
+      const sourceId = screenSelect.value;
+      startSharing(sourceId);
+    }
+  });
+}
 
 // When screen selection changes, switch source on the fly
-screenSelect.addEventListener('change', () => {
-  const sourceId = screenSelect.value;
-  if (sourceId) {
-    console.log('[Host]: Switching stream source to:', sourceId);
-    startSharing(sourceId);
-  }
-});
+if (screenSelect) {
+  screenSelect.addEventListener('change', () => {
+    const sourceId = screenSelect.value;
+    if (sourceId) {
+      console.log('[Host]: Switching stream source to:', sourceId);
+      startSharing(sourceId);
+    }
+  });
+}
 
 // Initialize permanent access code on script load
-getOrInitPermanentCode();"
+getOrInitPermanentCode();
 
 // Setup WebRTC Peer Connection
 async function createPeerConnection() {
