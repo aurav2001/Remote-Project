@@ -482,21 +482,41 @@ function App() {
                     background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                     color: '#fff',
                     padding: '8px 16px',
-                    borderRadius: '10px',
+                    borderRadius: '100px',
                     fontSize: '0.85rem',
                     fontWeight: 600,
                     textDecoration: 'none',
                     boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
                   }}
                 >
-                  📥 Download Host App (.exe)
+                  📥 Download (.exe)
+                </a>
+
+                <a
+                  href="/RemoteG-Setup.zip"
+                  download="RemoteG-Setup.zip"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                    color: '#fff',
+                    padding: '8px 16px',
+                    borderRadius: '100px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
+                  }}
+                >
+                  📦 Download (.zip)
                 </a>
 
                 <button
                   onClick={() => {
-                    const downloadUrl = `${window.location.origin}/RemoteG-Setup.exe`;
+                    const downloadUrl = `${window.location.origin}/RemoteG-Setup.zip`;
                     navigator.clipboard.writeText(downloadUrl);
-                    alert(`WhatsApp Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                    alert(`WhatsApp Zip Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
                   }}
                   style={{
                     display: 'inline-flex',
@@ -506,7 +526,7 @@ function App() {
                     border: '1px solid rgba(255, 255, 255, 0.2)',
                     color: '#38bdf8',
                     padding: '8px 14px',
-                    borderRadius: '10px',
+                    borderRadius: '100px',
                     fontSize: '0.85rem',
                     fontWeight: 600,
                     cursor: 'pointer'
