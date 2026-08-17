@@ -59,6 +59,17 @@ function App() {
     }
   }, [status]);
 
+  // Check URL query parameters (?code=123456 or ?id=123456) for instant auto-connect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const codeFromUrl = params.get('code') || params.get('id') || params.get('room') || window.location.hash.replace('#', '');
+    if (codeFromUrl && codeFromUrl.trim().length === 6) {
+      console.log('[Controller]: Found direct access code in URL:', codeFromUrl);
+      setTargetRoomId(codeFromUrl.trim());
+      handleConnect(null, codeFromUrl.trim());
+    }
+  }, []);
+
   const cleanup = () => {
     remoteStreamRef.current = null;
     if (dataChannelRef.current) {
@@ -457,6 +468,26 @@ function App() {
             <div className="control-bar-left">
               <span className="session-tag">Active Node: {roomId}</span>
               <span className="stream-badge">LIVE</span>
+              <button 
+                onClick={() => {
+                  const directUrl = `${window.location.origin}/?code=${roomId}`;
+                  navigator.clipboard.writeText(directUrl);
+                  alert(`Direct Access Link copied to clipboard:\n${directUrl}\n\nYou can bookmark this link for 1-click auto-connect!`);
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#fff',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  marginLeft: '10px'
+                }}
+                title="Copy Direct Bookmark Link"
+              >
+                🔗 Copy 1-Click Link
+              </button>
             </div>
             <button className="btn-disconnect" onClick={cleanup}>
               Terminate Session
