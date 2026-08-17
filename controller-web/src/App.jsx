@@ -452,13 +452,70 @@ function App() {
               </div>
             )}
 
-            <div className="status-indicator">
+            <div className="status-indicator" style={{ marginBottom: '20px' }}>
               <span className={`status-dot ${status}`}></span>
               <span className="status-text">
                 {status === 'disconnected' && 'Ready for Connection'}
                 {status === 'connecting' && 'Connecting to Signaling Server...'}
                 {status === 'ready' && 'Signaled Host. Establishing WebRTC stream...'}
               </span>
+            </div>
+
+            <div style={{ 
+              background: 'rgba(255, 255, 255, 0.04)', 
+              border: '1px solid rgba(255, 255, 255, 0.1)', 
+              borderRadius: '16px', 
+              padding: '16px',
+              textAlign: 'center'
+            }}>
+              <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
+                💻 Need to control a new PC?
+              </span>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <a
+                  href="/RemoteG-Setup.exe"
+                  download="RemoteG-Setup.exe"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#fff',
+                    padding: '8px 16px',
+                    borderRadius: '10px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  📥 Download Host App (.exe)
+                </a>
+
+                <button
+                  onClick={() => {
+                    const downloadUrl = `${window.location.origin}/RemoteG-Setup.exe`;
+                    navigator.clipboard.writeText(downloadUrl);
+                    alert(`WhatsApp Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    color: '#38bdf8',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                  title="Copy WhatsApp Direct Download Link"
+                >
+                  💬 Copy WhatsApp Link
+                </button>
+              </div>
             </div>
           </div>
         </div>
