@@ -193,10 +193,18 @@ if (btnResetCode) {
 }
 
 // Setup listener for socket connection status
-window.addEventListener('socket-connected', () => {
+window.addEventListener('socket-connected', async () => {
   console.log('Connected to signaling server as Host with ID:', roomId);
   updateStatus('connecting', 'Waiting for Controller...');
-  window.electronAPI.joinRoom(roomId, 'host');
+  let systemInfo = null;
+  try {
+    if (window.electronAPI && window.electronAPI.getSystemInfo) {
+      systemInfo = await window.electronAPI.getSystemInfo();
+    }
+  } catch (err) {
+    console.warn('Could not fetch system info:', err);
+  }
+  window.electronAPI.joinRoom(roomId, 'host', systemInfo);
 });
 
 window.addEventListener('socket-disconnected', () => {

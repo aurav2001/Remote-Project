@@ -35,6 +35,8 @@ function App() {
   const [targetRoomId, setTargetRoomId] = useState('');
   const [status, setStatus] = useState('disconnected'); // disconnected, connecting, ready, connected
   const [aspectRatio, setAspectRatio] = useState(16 / 9);
+  const [hostSystemInfo, setHostSystemInfo] = useState(null);
+  const [showSpecsModal, setShowSpecsModal] = useState(false);
 
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
@@ -135,9 +137,20 @@ function App() {
       cleanup();
     });
 
+    // Receive system information from host
+    socket.on('host-info', ({ systemInfo }) => {
+      if (systemInfo) {
+        console.log('[Controller]: Received Host System Specs:', systemInfo);
+        setHostSystemInfo(systemInfo);
+      }
+    });
+
     // Both host and controller are in the room
-    socket.on('ready', () => {
+    socket.on('ready', ({ systemInfo } = {}) => {
       console.log('Host is ready, waiting for WebRTC offer...');
+      if (systemInfo) {
+        setHostSystemInfo(systemInfo);
+      }
       setStatus('ready');
     });
 
@@ -545,6 +558,27 @@ function App() {
             <div className="control-bar-left">
               <span className="session-tag">Active Node: {roomId}</span>
               <span className="stream-badge">LIVE</span>
+
+              {hostSystemInfo && (
+                <button
+                  onClick={() => setShowSpecsModal(prev => !prev)}
+                  style={{
+                    background: 'rgba(129, 140, 248, 0.25)',
+                    border: '1px solid rgba(129, 140, 248, 0.4)',
+                    color: '#a5b4fc',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    marginLeft: '10px'
+                  }}
+                  title="View Host Machine Specifications"
+                >
+                  💻 Device Specs ({hostSystemInfo.hostname || 'Host'})
+                </button>
+              )}
+
               <button 
                 onClick={() => {
                   const directUrl = `${window.location.origin}/?code=${roomId}`;
@@ -570,6 +604,63 @@ function App() {
               Terminate Session
             </button>
           </div>
+
+          {/* System Specs Popup Modal */}
+          {showSpecsModal && hostSystemInfo && (
+            <div style={{
+              position: 'absolute',
+              top: '75px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid rgba(129, 140, 248, 0.3)',
+              borderRadius: '16px',
+              padding: '20px 24px',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+              zIndex: 300,
+              minWidth: '340px',
+              color: '#fff',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#818cf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🖥️ Host Device Specifications
+                </h3>
+                <button 
+                  onClick={() => setShowSpecsModal(false)}
+                  style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>🖥️ PC Hostname:</span>
+                  <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.hostname || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>🌐 IP Address:</span>
+                  <strong style={{ color: '#34d399' }}>{hostSystemInfo.ip || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>⚡ Processor (CPU):</span>
+                  <strong style={{ color: '#f8fafc', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hostSystemInfo.cpu}>
+                    {hostSystemInfo.cpu || 'N/A'}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>💾 RAM Memory:</span>
+                  <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.ram || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#94a3b8' }}>💻 OS Platform:</span>
+                  <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.platform || 'N/A'}</strong>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div 
             ref={containerRef}

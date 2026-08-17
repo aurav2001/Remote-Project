@@ -29,7 +29,7 @@ io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // Join Room
-  socket.on('join-room', ({ roomId, role }) => {
+  socket.on('join-room', ({ roomId, role, systemInfo }) => {
     console.log(`Socket ${socket.id} joined room ${roomId} as ${role}`);
     
     // Join socket.io room
@@ -38,21 +38,28 @@ io.on('connection', (socket) => {
     socket.role = role;
 
     if (!rooms.has(roomId)) {
-      rooms.set(roomId, { host: null, controller: null });
+      rooms.set(roomId, { host: null, controller: null, systemInfo: null });
     }
 
     const room = rooms.get(roomId);
     if (role === 'host') {
       room.host = socket.id;
-      console.log(`Host registered for room ${roomId}`);
+      if (systemInfo) {
+        room.systemInfo = systemInfo;
+      }
+      console.log(`Host registered for room ${roomId} with info:`, room.systemInfo);
     } else if (role === 'controller') {
       room.controller = socket.id;
       console.log(`Controller registered for room ${roomId}`);
+      // Send host info to controller if available
+      if (room.systemInfo) {
+        socket.emit('host-info', { systemInfo: room.systemInfo });
+      }
     }
 
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
-      io.to(roomId).emit('ready', { host: room.host, controller: room.controller });
+      io.to(roomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo });
       console.log(`Room ${roomId} is ready for WebRTC connection`);
     }
   });

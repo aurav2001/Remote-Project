@@ -6,6 +6,7 @@ const pendingListeners = []; // Queue listeners registered before socket exists
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
   sendControlEvent: (event) => ipcRenderer.send('control-event', event),
   
   // Socket.io Signaling wrapper
@@ -27,8 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       window.dispatchEvent(new Event('socket-disconnected'));
     });
   },
-  joinRoom: (roomId, role) => {
-    if (socket) socket.emit('join-room', { roomId, role });
+  joinRoom: (roomId, role, systemInfo) => {
+    if (socket) socket.emit('join-room', { roomId, role, systemInfo });
   },
   onSocket: (event, callback) => {
     if (socket) {

@@ -113,6 +113,41 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
+// IPC Handler to get system information (Host Device Specs)
+ipcMain.handle('get-system-info', async () => {
+  const os = require('os');
+  let ipAddress = '127.0.0.1';
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const devName in interfaces) {
+      const iface = interfaces[devName];
+      for (let i = 0; i < iface.length; i++) {
+        const alias = iface[i];
+        if (alias.family === 'IPv4' && !alias.internal) {
+          ipAddress = alias.address;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error reading network interfaces:', err);
+  }
+
+  const cpus = os.cpus();
+  const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Standard CPU';
+  const totalRamGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+
+  const info = {
+    hostname: os.hostname(),
+    cpu: cpuModel,
+    ram: `${totalRamGb} GB`,
+    ip: ipAddress,
+    platform: `${os.type()} ${os.arch()}`
+  };
+  console.log('[Main Process]: Returning Host System Info:', info);
+  return info;
+});
+
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
   try {
