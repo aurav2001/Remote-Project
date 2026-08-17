@@ -518,10 +518,6 @@ function App() {
               style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block' }}
             />
           </div>
-          
-          <div className="control-hint">
-            Click inside the screen above to start controlling. Press escape or click outside to release focus.
-          </div>
         </div>
       )}
     </div>
