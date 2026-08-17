@@ -317,7 +317,7 @@
   <div class="container">
     <div class="header">
       <h1>RemoteG</h1>
-      <p>System Agent Node</p>
+      <p>System Agent Node &bull; Unattended Access</p>
     </div>
 
     <div class="status-badge">
@@ -326,13 +326,18 @@
     </div>
 
     <div class="room-card">
-      <div class="room-card-label">Target Access Code</div>
+      <div class="room-card-label">Permanent Access Code (Host ID)</div>
       <div class="room-id-container">
         <span id="room-id" class="room-id">------</span>
         <button id="btn-copy" class="btn-copy" title="Copy code">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        </button>
+        <button id="btn-reset-code" class="btn-copy" title="Regenerate Permanent Access Code">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
           </svg>
         </button>
       </div>
@@ -345,12 +350,12 @@
       </select>
     </div>
 
-    <button id="btn-start" class="btn-start" disabled>Initialize Sharing</button>
+    <button id="btn-start" class="btn-start" disabled>Sharing Screen (Auto-Started)</button>
     
     <video id="local-video" autoplay playsinline muted></video>
 
     <div class="info-footer">
-      Keep this application open to allow controllers to connect to this machine.
+      ⚡ <strong>Unattended Direct Access Active:</strong> This machine is ready for remote connection automatically on launch.
     </div>
   </div>
 

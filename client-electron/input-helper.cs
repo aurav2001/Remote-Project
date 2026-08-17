@@ -17,6 +17,7 @@ class InputHelper {
     const uint MOUSEEVENTF_RIGHTUP = 0x10;
     const uint MOUSEEVENTF_MIDDLEDOWN = 0x20;
     const uint MOUSEEVENTF_MIDDLEUP = 0x40;
+    const uint MOUSEEVENTF_WHEEL = 0x0800;
 
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
@@ -56,6 +57,11 @@ class InputHelper {
                     if (button == "left") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     else if (button == "right") mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     else if (button == "middle") mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                }
+                else if (command == "scroll" && parts.Length >= 2) {
+                    int deltaY = int.Parse(parts[1]);
+                    int amount = -deltaY;
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)amount, 0);
                 }
                 else if (command == "keydown" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);

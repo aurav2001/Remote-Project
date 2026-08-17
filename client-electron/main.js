@@ -129,6 +129,11 @@ ipcMain.on('control-event', (event, data) => {
     } else if (type === 'doubleclick') {
       sendInputHelperCommand(`click ${button || 'left'}`);
       sendInputHelperCommand(`click ${button || 'left'}`);
+    } else if (type === 'wheel') {
+      const { deltaY } = data;
+      if (deltaY) {
+        sendInputHelperCommand(`scroll ${Math.round(deltaY)}`);
+      }
     } else if (type === 'keydown') {
       if (keyCode) {
         sendInputHelperCommand(`keydown ${keyCode}`);

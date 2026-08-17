@@ -25,14 +25,16 @@
       "preload.js",
       "index.html",
       "renderer.js",
-      "input-helper.exe"
+      "input-helper.exe",
+      "icon.png"
     ],
     "asar": true,
     "asarUnpack": [
       "input-helper.exe"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "icon.png"
     },
     "nsis": {
       "oneClick": true,

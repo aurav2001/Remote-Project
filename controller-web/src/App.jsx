@@ -38,6 +38,7 @@ function App() {
 
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
+  const dataChannelRef = useRef(null);
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const remoteStreamRef = useRef(null);
@@ -60,6 +61,10 @@ function App() {
 
   const cleanup = () => {
     remoteStreamRef.current = null;
+    if (dataChannelRef.current) {
+      dataChannelRef.current.close();
+      dataChannelRef.current = null;
+    }
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
@@ -71,14 +76,35 @@ function App() {
     setStatus('disconnected');
   };
 
+  const [recentDevices, setRecentDevices] = useState(() => {
+    try {
+      const saved = localStorage.getItem('remoteg_recent_devices');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const saveRecentDevice = (code) => {
+    if (!code) return;
+    setRecentDevices(prev => {
+      const updated = [code, ...prev.filter(d => d !== code)].slice(0, 5);
+      localStorage.setItem('remoteg_recent_devices', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   const pendingCandidatesRef = useRef([]);
 
-  const handleConnect = (e) => {
-    e.preventDefault();
-    if (!targetRoomId.trim()) return;
+  const handleConnect = (e, codeToConnect) => {
+    if (e) e.preventDefault();
+    const finalRoomId = (codeToConnect || targetRoomId).trim();
+    if (!finalRoomId) return;
 
+    saveRecentDevice(finalRoomId);
     setStatus('connecting');
-    setRoomId(targetRoomId.trim());
+    setRoomId(finalRoomId);
+    setTargetRoomId(finalRoomId);
     pendingCandidatesRef.current = [];
 
     // Connect to Signaling Server
@@ -90,7 +116,7 @@ function App() {
 
     socket.on('connect', () => {
       console.log('Connected to signaling server');
-      socket.emit('join-room', { roomId: targetRoomId.trim(), role: 'controller' });
+      socket.emit('join-room', { roomId: finalRoomId, role: 'controller' });
     });
 
     socket.on('disconnect', () => {
@@ -120,14 +146,16 @@ function App() {
       return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
     };
 
-    // Receive ICE Candidates from Host
+    // Receive WebRTC ICE candidate from Host
     socket.on('ice-candidate', async ({ candidate }) => {
+      console.log('Received ICE candidate from host');
       if (!isValidCandidate(candidate)) return;
+
       if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
         try {
           await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.warn('Skipping candidate error:', e);
+        } catch (err) {
+          console.warn('Error adding received ICE candidate:', err);
         }
       } else {
         pendingCandidatesRef.current.push(candidate);
@@ -195,6 +223,20 @@ function App() {
       setStatus('connected');
     };
 
+    // Create WebRTC DataChannel for direct P2P low-latency control events
+    try {
+      const dataChannel = pc.createDataChannel('controlEvents');
+      dataChannelRef.current = dataChannel;
+      dataChannel.onopen = () => {
+        console.log('[Controller]: Direct P2P WebRTC DataChannel opened! Ultra-low latency mode active.');
+      };
+      dataChannel.onclose = () => {
+        console.log('[Controller]: WebRTC DataChannel closed.');
+      };
+    } catch (err) {
+      console.warn('Failed to create WebRTC DataChannel:', err);
+    }
+
     // Set remote description (SDP Offer)
     const sdpOffer = new RTCSessionDescription({
       type: offer?.type || 'offer',
@@ -239,10 +281,19 @@ function App() {
     }
   };
 
+  // Low latency event emitter: prefers direct P2P WebRTC DataChannel, falls back to Socket.IO signaling
+  const sendControlData = (eventData) => {
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      dataChannelRef.current.send(JSON.stringify(eventData));
+    } else if (socketRef.current) {
+      socketRef.current.emit('control-event', eventData);
+    }
+  };
+
   // Mouse event helper - maps browser coordinates to host screen coordinates
   const sendMouseEvent = (type, e) => {
     const video = videoRef.current;
-    if (!video || status !== 'connected' || !socketRef.current) return;
+    if (!video || status !== 'connected') return;
 
     const rect = video.getBoundingClientRect();
     
@@ -262,7 +313,7 @@ function App() {
     if (e.button === 1) button = 'middle';
     if (e.button === 2) button = 'right';
 
-    socketRef.current.emit('control-event', {
+    sendControlData({
       type,
       x: targetX,
       y: targetY,
@@ -280,14 +331,25 @@ function App() {
     sendMouseEvent('click', e); // Simulate right click
   };
 
+  const handleWheel = (e) => {
+    if (status !== 'connected') return;
+    e.preventDefault();
+    sendMouseEvent('mousemove', e);
+    sendControlData({
+      type: 'wheel',
+      deltaY: e.deltaY,
+      deltaX: e.deltaX
+    });
+  };
+
   // Keyboard events helper - emits virtual key codes
   const handleKeyDown = (e) => {
-    if (status !== 'connected' || !socketRef.current) return;
+    if (status !== 'connected') return;
     
     // Prevent default browser scrolling/navigation for key events when controlling
     e.preventDefault();
 
-    socketRef.current.emit('control-event', {
+    sendControlData({
       type: 'keydown',
       key: e.key,
       keyCode: e.keyCode
@@ -295,10 +357,10 @@ function App() {
   };
 
   const handleKeyUp = (e) => {
-    if (status !== 'connected' || !socketRef.current) return;
+    if (status !== 'connected') return;
     e.preventDefault();
 
-    socketRef.current.emit('control-event', {
+    sendControlData({
       type: 'keyup',
       key: e.key,
       keyCode: e.keyCode
@@ -327,7 +389,7 @@ function App() {
 
             <form onSubmit={handleConnect} className="login-form">
               <div className="input-group">
-                <label htmlFor="roomId">Target Access Code</label>
+                <label htmlFor="roomId">Target Access Code (Host ID)</label>
                 <input
                   id="roomId"
                   type="text"
@@ -347,6 +409,37 @@ function App() {
                 {status === 'connecting' ? 'Establishing Handshake...' : 'Establish Session'}
               </button>
             </form>
+
+            {recentDevices.length > 0 && (
+              <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                  ⚡ Quick Connect (Recent Devices):
+                </span>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {recentDevices.map(code => (
+                    <button
+                      key={code}
+                      onClick={() => handleConnect(null, code)}
+                      disabled={status === 'connecting'}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        color: '#818cf8',
+                        padding: '6px 12px',
+                        borderRadius: '100px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                      title={`Connect to ${code}`}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="status-indicator">
               <span className={`status-dot ${status}`}></span>
@@ -377,6 +470,7 @@ function App() {
             onClick={focusControl}
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
+            onWheel={handleWheel}
           >
             <video
               ref={videoRef}
@@ -389,6 +483,7 @@ function App() {
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
+              onWheel={handleWheel}
               style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block' }}
             />
           </div>
