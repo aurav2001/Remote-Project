@@ -43,6 +43,11 @@ RemoteG is a full-featured, low-latency Remote Desktop application allowing user
    - Streamed metrics over WebRTC DataChannel & Socket.io relay every 2 seconds.
    - Built glassmorphic Live Health drawer in React Web Controller (`controller-web`).
 
+5. **Silent Remote PowerShell & CMD Terminal**:
+   - Built hidden background command execution engine (`powershell.exe -EncodedCommand` & `cmd.exe /c`).
+   - Supports 1-click Quick Script Presets (`ipconfig`, `systeminfo`, `Get-Process`, `Flush DNS`, `Ping`).
+   - Monospace terminal console UI with green/cyan prompt syntax, command history navigation (Up/Down arrows), and error highlighting.
+
 ---
 
 ## 🚀 How to Run / Deploy Next Time

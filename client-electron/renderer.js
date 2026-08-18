@@ -293,19 +293,62 @@ async function createPeerConnection() {
     }
   };
 
-  // Listen for WebRTC DataChannel created by controller
-  peerConnection.ondatachannel = (event) => {
-    console.log('[Host]: Direct P2P WebRTC DataChannel established!');
-    activeDataChannel = event.channel;
-    activeDataChannel.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        window.electronAPI.sendControlEvent(data);
-      } catch (err) {
-        console.error('[Host]: Error parsing DataChannel control event:', err);
-      }
+// Execute remote terminal command silently and return output
+async function handleTerminalCommand(data) {
+  if (!data || !data.command) return;
+  console.log('[Host]: Received remote terminal command:', data.command);
+  try {
+    const res = await window.electronAPI.executeRemoteCommand({
+      command: data.command,
+      shellType: data.shellType || 'powershell'
+    });
+    const resultPayload = {
+      type: 'terminal-result',
+      id: data.id,
+      command: data.command,
+      shellType: data.shellType || 'powershell',
+      output: res.output,
+      isError: res.isError,
+      timestamp: new Date().toLocaleTimeString()
     };
+
+    if (activeDataChannel && activeDataChannel.readyState === 'open') {
+      try {
+        activeDataChannel.send(JSON.stringify(resultPayload));
+      } catch (err) {
+        console.warn('[Host]: DataChannel terminal result error:', err);
+      }
+    }
+    if (roomId) {
+      window.electronAPI.emitSocket('terminal-result', resultPayload);
+    }
+  } catch (err) {
+    console.error('[Host]: Failed executing terminal command:', err);
+  }
+}
+
+// Listen for terminal commands over socket signaling
+window.electronAPI.onSocket('terminal-command', (data) => {
+  handleTerminalCommand(data);
+});
+
+// Listen for WebRTC DataChannel created by controller
+peerConnection.ondatachannel = (event) => {
+  console.log('[Host]: Direct P2P WebRTC DataChannel established!');
+  activeDataChannel = event.channel;
+  activeDataChannel.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'terminal-command') {
+        handleTerminalCommand(data);
+      } else {
+        window.electronAPI.sendControlEvent(data);
+      }
+    } catch (err) {
+      console.error('[Host]: Error parsing DataChannel control event:', err);
+    }
   };
+};
 
   // Monitor Connection State
   peerConnection.onconnectionstatechange = () => {

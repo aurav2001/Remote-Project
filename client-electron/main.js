@@ -369,3 +369,33 @@ ipcMain.on('control-event', (event, data) => {
   }
 });
 
+// IPC Handler for Silent Remote Shell Execution (PowerShell & CMD)
+ipcMain.handle('execute-remote-command', async (event, { command, shellType = 'powershell' }) => {
+  return new Promise((resolve) => {
+    if (!command || !command.trim()) {
+      return resolve({ output: 'Error: Empty command provided.', isError: true });
+    }
+
+    let execCmd = '';
+    if (shellType === 'cmd') {
+      execCmd = `cmd.exe /c "${command.replace(/"/g, '""')}"`;
+    } else {
+      // PowerShell EncodedCommand for reliable handling of special chars and multi-line scripts
+      const encoded = Buffer.from(command, 'utf16le').toString('base64');
+      execCmd = `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
+    }
+
+    exec(execCmd, { windowsHide: true, maxBuffer: 1024 * 1024 * 5, timeout: 30000 }, (error, stdout, stderr) => {
+      let output = (stdout || '') + (stderr ? `\n[STDERR]:\n${stderr}` : '');
+      if (!output.trim()) {
+        output = error ? `Error: ${error.message}` : 'Command executed successfully (no output).';
+      }
+      resolve({
+        output: output.trim(),
+        isError: !!error
+      });
+    });
+  });
+});
+
+

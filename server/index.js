@@ -99,6 +99,25 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('system-metrics', { metrics });
   });
 
+  // Relay Terminal Command (controller -> host)
+  socket.on('terminal-command', (data) => {
+    const roomId = socket.roomId;
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      if (room.host) {
+        io.to(room.host).emit('terminal-command', data);
+      }
+    }
+  });
+
+  // Relay Terminal Result (host -> controller)
+  socket.on('terminal-result', (data) => {
+    const roomId = socket.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('terminal-result', data);
+    }
+  });
+
   // Handle Disconnect
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);

@@ -40,6 +40,22 @@ function App() {
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
 
+  const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
+  const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
+  const [terminalInput, setTerminalInput] = useState('');
+  const [terminalLogs, setTerminalLogs] = useState([]);
+  const [isExecutingCmd, setIsExecutingCmd] = useState(false);
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const terminalLogsRef = useRef(null);
+
+  // Auto-scroll terminal log window to bottom on new output
+  useEffect(() => {
+    if (terminalLogsRef.current) {
+      terminalLogsRef.current.scrollTop = terminalLogsRef.current.scrollHeight;
+    }
+  }, [terminalLogs]);
+
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const dataChannelRef = useRef(null);
@@ -77,6 +93,7 @@ function App() {
   const cleanup = () => {
     remoteStreamRef.current = null;
     setLiveMetrics(null);
+    setTerminalLogs([]);
     if (dataChannelRef.current) {
       dataChannelRef.current.close();
       dataChannelRef.current = null;
@@ -152,6 +169,20 @@ function App() {
     socket.on('system-metrics', ({ metrics }) => {
       if (metrics) {
         setLiveMetrics(metrics);
+      }
+    });
+
+    // Receive remote terminal execution results via signaling fallback
+    socket.on('terminal-result', (data) => {
+      if (data) {
+        setTerminalLogs(prev => {
+          const exists = prev.some(item => item.id === data.id);
+          if (exists) {
+            return prev.map(item => item.id === data.id ? { ...data, pending: false } : item);
+          }
+          return [...prev, { ...data, pending: false }];
+        });
+        setIsExecutingCmd(false);
       }
     });
 
@@ -257,7 +288,7 @@ function App() {
       setStatus('connected');
     };
 
-    // Create WebRTC DataChannel for direct P2P low-latency control events & live system metrics
+    // Create WebRTC DataChannel for direct P2P low-latency control events & live system metrics & terminal
     try {
       const dataChannel = pc.createDataChannel('controlEvents');
       dataChannelRef.current = dataChannel;
@@ -269,6 +300,15 @@ function App() {
           const data = JSON.parse(e.data);
           if (data.type === 'system-metrics' && data.metrics) {
             setLiveMetrics(data.metrics);
+          } else if (data.type === 'terminal-result') {
+            setTerminalLogs(prev => {
+              const exists = prev.some(item => item.id === data.id);
+              if (exists) {
+                return prev.map(item => item.id === data.id ? { ...data, pending: false } : item);
+              }
+              return [...prev, { ...data, pending: false }];
+            });
+            setIsExecutingCmd(false);
           }
         } catch (err) {}
       };
@@ -310,6 +350,68 @@ function App() {
         sdp: answer.sdp
       }
     });
+  };
+
+  // Execute remote terminal command
+  const handleExecuteTerminalCommand = (cmdToRun) => {
+    const command = (cmdToRun || terminalInput).trim();
+    if (!command) return;
+
+    const id = 'cmd_' + Date.now();
+    const newLog = {
+      id,
+      command,
+      shellType,
+      pending: true,
+      timestamp: new Date().toLocaleTimeString()
+    };
+
+    setTerminalLogs(prev => [...prev, newLog]);
+    setCommandHistory(prev => [command, ...prev.filter(c => c !== command)]);
+    setHistoryIdx(-1);
+    setTerminalInput('');
+    setIsExecutingCmd(true);
+
+    const payload = {
+      type: 'terminal-command',
+      id,
+      command,
+      shellType
+    };
+
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      try {
+        dataChannelRef.current.send(JSON.stringify(payload));
+      } catch (e) {
+        if (socketRef.current) socketRef.current.emit('terminal-command', payload);
+      }
+    } else if (socketRef.current) {
+      socketRef.current.emit('terminal-command', payload);
+    }
+  };
+
+  const handleTerminalInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleExecuteTerminalCommand();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandHistory.length > 0) {
+        const nextIdx = Math.min(commandHistory.length - 1, historyIdx + 1);
+        setHistoryIdx(nextIdx);
+        setTerminalInput(commandHistory[nextIdx]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIdx > 0) {
+        const prevIdx = historyIdx - 1;
+        setHistoryIdx(prevIdx);
+        setTerminalInput(commandHistory[prevIdx]);
+      } else if (historyIdx === 0) {
+        setHistoryIdx(-1);
+        setTerminalInput('');
+      }
+    }
   };
 
   // Adjust aspect ratio based on loaded video metadata
@@ -620,6 +722,29 @@ function App() {
                 📊 Live System Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
               </button>
 
+              <button
+                onClick={() => setShowTerminalDrawer(prev => !prev)}
+                style={{
+                  background: showTerminalDrawer ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(16, 185, 129, 0.2)',
+                  border: '1px solid rgba(52, 211, 153, 0.5)',
+                  color: showTerminalDrawer ? '#fff' : '#34d399',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginLeft: '10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: showTerminalDrawer ? '0 0 12px rgba(16, 185, 129, 0.5)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+                title="Open Silent Remote PowerShell & CMD Terminal"
+              >
+                💻 Remote Terminal
+              </button>
+
               <button 
                 onClick={() => {
                   const directUrl = `${window.location.origin}/?code=${roomId}`;
@@ -645,6 +770,100 @@ function App() {
               Terminate Session
             </button>
           </div>
+
+          {/* Silent Remote Terminal Drawer */}
+          {showTerminalDrawer && (
+            <div className="terminal-drawer">
+              <div className="drawer-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    💻 Silent Remote Shell
+                  </h3>
+                  <select 
+                    value={shellType}
+                    onChange={(e) => setShellType(e.target.value)}
+                    className="shell-selector"
+                  >
+                    <option value="powershell">PowerShell</option>
+                    <option value="cmd">CMD Prompt</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => setTerminalLogs([])} className="btn-clear-logs" title="Clear Console History">
+                    🧹 Clear
+                  </button>
+                  <button onClick={() => setShowTerminalDrawer(false)} className="drawer-close-btn">✕</button>
+                </div>
+              </div>
+
+              {/* Quick Script Presets */}
+              <div className="preset-commands-bar">
+                <span className="preset-label">⚡ Quick Presets:</span>
+                <button onClick={() => handleExecuteTerminalCommand('ipconfig /all')} className="preset-btn">
+                  Network (`ipconfig`)
+                </button>
+                <button onClick={() => handleExecuteTerminalCommand('systeminfo')} className="preset-btn">
+                  System Info
+                </button>
+                <button onClick={() => handleExecuteTerminalCommand(shellType === 'powershell' ? 'Get-Process | Select-Object -First 20 Name, CPU, WorkingSet64' : 'tasklist')} className="preset-btn">
+                  Running Tasks
+                </button>
+                <button onClick={() => handleExecuteTerminalCommand('ping 8.8.8.8 -n 4')} className="preset-btn">
+                  Ping Test
+                </button>
+                <button onClick={() => handleExecuteTerminalCommand('ipconfig /flushdns')} className="preset-btn">
+                  Flush DNS
+                </button>
+              </div>
+
+              {/* Console Output Window */}
+              <div className="terminal-output" ref={terminalLogsRef}>
+                <div className="terminal-welcome">
+                  RemoteG Silent Background Shell [{shellType.toUpperCase()}] connected.<br />
+                  Commands run silently on host machine without displaying any windows on the target PC screen.
+                </div>
+
+                {terminalLogs.map((log) => (
+                  <div key={log.id} className="terminal-log-entry">
+                    <div className="terminal-prompt">
+                      <span className="prompt-symbol">PS {hostSystemInfo?.hostname || 'HOST'}&gt;</span>
+                      <span className="prompt-command">{log.command}</span>
+                      <span className="prompt-time">[{log.timestamp}]</span>
+                    </div>
+
+                    {log.pending ? (
+                      <div className="terminal-pending">
+                        <span className="spinner-sm"></span> Executing command silently on remote PC...
+                      </div>
+                    ) : (
+                      <pre className={`terminal-result-text ${log.isError ? 'error' : ''}`}>
+                        {log.output}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="terminal-input-bar">
+                <span className="input-prompt-symbol">{shellType === 'powershell' ? 'PS>' : 'CMD>'}</span>
+                <input
+                  type="text"
+                  placeholder={`Type ${shellType} command and press Enter (Use ↑/↓ for history)...`}
+                  value={terminalInput}
+                  onChange={(e) => setTerminalInput(e.target.value)}
+                  onKeyDown={handleTerminalInputKeyDown}
+                  disabled={isExecutingCmd}
+                  autoFocus
+                />
+                <button 
+                  onClick={() => handleExecuteTerminalCommand()}
+                  disabled={isExecutingCmd || !terminalInput.trim()}
+                  className="btn-send-cmd"
+                >
+                  {isExecutingCmd ? 'Executing...' : 'Run ▶'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Live System Health Drawer */}
           {showHealthDrawer && (

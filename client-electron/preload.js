@@ -7,6 +7,7 @@ const pendingListeners = []; // Queue listeners registered before socket exists
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  executeRemoteCommand: (data) => ipcRenderer.invoke('execute-remote-command', data),
   sendControlEvent: (event) => ipcRenderer.send('control-event', event),
   
   // Socket.io Signaling wrapper
