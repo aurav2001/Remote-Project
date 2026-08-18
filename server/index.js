@@ -94,6 +94,11 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay System Metrics from host to controller
+  socket.on('system-metrics', ({ roomId, metrics }) => {
+    socket.to(roomId).emit('system-metrics', { metrics });
+  });
+
   // Handle Disconnect
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);

@@ -37,6 +37,8 @@ function App() {
   const [aspectRatio, setAspectRatio] = useState(16 / 9);
   const [hostSystemInfo, setHostSystemInfo] = useState(null);
   const [showSpecsModal, setShowSpecsModal] = useState(false);
+  const [liveMetrics, setLiveMetrics] = useState(null);
+  const [showHealthDrawer, setShowHealthDrawer] = useState(false);
 
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
@@ -74,6 +76,7 @@ function App() {
 
   const cleanup = () => {
     remoteStreamRef.current = null;
+    setLiveMetrics(null);
     if (dataChannelRef.current) {
       dataChannelRef.current.close();
       dataChannelRef.current = null;
@@ -142,6 +145,13 @@ function App() {
       if (systemInfo) {
         console.log('[Controller]: Received Host System Specs:', systemInfo);
         setHostSystemInfo(systemInfo);
+      }
+    });
+
+    // Receive live system metrics from host via signaling fallback
+    socket.on('system-metrics', ({ metrics }) => {
+      if (metrics) {
+        setLiveMetrics(metrics);
       }
     });
 
@@ -247,12 +257,20 @@ function App() {
       setStatus('connected');
     };
 
-    // Create WebRTC DataChannel for direct P2P low-latency control events
+    // Create WebRTC DataChannel for direct P2P low-latency control events & live system metrics
     try {
       const dataChannel = pc.createDataChannel('controlEvents');
       dataChannelRef.current = dataChannel;
       dataChannel.onopen = () => {
         console.log('[Controller]: Direct P2P WebRTC DataChannel opened! Ultra-low latency mode active.');
+      };
+      dataChannel.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'system-metrics' && data.metrics) {
+            setLiveMetrics(data.metrics);
+          }
+        } catch (err) {}
       };
       dataChannel.onclose = () => {
         console.log('[Controller]: WebRTC DataChannel closed.');
@@ -579,6 +597,29 @@ function App() {
                 </button>
               )}
 
+              <button
+                onClick={() => setShowHealthDrawer(prev => !prev)}
+                style={{
+                  background: showHealthDrawer ? 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)' : 'rgba(14, 165, 233, 0.2)',
+                  border: '1px solid rgba(56, 189, 248, 0.5)',
+                  color: showHealthDrawer ? '#fff' : '#38bdf8',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginLeft: '10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: showHealthDrawer ? '0 0 12px rgba(14, 165, 233, 0.5)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+                title="View Live CPU, RAM, Disk, and Network Health"
+              >
+                📊 Live System Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
+              </button>
+
               <button 
                 onClick={() => {
                   const directUrl = `${window.location.origin}/?code=${roomId}`;
@@ -604,6 +645,128 @@ function App() {
               Terminate Session
             </button>
           </div>
+
+          {/* Live System Health Drawer */}
+          {showHealthDrawer && (
+            <div className="health-drawer">
+              <div className="drawer-header">
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    📊 Live System Health & Telemetry
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                    {liveMetrics?.hostname || 'Host Machine'} • IP: {liveMetrics?.ip || '127.0.0.1'}
+                  </span>
+                </div>
+                <button onClick={() => setShowHealthDrawer(false)} className="drawer-close-btn">✕</button>
+              </div>
+
+              {liveMetrics ? (
+                <div className="drawer-body">
+                  {/* CPU Card */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">⚡ Processor (CPU)</span>
+                      <span className="metric-value">{liveMetrics.cpuPercent}%</span>
+                    </div>
+                    <div className="metric-subtext" title={liveMetrics.cpuModel}>{liveMetrics.cpuModel}</div>
+                    <div className="progress-bar-track">
+                      <div 
+                        className="progress-bar-fill" 
+                        style={{ 
+                          width: `${liveMetrics.cpuPercent}%`,
+                          background: liveMetrics.cpuPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : liveMetrics.cpuPercent > 60 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* RAM Card */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">💾 RAM Memory</span>
+                      <span className="metric-value">{liveMetrics.ramPercent}%</span>
+                    </div>
+                    <div className="metric-subtext">{liveMetrics.ramUsedGb} GB used of {liveMetrics.ramTotalGb} GB</div>
+                    <div className="progress-bar-track">
+                      <div 
+                        className="progress-bar-fill" 
+                        style={{ 
+                          width: `${liveMetrics.ramPercent}%`,
+                          background: liveMetrics.ramPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #6366f1, #818cf8)'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Disk Card */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">💽 Disk Space (C:)</span>
+                      <span className="metric-value">{liveMetrics.diskPercent}%</span>
+                    </div>
+                    <div className="metric-subtext">{liveMetrics.diskFreeGb} GB free of {liveMetrics.diskTotalGb} GB</div>
+                    <div className="progress-bar-track">
+                      <div 
+                        className="progress-bar-fill" 
+                        style={{ 
+                          width: `${liveMetrics.diskPercent}%`,
+                          background: liveMetrics.diskPercent > 90 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #0ea5e9, #38bdf8)'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Network Speed Card */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">🌐 Network Traffic</span>
+                    </div>
+                    <div className="network-speed-grid">
+                      <div className="speed-box download">
+                        <span className="speed-label">↓ Download</span>
+                        <span className="speed-val">{liveMetrics.downloadSpeed}</span>
+                      </div>
+                      <div className="speed-box upload">
+                        <span className="speed-label">↑ Upload</span>
+                        <span className="speed-val">{liveMetrics.uploadSpeed}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Battery & System Info */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">🔋 Power & System Status</span>
+                    </div>
+                    <div className="info-rows">
+                      <div className="info-row">
+                        <span>Battery:</span>
+                        <strong>
+                          {liveMetrics.batteryPercent !== null && liveMetrics.batteryPercent !== undefined
+                            ? `${liveMetrics.batteryPercent}% ${liveMetrics.isCharging ? '⚡ (Charging)' : '🔋'}`
+                            : '🔌 Desktop AC Power'}
+                        </strong>
+                      </div>
+                      <div className="info-row">
+                        <span>System Uptime:</span>
+                        <strong>⏱️ {liveMetrics.uptime}</strong>
+                      </div>
+                      <div className="info-row">
+                        <span>OS Platform:</span>
+                        <strong>{liveMetrics.platform}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="drawer-loading">
+                  <div className="spinner"></div>
+                  <p>Connecting to Host Telemetry Stream...</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* System Specs Popup Modal */}
           {showSpecsModal && hostSystemInfo && (

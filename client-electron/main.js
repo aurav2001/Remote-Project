@@ -148,6 +148,192 @@ ipcMain.handle('get-system-info', async () => {
   return info;
 });
 
+// --- LIVE SYSTEM HEALTH & METRICS ENGINE ---
+const os = require('os');
+const { exec } = require('child_process');
+
+let prevCpuTimes = null;
+function getCpuTimes() {
+  const cpus = os.cpus();
+  let user = 0, sys = 0, idle = 0;
+  for (const cpu of cpus) {
+    user += cpu.times.user;
+    sys += cpu.times.sys;
+    idle += cpu.times.idle;
+  }
+  const total = user + sys + idle;
+  return { idle, total };
+}
+prevCpuTimes = getCpuTimes();
+
+let lastNetBytes = null;
+let lastNetTime = Date.now();
+let lastNetSpeed = { download: '0 KB/s', upload: '0 KB/s' };
+
+let lastDiskAndBattery = {
+  diskFreeGb: 'N/A',
+  diskTotalGb: 'N/A',
+  diskPercent: 0,
+  batteryPercent: null,
+  isCharging: false
+};
+
+// Asynchronously fetch Disk & Battery status via PowerShell
+function updateDiskAndBattery() {
+  const cmd = `powershell -NoProfile -Command "$disk = Get-CimInstance Win32_LogicalDisk -Filter \\"DeviceID='C:'\\"; $batt = Get-CimInstance Win32_Battery; $free = if($disk){$disk.FreeSpace}else{0}; $size = if($disk){$disk.Size}else{0}; $battVal = if($batt){$batt.EstimatedChargeRemaining}else{-1}; $battStatus = if($batt){$batt.BatteryStatus}else{-1}; Write-Output \\"$size|$free|$battVal|$battStatus\\""`;
+  
+  exec(cmd, { windowsHide: true }, (err, stdout) => {
+    if (!err && stdout) {
+      const parts = stdout.trim().split('|');
+      if (parts.length >= 2) {
+        const total = parseFloat(parts[0]);
+        const free = parseFloat(parts[1]);
+        if (total > 0) {
+          const used = total - free;
+          lastDiskAndBattery.diskTotalGb = (total / (1024 * 1024 * 1024)).toFixed(1);
+          lastDiskAndBattery.diskFreeGb = (free / (1024 * 1024 * 1024)).toFixed(1);
+          lastDiskAndBattery.diskPercent = Math.round((used / total) * 100);
+        }
+      }
+      if (parts.length >= 4) {
+        const battVal = parseInt(parts[2], 10);
+        const battStatus = parseInt(parts[3], 10);
+        if (!isNaN(battVal) && battVal >= 0) {
+          lastDiskAndBattery.batteryPercent = battVal;
+          lastDiskAndBattery.isCharging = (battStatus === 2 || battStatus === 6 || battStatus === 7 || battStatus === 8);
+        }
+      }
+    }
+  });
+}
+
+// Fetch network bytes via netstat -e
+function updateNetworkSpeed() {
+  exec('netstat -e', { windowsHide: true }, (err, stdout) => {
+    if (!err && stdout) {
+      const lines = stdout.split('\n');
+      for (const line of lines) {
+        if (line.toLowerCase().includes('bytes')) {
+          const tokens = line.trim().split(/\s+/);
+          if (tokens.length >= 3) {
+            const rx = parseInt(tokens[1], 10);
+            const tx = parseInt(tokens[2], 10);
+            const now = Date.now();
+            if (lastNetBytes && !isNaN(rx) && !isNaN(tx)) {
+              const timeDiff = (now - lastNetTime) / 1000;
+              if (timeDiff > 0) {
+                const rxRate = Math.max(0, (rx - lastNetBytes.rx) / timeDiff);
+                const txRate = Math.max(0, (tx - lastNetBytes.tx) / timeDiff);
+
+                const formatSpeed = (bytesPerSec) => {
+                  if (bytesPerSec >= 1024 * 1024) {
+                    return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+                  } else {
+                    return `${Math.round(bytesPerSec / 1024)} KB/s`;
+                  }
+                };
+
+                lastNetSpeed = {
+                  download: formatSpeed(rxRate),
+                  upload: formatSpeed(txRate)
+                };
+              }
+            }
+            lastNetBytes = { rx, tx };
+            lastNetTime = now;
+            break;
+          }
+        }
+      }
+    }
+  });
+}
+
+// Initial calls
+updateDiskAndBattery();
+updateNetworkSpeed();
+
+// Periodic update intervals
+setInterval(updateDiskAndBattery, 5000);
+
+function formatUptime(seconds) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (hrs > 0) return `${hrs}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function collectLiveMetrics() {
+  // 1. CPU
+  const currCpu = getCpuTimes();
+  const idleDiff = currCpu.idle - prevCpuTimes.idle;
+  const totalDiff = currCpu.total - prevCpuTimes.total;
+  prevCpuTimes = currCpu;
+  let cpuPercent = 0;
+  if (totalDiff > 0) {
+    cpuPercent = Math.round((1 - (idleDiff / totalDiff)) * 100);
+    cpuPercent = Math.min(100, Math.max(0, cpuPercent));
+  }
+
+  // 2. RAM
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const ramPercent = Math.round((usedMem / totalMem) * 100);
+  const ramUsedGb = (usedMem / (1024 * 1024 * 1024)).toFixed(1);
+  const ramTotalGb = (totalMem / (1024 * 1024 * 1024)).toFixed(1);
+
+  // 3. IP & CPU Model
+  let ipAddress = '127.0.0.1';
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const devName in interfaces) {
+      const iface = interfaces[devName];
+      for (let i = 0; i < iface.length; i++) {
+        if (iface[i].family === 'IPv4' && !iface[i].internal) {
+          ipAddress = iface[i].address;
+          break;
+        }
+      }
+    }
+  } catch (e) {}
+
+  const cpus = os.cpus();
+  const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Standard CPU';
+
+  updateNetworkSpeed();
+
+  return {
+    hostname: os.hostname(),
+    platform: `${os.type()} ${os.release()} (${os.arch()})`,
+    cpuModel,
+    ip: ipAddress,
+    cpuPercent,
+    ramUsedGb,
+    ramTotalGb,
+    ramPercent,
+    diskFreeGb: lastDiskAndBattery.diskFreeGb,
+    diskTotalGb: lastDiskAndBattery.diskTotalGb,
+    diskPercent: lastDiskAndBattery.diskPercent,
+    downloadSpeed: lastNetSpeed.download,
+    uploadSpeed: lastNetSpeed.upload,
+    uptime: formatUptime(os.uptime()),
+    batteryPercent: lastDiskAndBattery.batteryPercent,
+    isCharging: lastDiskAndBattery.isCharging
+  };
+}
+
+// Push live metrics to renderer every 2 seconds
+setInterval(() => {
+  const metrics = collectLiveMetrics();
+  const allWindows = BrowserWindow.getAllWindows();
+  for (const win of allWindows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('system-metrics-update', metrics);
+    }
+  }
+}, 2000);
+
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
   try {
@@ -182,3 +368,4 @@ ipcMain.on('control-event', (event, data) => {
     console.error('Error handling control event:', err);
   }
 });
+

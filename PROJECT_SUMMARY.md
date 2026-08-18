@@ -38,6 +38,11 @@ RemoteG is a full-featured, low-latency Remote Desktop application allowing user
    - Built production installer (`dist-build/RemoteG Setup 1.0.0.exe`).
    - Compressed build output to `c:\Users\Gulshan Pandey\Desktop\Remote\client-electron\RemoteG-Setup.zip` (~76.3 MB).
 
+4. **Live System Health & Metrics Dashboard (Atera-Style Telemetry)**:
+   - Built host periodic telemetry sampler (CPU %, RAM GB & %, Disk space C:, Network Download/Upload speed, Battery %, Uptime).
+   - Streamed metrics over WebRTC DataChannel & Socket.io relay every 2 seconds.
+   - Built glassmorphic Live Health drawer in React Web Controller (`controller-web`).
+
 ---
 
 ## 🚀 How to Run / Deploy Next Time

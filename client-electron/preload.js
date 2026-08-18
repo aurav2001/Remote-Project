@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   joinRoom: (roomId, role, systemInfo) => {
     if (socket) socket.emit('join-room', { roomId, role, systemInfo });
   },
+  onSystemMetricsUpdate: (callback) => {
+    ipcRenderer.on('system-metrics-update', (event, metrics) => callback(metrics));
+  },
   onSocket: (event, callback) => {
     if (socket) {
       socket.on(event, (data) => callback(data));

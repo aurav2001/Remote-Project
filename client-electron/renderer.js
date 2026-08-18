@@ -236,6 +236,30 @@ if (screenSelect) {
 // Initialize permanent access code on script load
 getOrInitPermanentCode();
 
+let activeDataChannel = null;
+
+// Listen for incoming hardware input events from controller
+window.electronAPI.onSocket('control-event', (data) => {
+  window.electronAPI.sendControlEvent(data);
+});
+
+// Relay system metrics to controller over DataChannel and Socket
+if (window.electronAPI && window.electronAPI.onSystemMetricsUpdate) {
+  window.electronAPI.onSystemMetricsUpdate((metrics) => {
+    const payload = JSON.stringify({ type: 'system-metrics', metrics });
+    if (activeDataChannel && activeDataChannel.readyState === 'open') {
+      try {
+        activeDataChannel.send(payload);
+      } catch (e) {
+        console.warn('[Host]: DataChannel metrics send error:', e);
+      }
+    }
+    if (roomId) {
+      window.electronAPI.emitSocket('system-metrics', { roomId, metrics });
+    }
+  });
+}
+
 // Setup WebRTC Peer Connection
 async function createPeerConnection() {
   if (peerConnection) {
@@ -272,8 +296,8 @@ async function createPeerConnection() {
   // Listen for WebRTC DataChannel created by controller
   peerConnection.ondatachannel = (event) => {
     console.log('[Host]: Direct P2P WebRTC DataChannel established!');
-    const dataChannel = event.channel;
-    dataChannel.onmessage = (e) => {
+    activeDataChannel = event.channel;
+    activeDataChannel.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         window.electronAPI.sendControlEvent(data);
