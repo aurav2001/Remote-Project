@@ -15,10 +15,19 @@
   --color-control-bar: rgba(15, 23, 42, 0.6);
 }
 
+/* Global scrollbar removal for sleek UI */
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 html, body, #root {
@@ -101,16 +110,23 @@ body {
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
   border-radius: 28px;
-  padding: 40px 44px;
+  padding: 28px 36px;
   width: 100%;
   max-width: 460px;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 24px);
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   text-align: center;
   position: relative;
   z-index: 1;
   box-sizing: border-box;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login-card::-webkit-scrollbar {
+  display: none;
+  width: 0;
 }
 
 .login-card:hover {
@@ -121,7 +137,7 @@ body {
 .card-header h1 {
   font-size: 2.25rem;
   font-weight: 800;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   background: linear-gradient(135deg, #ffffff 40%, var(--color-primary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -130,11 +146,11 @@ body {
 .card-header p {
   color: var(--color-text-muted);
   font-size: 0.95rem;
-  margin-bottom: 36px;
+  margin-bottom: 20px;
 }
 
 .login-form {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .input-group {
