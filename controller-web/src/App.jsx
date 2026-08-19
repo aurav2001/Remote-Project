@@ -434,23 +434,48 @@ function App() {
     }
   };
 
-  // Mouse event helper - maps browser coordinates to host screen coordinates
+  // Mouse event helper - maps browser coordinates to host screen coordinates with exact aspect-ratio alignment
   const sendMouseEvent = (type, e) => {
     const video = videoRef.current;
     if (!video || status !== 'connected') return;
 
     const rect = video.getBoundingClientRect();
-    
-    // Position relative to the video element viewport
-    const relativeX = e.clientX - rect.left;
-    const relativeY = e.clientY - rect.top;
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
 
-    // Aspect ratio scaling logic: maps viewport pixels directly to host screen resolution
-    const scaleX = video.videoWidth / rect.width;
-    const scaleY = video.videoHeight / rect.height;
+    if (!videoWidth || !videoHeight || !rect.width || !rect.height) return;
 
-    const targetX = relativeX * scaleX;
-    const targetY = relativeY * scaleY;
+    // Calculate actual rendered video dimensions inside the <video> element (accounting for letterboxing/pillarboxing)
+    const containerAspect = rect.width / rect.height;
+    const videoAspect = videoWidth / videoHeight;
+
+    let renderWidth, renderHeight, offsetX, offsetY;
+
+    if (containerAspect > videoAspect) {
+      // Pillarboxed (black bars on left and right)
+      renderHeight = rect.height;
+      renderWidth = rect.height * videoAspect;
+      offsetX = (rect.width - renderWidth) / 2;
+      offsetY = 0;
+    } else {
+      // Letterboxed (black bars on top and bottom)
+      renderWidth = rect.width;
+      renderHeight = rect.width / videoAspect;
+      offsetX = 0;
+      offsetY = (rect.height - renderHeight) / 2;
+    }
+
+    // Position relative to the actual rendered video stream frame
+    const mouseX = e.clientX - rect.left - offsetX;
+    const mouseY = e.clientY - rect.top - offsetY;
+
+    // Clamp coordinates strictly to the rendered video boundary
+    const clampedX = Math.max(0, Math.min(renderWidth, mouseX));
+    const clampedY = Math.max(0, Math.min(renderHeight, mouseY));
+
+    // Map precisely to host screen resolution
+    const targetX = (clampedX / renderWidth) * videoWidth;
+    const targetY = (clampedY / renderHeight) * videoHeight;
 
     // Mouse button mapping (0 = left, 1 = middle, 2 = right)
     let button = 'left';
