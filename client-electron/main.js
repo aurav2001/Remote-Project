@@ -56,8 +56,11 @@ function sendInputHelperCommand(cmd) {
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 700,
+    width: 520,
+    height: 640,
+    resizable: false,
+    autoHideMenuBar: true,
+    title: 'RemoteG System Host Agent',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -67,7 +70,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools();
   
   // Relay renderer console.log to main process terminal
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {

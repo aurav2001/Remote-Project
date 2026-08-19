@@ -106,7 +106,7 @@ async function startSharing(sourceId) {
     const localVideo = document.getElementById('local-video');
     if (localVideo) {
       localVideo.srcObject = localStream;
-      localVideo.style.display = 'block';
+      localVideo.style.display = 'none';
     }
 
     if (btnStart) {
