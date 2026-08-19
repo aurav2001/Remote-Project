@@ -682,17 +682,7 @@ function App() {
               {hostSystemInfo && (
                 <button
                   onClick={() => setShowSpecsModal(prev => !prev)}
-                  style={{
-                    background: 'rgba(129, 140, 248, 0.25)',
-                    border: '1px solid rgba(129, 140, 248, 0.4)',
-                    color: '#a5b4fc',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    marginLeft: '10px'
-                  }}
+                  className={`control-btn btn-specs ${showSpecsModal ? 'active' : ''}`}
                   title="View Host Machine Specifications"
                 >
                   💻 Device Specs ({hostSystemInfo.hostname || 'Host'})
@@ -701,22 +691,7 @@ function App() {
 
               <button
                 onClick={() => setShowHealthDrawer(prev => !prev)}
-                style={{
-                  background: showHealthDrawer ? 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)' : 'rgba(14, 165, 233, 0.2)',
-                  border: '1px solid rgba(56, 189, 248, 0.5)',
-                  color: showHealthDrawer ? '#fff' : '#38bdf8',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  marginLeft: '10px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: showHealthDrawer ? '0 0 12px rgba(14, 165, 233, 0.5)' : 'none',
-                  transition: 'all 0.2s ease'
-                }}
+                className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
                 title="View Live CPU, RAM, Disk, and Network Health"
               >
                 📊 Live System Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
@@ -724,22 +699,7 @@ function App() {
 
               <button
                 onClick={() => setShowTerminalDrawer(prev => !prev)}
-                style={{
-                  background: showTerminalDrawer ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(16, 185, 129, 0.2)',
-                  border: '1px solid rgba(52, 211, 153, 0.5)',
-                  color: showTerminalDrawer ? '#fff' : '#34d399',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  marginLeft: '10px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: showTerminalDrawer ? '0 0 12px rgba(16, 185, 129, 0.5)' : 'none',
-                  transition: 'all 0.2s ease'
-                }}
+                className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
                 title="Open Silent Remote PowerShell & CMD Terminal"
               >
                 💻 Remote Terminal
@@ -751,16 +711,7 @@ function App() {
                   navigator.clipboard.writeText(directUrl);
                   alert(`Direct Access Link copied to clipboard:\n${directUrl}\n\nYou can bookmark this link for 1-click auto-connect!`);
                 }}
-                style={{
-                  background: 'rgba(255,255,255,0.1)',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  color: '#fff',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  marginLeft: '10px'
-                }}
+                className="control-btn btn-link"
                 title="Copy Direct Bookmark Link"
               >
                 🔗 Copy 1-Click Link
