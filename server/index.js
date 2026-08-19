@@ -25,6 +25,28 @@ const io = new Server(server, {
 // Map room ID to { host: socketId, controller: socketId }
 const rooms = new Map();
 
+// Helper to compile list of active live host nodes
+function getActiveHostsList() {
+  const list = [];
+  for (const [roomId, room] of rooms.entries()) {
+    if (room.host) {
+      list.push({
+        roomId,
+        systemInfo: room.systemInfo || null,
+        liveMetrics: room.liveMetrics || null,
+        isOnline: true,
+        lastSeen: new Date().toISOString()
+      });
+    }
+  }
+  return list;
+}
+
+function broadcastActiveHosts() {
+  const hosts = getActiveHostsList();
+  io.emit('active-hosts-list', hosts);
+}
+
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
@@ -48,14 +70,21 @@ io.on('connection', (socket) => {
         room.systemInfo = systemInfo;
       }
       console.log(`Host registered for room ${roomId} with info:`, room.systemInfo);
+      broadcastActiveHosts();
     } else if (role === 'controller') {
       room.controller = socket.id;
       console.log(`Controller registered for room ${roomId}`);
+      socket.emit('active-hosts-list', getActiveHostsList());
       // Send host info to controller if available
       if (room.systemInfo) {
         socket.emit('host-info', { systemInfo: room.systemInfo });
       }
     }
+
+    // Allow controllers to explicitly request current active host nodes
+    socket.on('get-active-hosts', () => {
+      socket.emit('active-hosts-list', getActiveHostsList());
+    });
 
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
@@ -96,6 +125,11 @@ io.on('connection', (socket) => {
 
   // Relay System Metrics from host to controller
   socket.on('system-metrics', ({ roomId, metrics }) => {
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      room.liveMetrics = metrics;
+      broadcastActiveHosts();
+    }
     socket.to(roomId).emit('system-metrics', { metrics });
   });
 
@@ -129,6 +163,7 @@ io.on('connection', (socket) => {
         console.log(`Host disconnected from room ${roomId}`);
         room.host = null;
         socket.to(roomId).emit('peer-disconnected', { role: 'host' });
+        broadcastActiveHosts();
       } else if (socket.id === room.controller) {
         console.log(`Controller disconnected from room ${roomId}`);
         room.controller = null;
@@ -139,6 +174,7 @@ io.on('connection', (socket) => {
       if (!room.host && !room.controller) {
         rooms.delete(roomId);
         console.log(`Room ${roomId} deleted`);
+        broadcastActiveHosts();
       }
     }
   });

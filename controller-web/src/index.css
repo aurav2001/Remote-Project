@@ -899,4 +899,310 @@ body {
   box-shadow: none;
 }
 
+/* ==========================================================================
+   4. Central Devices RMM Dashboard Styling
+   ========================================================================== */
+.dashboard-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-gradient);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.dashboard-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
+}
+
+.dashboard-brand h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin: 0;
+  background: linear-gradient(135deg, #ffffff 40%, var(--color-primary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  border-radius: 100px;
+  border: 1px solid var(--glass-border);
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 6px 16px;
+  border-radius: 100px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, var(--color-primary) 0%, #6366f1 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(129, 140, 248, 0.4);
+}
+
+.dashboard-content {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.dashboard-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.rmm-stat-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.rmm-stat-card:hover {
+  border-color: rgba(129, 140, 248, 0.3);
+  transform: translateY(-2px);
+}
+
+.stat-info h4 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin: 0 0 4px 0;
+}
+
+.stat-info span {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.stat-icon-wrapper {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+
+.rmm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.search-box-wrapper {
+  flex: 1;
+  min-width: 260px;
+  position: relative;
+}
+
+.search-box-wrapper input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text);
+  padding: 10px 16px 10px 38px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.search-box-wrapper input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 10px var(--color-primary-glow);
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.filter-select {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text);
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.devices-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.device-node-card {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 18px 20px;
+  transition: all 0.25s ease;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.device-node-card:hover {
+  border-color: rgba(129, 140, 248, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(129, 140, 248, 0.15);
+  transform: translateY(-2px);
+}
+
+.node-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.node-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.node-icon {
+  font-size: 1.4rem;
+}
+
+.node-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.node-code {
+  font-size: 0.78rem;
+  color: #818cf8;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.node-metrics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metric-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-bar-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.metric-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.metric-progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  transition: width 0.4s ease;
+}
+
+.node-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.btn-card-action {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
 

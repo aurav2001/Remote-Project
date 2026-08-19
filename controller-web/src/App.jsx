@@ -40,6 +40,13 @@ function App() {
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
 
+  // Central Dashboard RMM States
+  const [activeHosts, setActiveHosts] = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' or 'connect'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'online', 'offline'
+  const [isServerConnected, setIsServerConnected] = useState(false);
+
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
   const [terminalInput, setTerminalInput] = useState('');
@@ -48,6 +55,33 @@ function App() {
   const [commandHistory, setCommandHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const terminalLogsRef = useRef(null);
+
+  // Connect to signaling server on mount to receive real-time active hosts
+  useEffect(() => {
+    const globalSocket = io(SIGNALING_SERVER, {
+      pingTimeout: 60000,
+      pingInterval: 25000
+    });
+
+    globalSocket.on('connect', () => {
+      console.log('[Controller]: Global dashboard socket connected');
+      setIsServerConnected(true);
+      globalSocket.emit('get-active-hosts');
+    });
+
+    globalSocket.on('disconnect', () => {
+      setIsServerConnected(false);
+    });
+
+    globalSocket.on('active-hosts-list', (hosts) => {
+      console.log('[Controller]: Received live active hosts update:', hosts);
+      setActiveHosts(hosts || []);
+    });
+
+    return () => {
+      globalSocket.disconnect();
+    };
+  }, []);
 
   // Auto-scroll terminal log window to bottom on new output
   useEffect(() => {
@@ -543,159 +577,423 @@ function App() {
     }
   };
 
+  // Combine live active hosts from signaling server with saved recent devices
+  const allTrackedDevices = Array.from(new Set([
+    ...activeHosts.map(h => h.roomId),
+    ...recentDevices
+  ])).map(id => {
+    const liveHost = activeHosts.find(h => h.roomId === id);
+    if (liveHost) {
+      return {
+        roomId: id,
+        hostname: liveHost.systemInfo?.hostname || `Host-${id}`,
+        isOnline: true,
+        systemInfo: liveHost.systemInfo,
+        liveMetrics: liveHost.liveMetrics,
+        lastSeen: 'Just Now'
+      };
+    }
+    return {
+      roomId: id,
+      hostname: `Host-${id}`,
+      isOnline: false,
+      systemInfo: null,
+      liveMetrics: null,
+      lastSeen: 'Offline'
+    };
+  });
+
+  const filteredDevices = allTrackedDevices.filter(device => {
+    const matchesSearch = device.hostname.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          device.roomId.includes(searchQuery);
+    if (statusFilter === 'online') return matchesSearch && device.isOnline;
+    if (statusFilter === 'offline') return matchesSearch && !device.isOnline;
+    return matchesSearch;
+  });
+
+  const totalCount = allTrackedDevices.length;
+  const onlineCount = allTrackedDevices.filter(d => d.isOnline).length;
+  const onlineWithMetrics = allTrackedDevices.filter(d => d.isOnline && d.liveMetrics);
+  const avgCpu = onlineWithMetrics.length > 0 
+    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.cpuPercent || 0), 0) / onlineWithMetrics.length) 
+    : 0;
+  const avgRam = onlineWithMetrics.length > 0 
+    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.ramPercent || 0), 0) / onlineWithMetrics.length) 
+    : 0;
+
   return (
     <div className="app-container">
       {status !== 'connected' ? (
-        <div className="login-wrapper">
-          <div className="glow-sphere sphere-1"></div>
-          <div className="glow-sphere sphere-2"></div>
-          
-          <div className="login-card">
-            <div className="card-header">
-              <h1>RemoteG Control</h1>
-              <p>Connect to a Remote System Node</p>
+        <div className="dashboard-root">
+          {/* Top Navbar Header */}
+          <div className="dashboard-nav">
+            <div className="dashboard-brand">
+              <div className="dashboard-brand-icon">⚡</div>
+              <div>
+                <h2>RemoteG Central Portal</h2>
+              </div>
             </div>
 
-            <form onSubmit={handleConnect} className="login-form">
-              <div className="input-group">
-                <label htmlFor="roomId">Target Access Code (Host ID)</label>
-                <input
-                  id="roomId"
-                  type="text"
-                  placeholder="Enter 6-digit code"
-                  value={targetRoomId}
-                  onChange={(e) => setTargetRoomId(e.target.value)}
-                  maxLength={6}
-                  disabled={status === 'connecting'}
-                />
+            <div className="nav-tabs">
+              <button 
+                className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setActiveTab('dashboard')}
+              >
+                🖥️ Devices Dashboard
+                <span style={{ 
+                  background: activeHosts.length > 0 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                  color: activeHosts.length > 0 ? '#34d399' : '#94a3b8',
+                  padding: '2px 8px',
+                  borderRadius: '100px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700
+                }}>
+                  {activeHosts.length} Live
+                </span>
+              </button>
+
+              <button 
+                className={`tab-btn ${activeTab === 'connect' ? 'active' : ''}`}
+                onClick={() => setActiveTab('connect')}
+              >
+                ⚡ Code Connect
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: isServerConnected ? '#34d399' : '#f87171' }}>
+              <span className={`status-dot ${isServerConnected ? 'ready' : ''}`} style={{ width: '8px', height: '8px' }}></span>
+              <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
+            </div>
+          </div>
+
+          {/* Main View Area */}
+          {activeTab === 'dashboard' ? (
+            <div className="dashboard-content">
+              {/* Summary Stats Row */}
+              <div className="dashboard-stats-grid">
+                <div className="rmm-stat-card">
+                  <div className="stat-info">
+                    <h4>Total Managed Nodes</h4>
+                    <span>{totalCount}</span>
+                  </div>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(129, 140, 248, 0.15)', color: '#818cf8' }}>🖥️</div>
+                </div>
+
+                <div className="rmm-stat-card">
+                  <div className="stat-info">
+                    <h4>Online Streaming</h4>
+                    <span style={{ color: '#34d399' }}>{onlineCount}</span>
+                  </div>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}>🟢</div>
+                </div>
+
+                <div className="rmm-stat-card">
+                  <div className="stat-info">
+                    <h4>Avg CPU Utilization</h4>
+                    <span style={{ color: '#38bdf8' }}>{avgCpu}%</span>
+                  </div>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>⚡</div>
+                </div>
+
+                <div className="rmm-stat-card">
+                  <div className="stat-info">
+                    <h4>Avg Memory Usage</h4>
+                    <span style={{ color: '#a5b4fc' }}>{avgRam}%</span>
+                  </div>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(165, 180, 252, 0.15)', color: '#a5b4fc' }}>📊</div>
+                </div>
               </div>
 
-              <button
-                type="submit"
-                className="btn-connect"
-                disabled={status === 'connecting' || !targetRoomId.trim()}
-              >
-                {status === 'connecting' ? 'Establishing Handshake...' : 'Establish Session'}
-              </button>
-            </form>
+              {/* Toolbar & Search Header */}
+              <div className="rmm-toolbar">
+                <div className="search-box-wrapper">
+                  <span className="search-icon">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Search machines by Hostname, ID, or OS..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
 
-            {recentDevices.length > 0 && (
-              <div style={{ marginTop: '20px', textAlign: 'left' }}>
-                <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
-                  ⚡ Quick Connect (Recent Devices):
-                </span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {recentDevices.map(code => (
-                    <button
-                      key={code}
-                      onClick={() => handleConnect(null, code)}
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <select 
+                    value={statusFilter} 
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="filter-select"
+                  >
+                    <option value="all">All Devices ({totalCount})</option>
+                    <option value="online">Online Only ({onlineCount})</option>
+                    <option value="offline">Offline Only ({totalCount - onlineCount})</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Devices Card Grid */}
+              <div className="devices-card-grid">
+                {filteredDevices.map(device => (
+                  <div key={device.roomId} className="device-node-card">
+                    <div>
+                      <div className="node-card-header">
+                        <div className="node-title-group">
+                          <span className="node-icon">💻</span>
+                          <div>
+                            <h3 className="node-name">{device.hostname}</h3>
+                            <span className="node-code">ID: {device.roomId}</span>
+                          </div>
+                        </div>
+
+                        <span className="stream-badge" style={{
+                          background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
+                          borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
+                          color: device.isOnline ? '#34d399' : '#94a3b8'
+                        }}>
+                          {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
+                        </span>
+                      </div>
+
+                      {/* OS info */}
+                      <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '10px' }}>
+                        🖥️ {device.systemInfo ? `${device.systemInfo.platform || 'Windows'} ${device.systemInfo.arch || 'x64'}` : 'Windows Remote Machine'}
+                      </div>
+
+                      {/* Live Telemetry Gauges */}
+                      {device.isOnline && device.liveMetrics ? (
+                        <div className="node-metrics-list">
+                          <div className="metric-bar-group">
+                            <div className="metric-bar-header">
+                              <span>CPU Load</span>
+                              <span style={{ color: '#38bdf8' }}>{device.liveMetrics.cpuPercent}%</span>
+                            </div>
+                            <div className="metric-progress-track">
+                              <div 
+                                className="metric-progress-fill" 
+                                style={{ 
+                                  width: `${device.liveMetrics.cpuPercent}%`,
+                                  background: 'linear-gradient(90deg, #38bdf8, #818cf8)'
+                                }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          <div className="metric-bar-group">
+                            <div className="metric-bar-header">
+                              <span>RAM ({device.liveMetrics.ramUsedGB} / {device.liveMetrics.ramTotalGB} GB)</span>
+                              <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent}%</span>
+                            </div>
+                            <div className="metric-progress-track">
+                              <div 
+                                className="metric-progress-fill" 
+                                style={{ 
+                                  width: `${device.liveMetrics.ramPercent}%`,
+                                  background: 'linear-gradient(90deg, #818cf8, #c084fc)'
+                                }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          <div className="metric-bar-header" style={{ marginTop: '2px' }}>
+                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGB} GB</strong></span>
+                            <span>Speed: {device.liveMetrics.downloadMbps} Mbps</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', fontSize: '0.8rem', color: '#64748b' }}>
+                          Machine offline. Launch setup client on target PC to stream live RMM metrics.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Action Buttons */}
+                    <div className="node-card-footer">
+                      <button
+                        onClick={() => handleConnect(null, device.roomId)}
+                        disabled={!device.isOnline || status === 'connecting'}
+                        className="btn-card-action"
+                        style={{
+                          background: device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
+                          color: device.isOnline ? '#fff' : '#64748b',
+                          boxShadow: device.isOnline ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none'
+                        }}
+                      >
+                        ⚡ 1-Click Connect
+                      </button>
+
+                      {device.systemInfo && (
+                        <button
+                          onClick={() => {
+                            setHostSystemInfo(device.systemInfo);
+                            setShowSpecsModal(true);
+                          }}
+                          className="btn-card-action"
+                          style={{
+                            background: 'rgba(255,255,255,0.08)',
+                            color: '#a5b4fc',
+                            flex: '0 0 auto'
+                          }}
+                          title="View Hardware Specifications"
+                        >
+                          💻 Specs
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="login-wrapper">
+              <div className="glow-sphere sphere-1"></div>
+              <div className="glow-sphere sphere-2"></div>
+              
+              <div className="login-card">
+                <div className="card-header">
+                  <h1>RemoteG Control</h1>
+                  <p>Connect to a Remote System Node</p>
+                </div>
+
+                <form onSubmit={handleConnect} className="login-form">
+                  <div className="input-group">
+                    <label htmlFor="roomId">Target Access Code (Host ID)</label>
+                    <input
+                      id="roomId"
+                      type="text"
+                      placeholder="Enter 6-digit code"
+                      value={targetRoomId}
+                      onChange={(e) => setTargetRoomId(e.target.value)}
+                      maxLength={6}
                       disabled={status === 'connecting'}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn-connect"
+                    disabled={status === 'connecting' || !targetRoomId.trim()}
+                  >
+                    {status === 'connecting' ? 'Establishing Handshake...' : 'Establish Session'}
+                  </button>
+                </form>
+
+                {recentDevices.length > 0 && (
+                  <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                      ⚡ Quick Connect (Recent Devices):
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {recentDevices.map(code => (
+                        <button
+                          key={code}
+                          onClick={() => handleConnect(null, code)}
+                          disabled={status === 'connecting'}
+                          style={{
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            color: '#818cf8',
+                            padding: '6px 12px',
+                            borderRadius: '100px',
+                            fontSize: '0.85rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                          title={`Connect to ${code}`}
+                        >
+                          {code}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="status-indicator" style={{ marginBottom: '20px' }}>
+                  <span className={`status-dot ${status}`}></span>
+                  <span className="status-text">
+                    {status === 'disconnected' && 'Ready for Connection'}
+                    {status === 'connecting' && 'Connecting to Signaling Server...'}
+                    {status === 'ready' && 'Signaled Host. Establishing WebRTC stream...'}
+                  </span>
+                </div>
+
+                <div style={{ 
+                  background: 'rgba(255, 255, 255, 0.04)', 
+                  border: '1px solid rgba(255, 255, 255, 0.1)', 
+                  borderRadius: '16px', 
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
+                    💻 Need to control a new PC?
+                  </span>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <a
+                      href="/RemoteG-Setup.exe"
+                      download="RemoteG-Setup.exe"
                       style={{
-                        background: 'rgba(255,255,255,0.08)',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        color: '#818cf8',
-                        padding: '6px 12px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color: '#fff',
+                        padding: '8px 16px',
                         borderRadius: '100px',
                         fontSize: '0.85rem',
                         fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease'
+                        textDecoration: 'none',
+                        boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
                       }}
-                      title={`Connect to ${code}`}
                     >
-                      {code}
+                      📥 Download (.exe)
+                    </a>
+
+                    <a
+                      href="/RemoteG-Setup.zip"
+                      download="RemoteG-Setup.zip"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                        color: '#fff',
+                        padding: '8px 16px',
+                        borderRadius: '100px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        textDecoration: 'none',
+                        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
+                      }}
+                    >
+                      📦 Download (.zip)
+                    </a>
+
+                    <button
+                      onClick={() => {
+                        const downloadUrl = `${window.location.origin}/RemoteG-Setup.zip`;
+                        navigator.clipboard.writeText(downloadUrl);
+                        alert(`WhatsApp Zip Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        color: '#38bdf8',
+                        padding: '8px 14px',
+                        borderRadius: '100px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                      title="Copy WhatsApp Direct Download Link"
+                    >
+                      💬 Copy WhatsApp Link
                     </button>
-                  ))}
+                  </div>
                 </div>
               </div>
-            )}
-
-            <div className="status-indicator" style={{ marginBottom: '20px' }}>
-              <span className={`status-dot ${status}`}></span>
-              <span className="status-text">
-                {status === 'disconnected' && 'Ready for Connection'}
-                {status === 'connecting' && 'Connecting to Signaling Server...'}
-                {status === 'ready' && 'Signaled Host. Establishing WebRTC stream...'}
-              </span>
             </div>
-
-            <div style={{ 
-              background: 'rgba(255, 255, 255, 0.04)', 
-              border: '1px solid rgba(255, 255, 255, 0.1)', 
-              borderRadius: '16px', 
-              padding: '16px',
-              textAlign: 'center'
-            }}>
-              <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
-                💻 Need to control a new PC?
-              </span>
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                <a
-                  href="/RemoteG-Setup.exe"
-                  download="RemoteG-Setup.exe"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                    color: '#fff',
-                    padding: '8px 16px',
-                    borderRadius: '100px',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
-                  }}
-                >
-                  📥 Download (.exe)
-                </a>
-
-                <a
-                  href="/RemoteG-Setup.zip"
-                  download="RemoteG-Setup.zip"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                    color: '#fff',
-                    padding: '8px 16px',
-                    borderRadius: '100px',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
-                  }}
-                >
-                  📦 Download (.zip)
-                </a>
-
-                <button
-                  onClick={() => {
-                    const downloadUrl = `${window.location.origin}/RemoteG-Setup.zip`;
-                    navigator.clipboard.writeText(downloadUrl);
-                    alert(`WhatsApp Zip Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    color: '#38bdf8',
-                    padding: '8px 14px',
-                    borderRadius: '100px',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                  title="Copy WhatsApp Direct Download Link"
-                >
-                  💬 Copy WhatsApp Link
-                </button>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       ) : (
         <div className="viewer-layout">
