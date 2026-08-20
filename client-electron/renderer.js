@@ -156,6 +156,11 @@ let streamPromise = null;
 async function startSharing(sourceId) {
   if (!sourceId) return;
 
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+
   try {
     streamPromise = navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -181,6 +186,16 @@ async function startSharing(sourceId) {
         track.enabled = true;
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
+
+      // Dynamic stream replacement on active peer connection
+      if (peerConnection) {
+        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        const newTrack = localStream.getVideoTracks()[0];
+        if (sender && newTrack) {
+          console.log('[Host]: Dynamically replacing track on active PeerConnection sender');
+          sender.replaceTrack(newTrack);
+        }
+      }
     }
 
     if (btnStart) {

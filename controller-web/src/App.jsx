@@ -178,10 +178,14 @@ function App() {
 
   const setVideoRef = (el) => {
     videoRef.current = el;
-    if (el && remoteStreamRef.current) {
-      console.log('[Controller]: Callback ref attaching remoteStream to video element!');
-      el.srcObject = remoteStreamRef.current;
-      el.play().catch(err => console.warn('Video play warning:', err));
+    if (el) {
+      el.muted = true;
+      el.defaultMuted = true;
+      if (remoteStreamRef.current) {
+        console.log('[Controller]: Callback ref attaching remoteStream to video element!');
+        el.srcObject = remoteStreamRef.current;
+        el.play().catch(err => console.warn('Video play warning:', err));
+      }
     }
   };
 
@@ -201,6 +205,8 @@ function App() {
     if (status === 'connected') {
       const interval = setInterval(() => {
         if (videoRef.current && remoteStreamRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.defaultMuted = true;
           if (videoRef.current.srcObject !== remoteStreamRef.current) {
             console.log('[Controller]: Auto-assigning srcObject to video element');
             videoRef.current.srcObject = remoteStreamRef.current;

@@ -9,6 +9,8 @@ dist/
 dist-build/
 .env
 
-# OS files
+# OS & local binary outputs
 .DS_Store
 Thumbs.db
+/*.exe
+/*.zip
