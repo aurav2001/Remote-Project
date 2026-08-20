@@ -48,10 +48,7 @@ const rtcConfig = {
       username: 'openrelayproject',
       credential: 'openrelayproject'
     }
-  ],
-  iceCandidatePoolSize: 10,
-  bundlePolicy: 'max-bundle',
-  rtcpMuxPolicy: 'require'
+  ]
 };
 
 const isValidCandidate = (cand) => {

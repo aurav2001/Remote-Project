@@ -34,10 +34,7 @@ const rtcConfig = {
       username: 'openrelayproject',
       credential: 'openrelayproject'
     }
-  ],
-  iceCandidatePoolSize: 10,
-  bundlePolicy: 'max-bundle',
-  rtcpMuxPolicy: 'require'
+  ]
 };
 
 function App() {
@@ -811,8 +808,7 @@ function App() {
 
   return (
     <div className="app-container">
-      {status !== 'connected' ? (
-        <div className="dashboard-root">
+      <div className="dashboard-root" style={{ display: status === 'connected' ? 'none' : 'block' }}>
           {/* Top Navbar Header */}
           <div className="dashboard-nav">
             <div className="dashboard-brand">
@@ -1182,9 +1178,9 @@ function App() {
               </div>
             </div>
           )}
-        </div>
-      ) : (
-        <div className="viewer-layout">
+      </div>
+
+      <div className="viewer-layout" style={{ display: status === 'connected' ? 'flex' : 'none' }}>
           <div className="control-bar">
             <div className="control-bar-left">
               <span className="session-tag">🟢 Node: {roomId}</span>
@@ -1577,7 +1573,6 @@ function App() {
             />
           </div>
         </div>
-      )}
 
       {/* Bidirectional Clipboard Toast Notification Banner */}
       {clipboardToast && (
