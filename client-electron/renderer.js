@@ -170,6 +170,14 @@ function startSocketFrameRelay() {
   }, 100);
 }
 
+function stopSocketFrameRelay() {
+  if (frameInterval) {
+    console.log('[Host]: WebRTC stream connected. Pausing socket frame relay.');
+    clearInterval(frameInterval);
+    frameInterval = null;
+  }
+}
+
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
@@ -339,11 +347,14 @@ async function createPeerConnection() {
     console.log(`[Host]: Connection state changed to: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'connected') {
       updateStatus('connected', 'Connected & Streaming');
+      stopSocketFrameRelay();
     } else if (peerConnection.connectionState === 'disconnected') {
       updateStatus('connecting', 'Network blip. Reconnecting stream...');
+      startSocketFrameRelay();
     } else if (peerConnection.connectionState === 'failed') {
       console.warn('[Host]: WebRTC connection state failed. Attempting ICE restart...');
       updateStatus('connecting', 'Connection failed. Re-establishing...');
+      startSocketFrameRelay();
       if (peerConnection.restartIce) {
         peerConnection.restartIce();
       }
