@@ -171,6 +171,14 @@ async function startSharing(sourceId) {
       localVideo.style.display = 'none';
     }
 
+    // Explicitly enable and verify captured video tracks
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = true;
+        console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
+      });
+    }
+
     if (btnStart) {
       btnStart.innerText = 'Streaming Screen (Auto-Started)';
       btnStart.disabled = true;

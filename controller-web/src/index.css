@@ -1289,4 +1289,98 @@ body {
   padding: 4px;
 }
 
+/* Sleek Compact Action Menu Dropdown */
+.tools-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.btn-tools {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%);
+  border: 1px solid rgba(165, 180, 252, 0.4);
+  color: #c084fc;
+}
+
+.btn-tools:hover, .btn-tools.active {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border-color: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.5);
+}
+
+.tools-dropdown-menu {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  z-index: 1000;
+  min-width: 270px;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(165, 180, 252, 0.25);
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(139, 92, 246, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: dropdown-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdown-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.dropdown-item:hover {
+  background: rgba(129, 140, 248, 0.18);
+  transform: translateX(3px);
+}
+
+.dropdown-icon {
+  font-size: 1.2rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.dropdown-item strong {
+  display: block;
+  font-size: 0.85rem;
+  color: #f8fafc;
+}
+
+.dropdown-item small {
+  display: block;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
 

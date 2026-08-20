@@ -58,6 +58,7 @@ function App() {
   const [isServerConnected, setIsServerConnected] = useState(false);
 
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [clipboardToast, setClipboardToast] = useState(null);
   const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
@@ -171,6 +172,15 @@ function App() {
       alert('Click anywhere on the stream video area first to grant browser clipboard permission.');
     } finally {
       setIsSyncingClipboard(false);
+    }
+  };
+
+  const setVideoRef = (el) => {
+    videoRef.current = el;
+    if (el && remoteStreamRef.current) {
+      console.log('[Controller]: Callback ref attaching remoteStream to video element!');
+      el.srcObject = remoteStreamRef.current;
+      el.play().catch(err => console.warn('Video play warning:', err));
     }
   };
 
@@ -379,12 +389,24 @@ function App() {
 
     // Receive screen track
     pc.ontrack = (event) => {
-      console.log('Received remote video track! Opening full-screen stream.');
+      console.log('[Controller]: Received remote video track! Opening full-screen stream.', event);
       const stream = (event.streams && event.streams[0])
         ? event.streams[0]
         : new MediaStream([event.track]);
 
       remoteStreamRef.current = stream;
+
+      if (event.track) {
+        event.track.enabled = true;
+        event.track.onunmute = () => {
+          console.log('[Controller]: Remote video track unmuted!');
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(e => {});
+          }
+        };
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(e => console.warn('Video play warning:', e));
@@ -1078,56 +1100,80 @@ function App() {
         <div className="viewer-layout">
           <div className="control-bar">
             <div className="control-bar-left">
-              <span className="session-tag">Active Node: {roomId}</span>
+              <span className="session-tag">🟢 Node: {roomId}</span>
               <span className="stream-badge">LIVE</span>
 
-              {hostSystemInfo && (
-                <button
-                  onClick={() => setShowSpecsModal(prev => !prev)}
-                  className={`control-btn btn-specs ${showSpecsModal ? 'active' : ''}`}
-                  title="View Host Machine Specifications"
-                >
-                  💻 Device Specs ({hostSystemInfo.hostname || 'Host'})
-                </button>
-              )}
-
+              {/* Compact Quick Action Buttons */}
               <button
                 onClick={() => setShowHealthDrawer(prev => !prev)}
                 className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
                 title="View Live CPU, RAM, Disk, and Network Health"
               >
-                📊 Live System Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
+                📊 Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
               </button>
 
               <button
                 onClick={() => setShowTerminalDrawer(prev => !prev)}
                 className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
-                title="Open Silent Remote PowerShell & CMD Terminal"
+                title="Open Remote PowerShell & CMD Terminal"
               >
-                💻 Remote Terminal
+                💻 Terminal
               </button>
 
-              <button
-                onClick={syncLocalClipboardToRemote}
-                disabled={isSyncingClipboard}
-                className="control-btn btn-clipboard"
-                title="Copy your browser local clipboard and push it to Remote Host PC"
-                style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
-              >
-                📋 {isSyncingClipboard ? 'Syncing...' : 'Sync Local Clipboard'}
-              </button>
+              {/* Sleek Compact Action Menu Dropdown */}
+              <div className="tools-dropdown-wrapper">
+                <button
+                  onClick={() => setShowToolsDropdown(prev => !prev)}
+                  className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
+                  title="Open Actions & Utilities Menu"
+                >
+                  ⚡ Actions <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>▼</span>
+                </button>
 
-              <button 
-                onClick={() => {
-                  const directUrl = `${window.location.origin}/?code=${roomId}`;
-                  navigator.clipboard.writeText(directUrl);
-                  alert(`Direct Access Link copied to clipboard:\n${directUrl}\n\nYou can bookmark this link for 1-click auto-connect!`);
-                }}
-                className="control-btn btn-link"
-                title="Copy Direct Bookmark Link"
-              >
-                🔗 Copy 1-Click Link
-              </button>
+                {showToolsDropdown && (
+                  <div className="tools-dropdown-menu">
+                    {hostSystemInfo && (
+                      <button 
+                        onClick={() => { setShowSpecsModal(true); setShowToolsDropdown(false); }} 
+                        className="dropdown-item"
+                      >
+                        <span className="dropdown-icon">💻</span>
+                        <div>
+                          <strong>Hardware Specs</strong>
+                          <small>{hostSystemInfo.hostname || 'Device Specs'}</small>
+                        </div>
+                      </button>
+                    )}
+
+                    <button 
+                      onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }} 
+                      className="dropdown-item"
+                    >
+                      <span className="dropdown-icon">📋</span>
+                      <div>
+                        <strong>Sync Clipboard</strong>
+                        <small>Push local text to Remote PC</small>
+                      </div>
+                    </button>
+
+                    <button 
+                      onClick={() => {
+                        const directUrl = `${window.location.origin}/?code=${roomId}`;
+                        navigator.clipboard.writeText(directUrl);
+                        alert(`Direct Access Link copied to clipboard:\n${directUrl}`);
+                        setShowToolsDropdown(false);
+                      }} 
+                      className="dropdown-item"
+                    >
+                      <span className="dropdown-icon">🔗</span>
+                      <div>
+                        <strong>Copy Direct Link</strong>
+                        <small>1-Click bookmark link</small>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             <button className="btn-disconnect" onClick={cleanup}>
               Terminate Session
@@ -1417,7 +1463,7 @@ function App() {
             onWheel={handleWheel}
           >
             <video
-              ref={videoRef}
+              ref={setVideoRef}
               autoPlay
               playsInline
               muted
