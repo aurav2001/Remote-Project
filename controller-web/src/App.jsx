@@ -718,7 +718,15 @@ function App() {
     });
   };
 
-  const handleMouseMove = (e) => sendMouseEvent('mousemove', e);
+  const lastMoveTimeRef = useRef(0);
+  const handleMouseMove = (e) => {
+    const now = Date.now();
+    if (now - lastMoveTimeRef.current > 16) {
+      lastMoveTimeRef.current = now;
+      sendMouseEvent('mousemove', e);
+    }
+  };
+  const handleClick = (e) => sendMouseEvent('click', e);
   const handleMouseDown = (e) => sendMouseEvent('mousedown', e);
   const handleMouseUp = (e) => sendMouseEvent('mouseup', e);
   const handleDoubleClick = (e) => sendMouseEvent('doubleclick', e);
@@ -1580,6 +1588,7 @@ function App() {
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onMouseMove={handleMouseMove}
+              onClick={handleClick}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
@@ -1599,6 +1608,7 @@ function App() {
                 src={socketFrame}
                 alt="Remote Screen Stream Fallback"
                 onMouseMove={handleMouseMove}
+                onClick={handleClick}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
                 onDoubleClick={handleDoubleClick}
