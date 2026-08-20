@@ -209,7 +209,11 @@ window.addEventListener('socket-connected', async () => {
 
 window.addEventListener('socket-disconnected', () => {
   console.log('Disconnected from signaling server');
-  updateStatus('', 'Disconnected');
+  if (!peerConnection || peerConnection.connectionState !== 'connected') {
+    updateStatus('', 'Disconnected');
+  } else {
+    console.warn('[Host]: Signaling socket blip, maintaining WebRTC P2P stream.');
+  }
 });
 
 // Manual Start button click (if user wants to manually re-share or switch)

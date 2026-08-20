@@ -5,6 +5,10 @@ const fs = require('fs');
 
 // Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
 try {
+  // Expose real local IPv4 addresses (192.168.x.x) instead of anonymized .local mDNS hostnames for direct P2P connection on same Wi-Fi
+  app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
+  app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+
   const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {
     fs.mkdirSync(localUserData, { recursive: true });

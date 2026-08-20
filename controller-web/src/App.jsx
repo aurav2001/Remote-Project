@@ -186,9 +186,9 @@ function App() {
       socket.emit('join-room', { roomId: finalRoomId, role: 'controller' });
     });
 
-    socket.on('disconnect', () => {
-      console.log('Disconnected from signaling server');
-      cleanup();
+    socket.on('disconnect', (reason) => {
+      console.log('Disconnected from signaling server:', reason);
+      // Do not kill active WebRTC P2P stream on temporary signaling socket drop
     });
 
     // Receive system information from host
@@ -264,8 +264,13 @@ function App() {
     // Handle peer disconnect
     socket.on('peer-disconnected', ({ role }) => {
       if (role === 'host') {
-        alert('Target host disconnected');
-        cleanup();
+        const isPeerActive = peerConnectionRef.current && peerConnectionRef.current.connectionState === 'connected';
+        if (!isPeerActive) {
+          alert('Target host disconnected');
+          cleanup();
+        } else {
+          console.warn('[Controller]: Host signaling socket reconnected, maintaining active P2P stream.');
+        }
       }
     });
   };

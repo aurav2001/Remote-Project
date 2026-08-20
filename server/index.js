@@ -152,30 +152,36 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle Disconnect
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+  // Handle Disconnect with brief grace period for Wi-Fi reconnects
+  socket.on('disconnect', (reason) => {
+    console.log(`User disconnected: ${socket.id}, reason: ${reason}`);
     const roomId = socket.roomId;
     if (roomId && rooms.has(roomId)) {
-      const room = rooms.get(roomId);
-      
-      if (socket.id === room.host) {
-        console.log(`Host disconnected from room ${roomId}`);
-        room.host = null;
-        socket.to(roomId).emit('peer-disconnected', { role: 'host' });
-        broadcastActiveHosts();
-      } else if (socket.id === room.controller) {
-        console.log(`Controller disconnected from room ${roomId}`);
-        room.controller = null;
-        socket.to(roomId).emit('peer-disconnected', { role: 'controller' });
-      }
+      const targetSocketId = socket.id;
+      const targetRole = socket.role;
 
-      // Clean up room if both disconnected
-      if (!room.host && !room.controller) {
-        rooms.delete(roomId);
-        console.log(`Room ${roomId} deleted`);
-        broadcastActiveHosts();
-      }
+      setTimeout(() => {
+        const room = rooms.get(roomId);
+        if (!room) return;
+
+        if (targetRole === 'host' && room.host === targetSocketId) {
+          console.log(`Host permanently disconnected from room ${roomId}`);
+          room.host = null;
+          socket.to(roomId).emit('peer-disconnected', { role: 'host' });
+          broadcastActiveHosts();
+        } else if (targetRole === 'controller' && room.controller === targetSocketId) {
+          console.log(`Controller permanently disconnected from room ${roomId}`);
+          room.controller = null;
+          socket.to(roomId).emit('peer-disconnected', { role: 'controller' });
+        }
+
+        // Clean up room if both host and controller are empty
+        if (!room.host && !room.controller) {
+          rooms.delete(roomId);
+          console.log(`Room ${roomId} deleted`);
+          broadcastActiveHosts();
+        }
+      }, 3000);
     }
   });
 });
