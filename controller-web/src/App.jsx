@@ -184,6 +184,28 @@ function App() {
     }
   };
 
+  // Close tools dropdown when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (showToolsDropdown && !e.target.closest('.tools-dropdown-wrapper')) {
+        setShowToolsDropdown(false);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [showToolsDropdown]);
+
+  // Guarantee video stream binding when status becomes connected
+  useEffect(() => {
+    if (status === 'connected' && remoteStreamRef.current) {
+      if (videoRef.current) {
+        console.log('[Controller]: Status connected effect - binding srcObject and play()');
+        videoRef.current.srcObject = remoteStreamRef.current;
+        videoRef.current.play().catch(e => console.warn('Video play error on connected state:', e));
+      }
+    }
+  }, [status]);
+
   const cleanup = () => {
     remoteStreamRef.current = null;
     setLiveMetrics(null);
@@ -1123,7 +1145,10 @@ function App() {
               {/* Sleek Compact Action Menu Dropdown */}
               <div className="tools-dropdown-wrapper">
                 <button
-                  onClick={() => setShowToolsDropdown(prev => !prev)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowToolsDropdown(prev => !prev);
+                  }}
                   className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
                   title="Open Actions & Utilities Menu"
                 >

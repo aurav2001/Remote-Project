@@ -150,12 +150,14 @@ async function handleTerminalCommand(data) {
   }
 }
 
+let streamPromise = null;
+
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
+    streamPromise = navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
         mandatory: {
@@ -164,6 +166,8 @@ async function startSharing(sourceId) {
         }
       }
     });
+
+    localStream = await streamPromise;
 
     const localVideo = document.getElementById('local-video');
     if (localVideo) {
@@ -219,7 +223,7 @@ async function loadSources() {
     if (!isSharingStarted && sources.length > 0) {
       const primarySourceId = sources[0].id;
       console.log('[Host]: Auto-starting screen capture for primary source:', primarySourceId);
-      startSharing(primarySourceId);
+      await startSharing(primarySourceId);
     }
   } catch (error) {
     console.error('Error loading sources:', error);
@@ -237,15 +241,27 @@ async function createPeerConnection() {
     } catch (e) {}
   }
 
-  peerConnection = new RTCPeerConnection(rtcConfig);
-
-  if (!localStream) {
-    console.error('No localStream available to share!');
-    return;
+  if (!localStream && streamPromise) {
+    console.log('[Host]: Waiting for streamPromise getUserMedia to resolve...');
+    localStream = await streamPromise;
   }
 
-  localStream.getTracks().forEach(track => {
+  if (!localStream) {
+    console.error('[Host]: CRITICAL - localStream is NULL when creating PeerConnection!');
+    return false;
+  }
+
+  peerConnection = new RTCPeerConnection(rtcConfig);
+
+  const videoTracks = localStream.getVideoTracks();
+  if (videoTracks.length === 0) {
+    console.error('[Host]: CRITICAL - localStream has 0 video tracks!');
+    return false;
+  }
+
+  videoTracks.forEach(track => {
     track.enabled = true;
+    console.log('[Host]: Adding screen video track to PeerConnection:', track.id, 'readyState:', track.readyState);
     peerConnection.addTrack(track, localStream);
   });
 
@@ -320,7 +336,11 @@ async function handleControllerJoined() {
     updateStatus('connecting', 'Establishing WebRTC connection...');
     pendingIceCandidates = [];
 
-    await createPeerConnection();
+    const pcCreated = await createPeerConnection();
+    if (pcCreated === false) {
+      console.error('[Host]: PeerConnection creation aborted because no active video tracks exist!');
+      return;
+    }
 
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
