@@ -10,6 +10,8 @@ const rtcConfig = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' },
     { urls: 'stun:global.stun.twilio.com:3478' },
     { urls: 'stun:relay.metered.ca:80' },
     {
@@ -26,8 +28,16 @@ const rtcConfig = {
       urls: 'turn:openrelay.metered.ca:443?transport=tcp',
       username: 'openrelayproject',
       credential: 'openrelayproject'
+    },
+    {
+      urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
     }
-  ]
+  ],
+  iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require'
 };
 
 function App() {
@@ -298,9 +308,14 @@ function App() {
       console.log('WebRTC State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
+      } else if (pc.connectionState === 'disconnected') {
+        setStatus('connecting');
+        console.warn('WebRTC state disconnected. Waiting for auto-reconnect...');
       } else if (pc.connectionState === 'failed') {
-        console.warn('WebRTC connection failed. Cleaning up...');
-        cleanup();
+        console.warn('WebRTC connection failed. Attempting ICE restart...');
+        if (pc.restartIce) {
+          pc.restartIce();
+        }
       }
     };
 
@@ -308,7 +323,10 @@ function App() {
     pc.oniceconnectionstatechange = () => {
       console.log('ICE State Change:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'failed') {
-        console.error('WebRTC ICE connection failed!');
+        console.error('WebRTC ICE connection failed. Attempting ICE restart...');
+        if (pc.restartIce) {
+          pc.restartIce();
+        }
       }
     };
 
@@ -337,6 +355,13 @@ function App() {
       dataChannel.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
+          if (data.type === 'ping') {
+            if (dataChannel.readyState === 'open') {
+              dataChannel.send(JSON.stringify({ type: 'pong' }));
+            }
+            return;
+          }
+          if (data.type === 'pong') return;
           if (data.type === 'system-metrics' && data.metrics) {
             setLiveMetrics(data.metrics);
           } else if (data.type === 'terminal-result') {
