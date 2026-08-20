@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -404,5 +404,36 @@ ipcMain.handle('execute-remote-command', async (event, { command, shellType = 'p
     });
   });
 });
+
+// --- NATIVE BIDIRECTIONAL CLIPBOARD SYNCHRONIZATION ENGINE ---
+let lastHostClipboardText = '';
+
+ipcMain.handle('read-clipboard', () => {
+  return clipboard.readText();
+});
+
+ipcMain.on('write-clipboard', (event, text) => {
+  if (typeof text === 'string') {
+    lastHostClipboardText = text; // Cache to prevent echo loop back
+    clipboard.writeText(text);
+    console.log('[Main Process]: Host OS Clipboard updated from Remote Controller:', text.substring(0, 30));
+  }
+});
+
+// Periodic host system clipboard monitor (1-second interval)
+setInterval(() => {
+  try {
+    const currentText = clipboard.readText();
+    if (currentText && currentText !== lastHostClipboardText && currentText.trim().length > 0) {
+      lastHostClipboardText = currentText;
+      const allWindows = BrowserWindow.getAllWindows();
+      for (const win of allWindows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('host-clipboard-changed', currentText);
+        }
+      }
+    }
+  } catch (err) {}
+}, 1000);
 
 

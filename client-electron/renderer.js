@@ -264,6 +264,11 @@ async function createPeerConnection() {
           return;
         }
         if (data.type === 'pong') return;
+        if (data.type === 'clipboard-sync' && data.text) {
+          console.log('[Host]: Received remote controller clipboard text:', data.text.substring(0, 30));
+          window.electronAPI.writeClipboard(data.text);
+          return;
+        }
         if (data.type === 'terminal-command') {
           handleTerminalCommand(data);
         } else {
@@ -359,6 +364,30 @@ window.electronAPI.onSocket('terminal-command', (data) => {
 window.electronAPI.onSocket('control-event', (data) => {
   window.electronAPI.sendControlEvent(data);
 });
+
+// Incoming clipboard sync over socket fallback
+window.electronAPI.onSocket('clipboard-sync', (data) => {
+  if (data && data.text) {
+    console.log('[Host]: Received remote clipboard text via socket fallback:', data.text.substring(0, 30));
+    window.electronAPI.writeClipboard(data.text);
+  }
+});
+
+// Sync Host OS Clipboard changes to Controller
+if (window.electronAPI && window.electronAPI.onHostClipboardChanged) {
+  window.electronAPI.onHostClipboardChanged((text) => {
+    console.log('[Host]: Host OS clipboard changed, syncing to remote controller:', text.substring(0, 30));
+    const payload = JSON.stringify({ type: 'clipboard-sync', text });
+    if (activeDataChannel && activeDataChannel.readyState === 'open') {
+      try {
+        activeDataChannel.send(payload);
+      } catch (e) {}
+    }
+    if (roomId) {
+      window.electronAPI.emitSocket('clipboard-sync', { roomId, text });
+    }
+  });
+}
 
 // System metrics updates
 if (window.electronAPI && window.electronAPI.onSystemMetricsUpdate) {

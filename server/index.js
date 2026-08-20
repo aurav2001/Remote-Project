@@ -160,6 +160,14 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay Clipboard Sync (bidirectional controller <-> host)
+  socket.on('clipboard-sync', (data) => {
+    const roomId = socket.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('clipboard-sync', data);
+    }
+  });
+
   // Handle Disconnect with brief grace period for Wi-Fi reconnects
   socket.on('disconnect', (reason) => {
     console.log(`User disconnected: ${socket.id}, reason: ${reason}`);

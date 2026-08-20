@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
   executeRemoteCommand: (data) => ipcRenderer.invoke('execute-remote-command', data),
   sendControlEvent: (event) => ipcRenderer.send('control-event', event),
+  readClipboard: () => ipcRenderer.invoke('read-clipboard'),
+  writeClipboard: (text) => ipcRenderer.send('write-clipboard', text),
+  onHostClipboardChanged: (callback) => {
+    ipcRenderer.on('host-clipboard-changed', (event, text) => callback(text));
+  },
   
   // Socket.io Signaling wrapper
   connectSocket: (url) => {

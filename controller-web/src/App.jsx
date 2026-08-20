@@ -58,6 +58,8 @@ function App() {
   const [isServerConnected, setIsServerConnected] = useState(false);
 
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
+  const [clipboardToast, setClipboardToast] = useState(null);
+  const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -133,6 +135,44 @@ function App() {
       handleConnect(null, codeFromUrl.trim());
     }
   }, []);
+
+  const handleReceiveRemoteClipboard = (text) => {
+    if (!text || typeof text !== 'string' || !text.trim()) return;
+    console.log('[Controller]: Received Remote Host Clipboard Sync:', text.substring(0, 30));
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(err => console.warn('Browser clipboard write warning:', err));
+    }
+    
+    setClipboardToast({
+      text,
+      timestamp: new Date().toLocaleTimeString()
+    });
+  };
+
+  const syncLocalClipboardToRemote = async () => {
+    try {
+      setIsSyncingClipboard(true);
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const payload = { type: 'clipboard-sync', text };
+        if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+          dataChannelRef.current.send(JSON.stringify(payload));
+        } else if (socketRef.current) {
+          socketRef.current.emit('clipboard-sync', payload);
+        }
+        setClipboardToast({ text: `Pushed local text to remote: "${text.substring(0, 30)}..."`, isSelf: true });
+        setTimeout(() => setClipboardToast(null), 3000);
+      } else {
+        alert('Your local browser clipboard is empty!');
+      }
+    } catch (err) {
+      console.warn('Clipboard read error:', err);
+      alert('Click anywhere on the stream video area first to grant browser clipboard permission.');
+    } finally {
+      setIsSyncingClipboard(false);
+    }
+  };
 
   const cleanup = () => {
     remoteStreamRef.current = null;
@@ -227,6 +267,13 @@ function App() {
           return [...prev, { ...data, pending: false }];
         });
         setIsExecutingCmd(false);
+      }
+    });
+
+    // Receive clipboard sync via signaling fallback
+    socket.on('clipboard-sync', (data) => {
+      if (data && data.text) {
+        handleReceiveRemoteClipboard(data.text);
       }
     });
 
@@ -364,6 +411,8 @@ function App() {
           if (data.type === 'pong') return;
           if (data.type === 'system-metrics' && data.metrics) {
             setLiveMetrics(data.metrics);
+          } else if (data.type === 'clipboard-sync' && data.text) {
+            handleReceiveRemoteClipboard(data.text);
           } else if (data.type === 'terminal-result') {
             setTerminalLogs(prev => {
               const exists = prev.some(item => item.id === data.id);
@@ -1058,6 +1107,16 @@ function App() {
                 💻 Remote Terminal
               </button>
 
+              <button
+                onClick={syncLocalClipboardToRemote}
+                disabled={isSyncingClipboard}
+                className="control-btn btn-clipboard"
+                title="Copy your browser local clipboard and push it to Remote Host PC"
+                style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
+              >
+                📋 {isSyncingClipboard ? 'Syncing...' : 'Sync Local Clipboard'}
+              </button>
+
               <button 
                 onClick={() => {
                   const directUrl = `${window.location.origin}/?code=${roomId}`;
@@ -1372,6 +1431,28 @@ function App() {
               style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block' }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Bidirectional Clipboard Toast Notification Banner */}
+      {clipboardToast && (
+        <div className="clipboard-toast">
+          <span className="toast-icon">📋</span>
+          <div className="toast-body">
+            <strong>{clipboardToast.isSelf ? 'Clipboard Sent to Remote' : 'Clipboard Synced from Remote PC'}</strong>
+            <p>{clipboardToast.text}</p>
+          </div>
+          <button 
+            onClick={() => {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(clipboardToast.text);
+              }
+            }}
+            className="btn-toast-copy"
+          >
+            Copy
+          </button>
+          <button onClick={() => setClipboardToast(null)} className="btn-toast-close">✕</button>
         </div>
       )}
     </div>
