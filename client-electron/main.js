@@ -22,9 +22,22 @@ let inputHelperProcess = null;
 
 // Initialize the C# native input helper process
 function startInputHelper() {
-  const exePath = app.isPackaged 
+  let exePath = app.isPackaged 
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'input-helper.exe')
     : path.join(__dirname, 'input-helper.exe');
+  
+  if (!fs.existsSync(exePath)) {
+    const altPath = path.join(__dirname, 'input-helper.exe');
+    if (fs.existsSync(altPath)) {
+      exePath = altPath;
+    }
+  }
+
+  if (!fs.existsSync(exePath)) {
+    console.error('[InputHelper]: input-helper.exe missing at path:', exePath);
+    return;
+  }
+
   console.log('Spawning input helper from:', exePath);
   
   inputHelperProcess = spawn(exePath, [], {
@@ -82,14 +95,30 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
-  startInputHelper();
-  createWindow();
+// Single Instance Lock: Prevents duplicate host instances from running concurrently
+const gotTheLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (!gotTheLock) {
+  console.log('[Main Process]: Another instance of RemoteG is already running. Quitting duplicate instance...');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const allWindows = BrowserWindow.getAllWindows();
+    if (allWindows.length > 0) {
+      if (allWindows[0].isMinimized()) allWindows[0].restore();
+      allWindows[0].focus();
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    startInputHelper();
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (inputHelperProcess) {
