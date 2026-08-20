@@ -109,6 +109,7 @@ function App() {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const remoteStreamRef = useRef(null);
+  const pendingCandidatesRef = useRef([]);
 
   // Clean up WebRTC and socket on unmount
   useEffect(() => {
@@ -271,6 +272,7 @@ function App() {
 
   const cleanup = () => {
     remoteStreamRef.current = null;
+    pendingCandidatesRef.current = [];
     setLiveMetrics(null);
     setTerminalLogs([]);
     if (dataChannelRef.current) {
@@ -305,8 +307,6 @@ function App() {
       return updated;
     });
   };
-
-  const pendingCandidatesRef = useRef([]);
 
   const handleConnect = (e, codeToConnect) => {
     if (e) e.preventDefault();
