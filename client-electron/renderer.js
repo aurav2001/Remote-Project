@@ -147,19 +147,22 @@ async function handleTerminalCommand(data) {
   }
 }
 
-let streamPromise = null;
-
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
 
-  if (localStream) {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
+  // Do not re-capture if we already have a live captured stream
+  if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
+    const activeTrack = localStream.getVideoTracks()[0];
+    if (activeTrack.readyState === 'live') {
+      console.log('[Host]: Screen capture stream already active:', activeTrack.id);
+      window.electronAPI.connectSocket(SIGNALING_SERVER);
+      return;
+    }
   }
 
   try {
-    streamPromise = navigator.mediaDevices.getUserMedia({
+    localStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
         mandatory: {
@@ -169,30 +172,17 @@ async function startSharing(sourceId) {
       }
     });
 
-    localStream = await streamPromise;
-
     const localVideo = document.getElementById('local-video');
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.style.display = 'none';
     }
 
-    // Explicitly enable and verify captured video tracks
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = true;
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
-
-      // Dynamic stream replacement on active peer connection
-      if (peerConnection) {
-        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-        const newTrack = localStream.getVideoTracks()[0];
-        if (sender && newTrack) {
-          console.log('[Host]: Dynamically replacing track on active PeerConnection sender');
-          sender.replaceTrack(newTrack);
-        }
-      }
     }
 
     if (btnStart) {
@@ -253,9 +243,11 @@ async function createPeerConnection() {
     } catch (e) {}
   }
 
-  if (!localStream && streamPromise) {
-    console.log('[Host]: Waiting for streamPromise getUserMedia to resolve...');
-    localStream = await streamPromise;
+  if (!localStream || !localStream.active || localStream.getVideoTracks().length === 0) {
+    console.warn('[Host]: localStream missing or inactive. Re-capturing screen...');
+    if (screenSelect && screenSelect.value) {
+      await startSharing(screenSelect.value);
+    }
   }
 
   if (!localStream) {
