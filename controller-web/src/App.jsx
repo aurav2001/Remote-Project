@@ -195,15 +195,78 @@ function App() {
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [showToolsDropdown]);
 
-  // Guarantee video stream binding when status becomes connected
+  // Continuous verification loop to ensure video element plays live stream
   useEffect(() => {
-    if (status === 'connected' && remoteStreamRef.current) {
-      if (videoRef.current) {
-        console.log('[Controller]: Status connected effect - binding srcObject and play()');
-        videoRef.current.srcObject = remoteStreamRef.current;
-        videoRef.current.play().catch(e => console.warn('Video play error on connected state:', e));
-      }
+    if (status === 'connected') {
+      const interval = setInterval(() => {
+        if (videoRef.current && remoteStreamRef.current) {
+          if (videoRef.current.srcObject !== remoteStreamRef.current) {
+            console.log('[Controller]: Auto-assigning srcObject to video element');
+            videoRef.current.srcObject = remoteStreamRef.current;
+          }
+          if (videoRef.current.paused) {
+            console.log('[Controller]: Video stream paused, invoking play()');
+            videoRef.current.play().catch(e => console.warn('Video play retry warning:', e));
+          }
+        }
+      }, 500);
+      return () => clearInterval(interval);
     }
+  }, [status]);
+
+  // Global Keyboard Listener for Arrow Keys & controls across viewer
+  useEffect(() => {
+    if (status !== 'connected') return;
+
+    const handleGlobalKeyDown = (e) => {
+      // Ignore inputs if typing inside drawers, inputs, or textareas
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+
+      let vk = e.keyCode || e.which;
+      if (!vk) return;
+
+      // Prevent default browser scroll for arrow keys (37-40), Space (32), Tab (9), Backspace (8)
+      if ([37, 38, 39, 40, 32, 33, 34, 35, 36, 8, 9, 13, 46].includes(vk)) {
+        e.preventDefault();
+      }
+
+      sendControlData({
+        type: 'keydown',
+        key: e.key,
+        keyCode: vk
+      });
+    };
+
+    const handleGlobalKeyUp = (e) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+
+      let vk = e.keyCode || e.which;
+      if (!vk) return;
+
+      if ([37, 38, 39, 40, 32, 33, 34, 35, 36, 8, 9, 13, 46].includes(vk)) {
+        e.preventDefault();
+      }
+
+      sendControlData({
+        type: 'keyup',
+        key: e.key,
+        keyCode: vk
+      });
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
+    window.addEventListener('keyup', handleGlobalKeyUp, { capture: true });
+
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
+      window.removeEventListener('keyup', handleGlobalKeyUp, { capture: true });
+    };
   }, [status]);
 
   const cleanup = () => {
@@ -1492,14 +1555,23 @@ function App() {
               autoPlay
               playsInline
               muted
-              onLoadedMetadata={handleLoadedMetadata}
+              onLoadedMetadata={(e) => {
+                handleLoadedMetadata();
+                if (e.target && e.target.paused) e.target.play().catch(err => {});
+              }}
+              onCanPlay={(e) => {
+                if (e.target && e.target.paused) e.target.play().catch(err => {});
+              }}
+              onLoadedData={(e) => {
+                if (e.target && e.target.paused) e.target.play().catch(err => {});
+              }}
               onMouseMove={handleMouseMove}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
               onWheel={handleWheel}
-              style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block' }}
+              style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block', background: '#000' }}
             />
           </div>
         </div>

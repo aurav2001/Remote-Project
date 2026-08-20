@@ -19,6 +19,7 @@ class InputHelper {
     const uint MOUSEEVENTF_MIDDLEUP = 0x40;
     const uint MOUSEEVENTF_WHEEL = 0x0800;
 
+    const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
 
@@ -65,11 +66,14 @@ class InputHelper {
                 }
                 else if (command == "keydown" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
-                    keybd_event(vk, 0, KEYEVENTF_KEYDOWN, 0);
+                    // Extended key flag for Arrow Keys (37=Left, 38=Up, 39=Right, 40=Down), PageUp/Down (33,34), End/Home (35,36), Insert/Delete (45,46)
+                    uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
+                    keybd_event(vk, 0, flags | KEYEVENTF_KEYDOWN, 0);
                 }
                 else if (command == "keyup" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
-                    keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+                    uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
+                    keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);
