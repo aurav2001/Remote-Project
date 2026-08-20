@@ -47,6 +47,11 @@ body {
   overflow: hidden;
 }
 
+.video-container video,
+.video-container img {
+  cursor: crosshair !important;
+}
+
 /* App container */
 .app-container {
   height: 100vh;

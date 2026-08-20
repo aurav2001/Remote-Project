@@ -199,7 +199,13 @@ async function startSharing(sourceId) {
       video: {
         mandatory: {
           chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId
+          chromeMediaSourceId: sourceId,
+          minWidth: 1920,
+          maxWidth: 3840,
+          minHeight: 1080,
+          maxHeight: 2160,
+          minFrameRate: 30,
+          maxFrameRate: 60
         }
       }
     });
@@ -300,8 +306,19 @@ async function createPeerConnection() {
 
   videoTracks.forEach(track => {
     track.enabled = true;
-    console.log('[Host]: Adding screen video track to PeerConnection:', track.id, 'readyState:', track.readyState);
-    peerConnection.addTrack(track, localStream);
+    console.log('[Host]: Adding HD screen video track to PeerConnection:', track.id, 'readyState:', track.readyState);
+    const sender = peerConnection.addTrack(track, localStream);
+    if (sender && sender.setParameters) {
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = 8000000; // 8 Mbps Ultra-HD High Bitrate
+        params.encodings[0].maxFramerate = 60;
+        sender.setParameters(params).catch(e => console.warn('Bitrate param error:', e));
+      } catch (err) {}
+    }
   });
 
   peerConnection.onicecandidate = (event) => {
