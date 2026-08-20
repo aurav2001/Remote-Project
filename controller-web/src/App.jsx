@@ -200,24 +200,16 @@ function App() {
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [showToolsDropdown]);
 
-  // Continuous verification loop to ensure video element plays live stream
+  // Ensure video element plays live stream cleanly without flickering interval
   useEffect(() => {
-    if (status === 'connected') {
-      const interval = setInterval(() => {
-        if (videoRef.current && remoteStreamRef.current) {
-          videoRef.current.muted = true;
-          videoRef.current.defaultMuted = true;
-          if (videoRef.current.srcObject !== remoteStreamRef.current) {
-            console.log('[Controller]: Auto-assigning srcObject to video element');
-            videoRef.current.srcObject = remoteStreamRef.current;
-          }
-          if (videoRef.current.paused) {
-            console.log('[Controller]: Video stream paused, invoking play()');
-            videoRef.current.play().catch(e => console.warn('Video play retry warning:', e));
-          }
-        }
-      }, 500);
-      return () => clearInterval(interval);
+    if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
+      const el = videoRef.current;
+      el.muted = true;
+      el.defaultMuted = true;
+      if (el.srcObject !== remoteStreamRef.current) {
+        el.srcObject = remoteStreamRef.current;
+      }
+      el.play().catch(e => console.warn('Video play warning:', e));
     }
   }, [status]);
 
@@ -436,6 +428,10 @@ function App() {
   const handleOffer = async (offer) => {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnectionRef.current = pc;
+
+    try {
+      pc.addTransceiver('video', { direction: 'recvonly' });
+    } catch (e) {}
 
     const isValidCandidate = (cand) => {
       return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
