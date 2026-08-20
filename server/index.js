@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -6,9 +7,24 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+// Serve compiled Web Controller frontend static assets directly on Render
+const distPath = path.join(__dirname, '../controller-web/dist');
+app.use(express.static(distPath));
+
+// Direct Setup Download endpoint
+app.get('/download', (req, res) => {
+  const exePath = path.join(__dirname, '../client-electron/dist-build/RemoteG Setup 1.0.0.exe');
+  res.download(exePath, 'RemoteG-Setup.exe');
+});
+
 // Health check endpoint
-app.get('/', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.send('Signaling Server is running.');
+});
+
+// Wildcard fallback for Single Page Application (SPA) routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 const server = http.createServer(app);
