@@ -214,7 +214,7 @@ function App() {
 
   // Global Keyboard Listener for Arrow Keys & controls across viewer
   useEffect(() => {
-    if (status !== 'connected') return;
+    if (status !== 'connected' && status !== 'ready') return;
 
     const handleGlobalKeyDown = (e) => {
       // Ignore inputs if typing inside drawers, inputs, or textareas
@@ -345,6 +345,7 @@ function App() {
     socket.on('screen-frame', ({ frame }) => {
       if (frame) {
         setSocketFrame(frame);
+        setStatus('connected');
       }
     });
 
@@ -664,48 +665,42 @@ function App() {
 
   // Mouse event helper - maps browser coordinates to host screen coordinates with exact aspect-ratio alignment
   const sendMouseEvent = (type, e) => {
-    const video = videoRef.current;
-    if (!video || status !== 'connected') return;
+    const targetEl = e.currentTarget || videoRef.current;
+    if (!targetEl || (status !== 'connected' && status !== 'ready')) return;
 
-    const rect = video.getBoundingClientRect();
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    const rect = targetEl.getBoundingClientRect();
+    const width = targetEl.videoWidth || targetEl.naturalWidth || 1280;
+    const height = targetEl.videoHeight || targetEl.naturalHeight || 720;
 
-    if (!videoWidth || !videoHeight || !rect.width || !rect.height) return;
+    if (!width || !height || !rect.width || !rect.height) return;
 
-    // Calculate actual rendered video dimensions inside the <video> element (accounting for letterboxing/pillarboxing)
+    // Calculate actual rendered dimensions inside the element
     const containerAspect = rect.width / rect.height;
-    const videoAspect = videoWidth / videoHeight;
+    const streamAspect = width / height;
 
     let renderWidth, renderHeight, offsetX, offsetY;
 
-    if (containerAspect > videoAspect) {
-      // Pillarboxed (black bars on left and right)
+    if (containerAspect > streamAspect) {
       renderHeight = rect.height;
-      renderWidth = rect.height * videoAspect;
+      renderWidth = rect.height * streamAspect;
       offsetX = (rect.width - renderWidth) / 2;
       offsetY = 0;
     } else {
-      // Letterboxed (black bars on top and bottom)
       renderWidth = rect.width;
-      renderHeight = rect.width / videoAspect;
+      renderHeight = rect.width / streamAspect;
       offsetX = 0;
       offsetY = (rect.height - renderHeight) / 2;
     }
 
-    // Position relative to the actual rendered video stream frame
     const mouseX = e.clientX - rect.left - offsetX;
     const mouseY = e.clientY - rect.top - offsetY;
 
-    // Clamp coordinates strictly to the rendered video boundary
     const clampedX = Math.max(0, Math.min(renderWidth, mouseX));
     const clampedY = Math.max(0, Math.min(renderHeight, mouseY));
 
-    // Map precisely to host screen resolution
-    const targetX = (clampedX / renderWidth) * videoWidth;
-    const targetY = (clampedY / renderHeight) * videoHeight;
+    const targetX = (clampedX / renderWidth) * width;
+    const targetY = (clampedY / renderHeight) * height;
 
-    // Mouse button mapping (0 = left, 1 = middle, 2 = right)
     let button = 'left';
     if (e.button === 1) button = 'middle';
     if (e.button === 2) button = 'right';
