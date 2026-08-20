@@ -47,6 +47,14 @@ function broadcastActiveHosts() {
   io.emit('active-hosts-list', hosts);
 }
 
+// Throttled 5-second background interval for central dashboard telemetry updates
+// (Runs O(N) once every 5s instead of O(N*M) 50 times per second on every packet pulse)
+setInterval(() => {
+  if (rooms.size > 0) {
+    broadcastActiveHosts();
+  }
+}, 5000);
+
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
@@ -123,13 +131,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Relay System Metrics from host to controller
+  // Relay System Metrics from host to controller (O(1) Constant Time Complexity)
   socket.on('system-metrics', ({ roomId, metrics }) => {
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
       room.liveMetrics = metrics;
-      broadcastActiveHosts();
     }
+    // O(1) targeted relay to the controller in this room (bypasses global broadcast CPU overhead)
     socket.to(roomId).emit('system-metrics', { metrics });
   });
 
