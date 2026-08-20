@@ -46,6 +46,8 @@ function App() {
   const [showSpecsModal, setShowSpecsModal] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
+  const [socketFrame, setSocketFrame] = useState(null);
+  const [isWebRtcActive, setIsWebRtcActive] = useState(false);
 
   // Central Dashboard RMM States
   const [activeHosts, setActiveHosts] = useState([]);
@@ -336,6 +338,13 @@ function App() {
       if (systemInfo) {
         console.log('[Controller]: Received Host System Specs:', systemInfo);
         setHostSystemInfo(systemInfo);
+      }
+    });
+
+    // Receive Hybrid Canvas JPEG Frame Stream Fallback
+    socket.on('screen-frame', ({ frame }) => {
+      if (frame) {
+        setSocketFrame(frame);
       }
     });
 
@@ -1555,12 +1564,16 @@ function App() {
               muted
               onLoadedMetadata={(e) => {
                 handleLoadedMetadata();
+                setIsWebRtcActive(true);
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
+              onPlaying={() => setIsWebRtcActive(true)}
               onCanPlay={(e) => {
+                setIsWebRtcActive(true);
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onLoadedData={(e) => {
+                setIsWebRtcActive(true);
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onMouseMove={handleMouseMove}
@@ -1569,8 +1582,34 @@ function App() {
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
               onWheel={handleWheel}
-              style={{ objectFit: 'contain', width: '100%', height: '100%', display: 'block', background: '#000' }}
+              style={{
+                objectFit: 'contain',
+                width: '100%',
+                height: '100%',
+                display: isWebRtcActive ? 'block' : 'none',
+                background: '#000'
+              }}
             />
+
+            {(!isWebRtcActive && socketFrame) && (
+              <img
+                src={socketFrame}
+                alt="Remote Screen Stream Fallback"
+                onMouseMove={handleMouseMove}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onDoubleClick={handleDoubleClick}
+                onContextMenu={handleContextMenu}
+                style={{
+                  objectFit: 'contain',
+                  width: '100%',
+                  height: '100%',
+                  display: 'block',
+                  userSelect: 'none',
+                  background: '#000'
+                }}
+              />
+            )}
           </div>
         </div>
 

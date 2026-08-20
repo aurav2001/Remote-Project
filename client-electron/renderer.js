@@ -147,6 +147,29 @@ async function handleTerminalCommand(data) {
   }
 }
 
+let frameInterval = null;
+const relayCanvas = document.createElement('canvas');
+const relayCtx = relayCanvas.getContext('2d');
+
+function startSocketFrameRelay() {
+  if (frameInterval) return;
+  console.log('[Host]: Starting Hybrid Canvas Frame Stream Fallback...');
+  const localVideo = document.getElementById('local-video');
+
+  frameInterval = setInterval(() => {
+    if (!localVideo || localVideo.readyState < 2 || localVideo.videoWidth === 0) return;
+    relayCanvas.width = 1280;
+    relayCanvas.height = 720;
+    relayCtx.drawImage(localVideo, 0, 0, relayCanvas.width, relayCanvas.height);
+    try {
+      const jpegData = relayCanvas.toDataURL('image/jpeg', 0.5);
+      if (roomId) {
+        window.electronAPI.emitSocket('screen-frame', { roomId, frame: jpegData });
+      }
+    } catch (e) {}
+  }, 100);
+}
+
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
@@ -156,6 +179,7 @@ async function startSharing(sourceId) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
       console.log('[Host]: Screen capture stream already active:', activeTrack.id);
+      startSocketFrameRelay();
       window.electronAPI.connectSocket(SIGNALING_SERVER);
       return;
     }
@@ -176,6 +200,7 @@ async function startSharing(sourceId) {
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.style.display = 'none';
+      localVideo.play().catch(e => {});
     }
 
     if (localStream) {
@@ -184,6 +209,8 @@ async function startSharing(sourceId) {
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
     }
+
+    startSocketFrameRelay();
 
     if (btnStart) {
       btnStart.innerText = 'Streaming Screen (Auto-Started)';

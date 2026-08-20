@@ -135,6 +135,11 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('ice-candidate', { candidate });
   });
 
+  // Relay Hybrid Canvas Screen Frame Fallback (host -> controller)
+  socket.on('screen-frame', ({ roomId, frame }) => {
+    socket.to(roomId).emit('screen-frame', { frame });
+  });
+
   // Relay Input Control Events (mouse movement, click, keyboard press)
   // These go from controller -> host
   socket.on('control-event', (data) => {
