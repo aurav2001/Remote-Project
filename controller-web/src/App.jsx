@@ -1178,6 +1178,9 @@ function App() {
                       💬 Copy WhatsApp Link
                     </button>
                   </div>
+                  <div style={{ marginTop: '10px', fontSize: '0.76rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.03)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                    💡 <b>Tip:</b> Agar Chrome <i>"Not commonly downloaded"</i> warning dikhaye, toh <b>📦 Download (.zip)</b> button use kijiye ya Chrome downloads me <b>Keep anyway</b> par click kijiye.
+                  </div>
                 </div>
               </div>
             </div>
