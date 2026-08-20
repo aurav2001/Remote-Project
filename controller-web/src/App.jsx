@@ -698,8 +698,11 @@ function App() {
     const clampedX = Math.max(0, Math.min(renderWidth, mouseX));
     const clampedY = Math.max(0, Math.min(renderHeight, mouseY));
 
-    const targetX = (clampedX / renderWidth) * width;
-    const targetY = (clampedY / renderHeight) * height;
+    const normX = clampedX / renderWidth;
+    const normY = clampedY / renderHeight;
+
+    const targetX = normX * width;
+    const targetY = normY * height;
 
     let button = 'left';
     if (e.button === 1) button = 'middle';
@@ -709,6 +712,8 @@ function App() {
       type,
       x: targetX,
       y: targetY,
+      nx: normX,
+      ny: normY,
       button
     });
   };

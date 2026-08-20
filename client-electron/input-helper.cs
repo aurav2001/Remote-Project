@@ -1,9 +1,13 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Globalization;
 
 class InputHelper {
     [DllImport("user32.dll")]
     static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("user32.dll")]
     static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
@@ -32,7 +36,19 @@ class InputHelper {
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
-                if (command == "move" && parts.Length >= 3) {
+                if (command == "movenorm" && parts.Length >= 3) {
+                    float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
+                    float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
+                    int screenW = GetSystemMetrics(0); // Primary Screen Width
+                    int screenH = GetSystemMetrics(1); // Primary Screen Height
+                    if (screenW <= 0) screenW = 1920;
+                    if (screenH <= 0) screenH = 1080;
+
+                    int targetX = (int)Math.Round(nx * screenW);
+                    int targetY = (int)Math.Round(ny * screenH);
+                    SetCursorPos(targetX, targetY);
+                }
+                else if (command == "move" && parts.Length >= 3) {
                     int x = int.Parse(parts[1]);
                     int y = int.Parse(parts[2]);
                     SetCursorPos(x, y);
@@ -66,7 +82,6 @@ class InputHelper {
                 }
                 else if (command == "keydown" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
-                    // Extended key flag for Arrow Keys (37=Left, 38=Up, 39=Right, 40=Down), PageUp/Down (33,34), End/Home (35,36), Insert/Delete (45,46)
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYDOWN, 0);
                 }

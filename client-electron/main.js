@@ -373,19 +373,38 @@ setInterval(() => {
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
   try {
-    const { type, x, y, button, keyCode } = data;
+    const { type, x, y, nx, ny, button, keyCode } = data;
 
     if (type === 'mousemove') {
-      sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
+      if (nx !== undefined && ny !== undefined) {
+        sendInputHelperCommand(`movenorm ${nx} ${ny}`);
+      } else {
+        sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
+      }
     } else if (type === 'mousedown') {
+      if (nx !== undefined && ny !== undefined) {
+        sendInputHelperCommand(`movenorm ${nx} ${ny}`);
+      } else if (x !== undefined && y !== undefined) {
+        sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
+      }
       sendInputHelperCommand(`mousedown ${button || 'left'}`);
     } else if (type === 'mouseup') {
+      if (nx !== undefined && ny !== undefined) {
+        sendInputHelperCommand(`movenorm ${nx} ${ny}`);
+      } else if (x !== undefined && y !== undefined) {
+        sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
+      }
       sendInputHelperCommand(`mouseup ${button || 'left'}`);
-    } else if (type === 'click') {
+    } else if (type === 'click' || type === 'doubleclick') {
+      if (nx !== undefined && ny !== undefined) {
+        sendInputHelperCommand(`movenorm ${nx} ${ny}`);
+      } else if (x !== undefined && y !== undefined) {
+        sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
+      }
       sendInputHelperCommand(`click ${button || 'left'}`);
-    } else if (type === 'doubleclick') {
-      sendInputHelperCommand(`click ${button || 'left'}`);
-      sendInputHelperCommand(`click ${button || 'left'}`);
+      if (type === 'doubleclick') {
+        sendInputHelperCommand(`click ${button || 'left'}`);
+      }
     } else if (type === 'wheel') {
       const { deltaY } = data;
       if (deltaY) {

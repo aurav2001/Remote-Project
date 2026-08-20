@@ -50,6 +50,8 @@ body {
 .video-container video,
 .video-container img {
   cursor: crosshair !important;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
 /* App container */
