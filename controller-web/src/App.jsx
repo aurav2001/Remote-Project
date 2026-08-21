@@ -1136,8 +1136,9 @@ function App() {
                   </span>
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
                     <a
-                      href="/RemoteG-Setup.exe"
-                      download="RemoteG-Setup.exe"
+                      href="https://files.catbox.moe/4nvr0r.zip"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -1152,34 +1153,14 @@ function App() {
                         boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
                       }}
                     >
-                      📥 Download (.exe)
-                    </a>
-
-                    <a
-                      href="/RemoteG-Setup.zip"
-                      download="RemoteG-Setup.zip"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                        color: '#fff',
-                        padding: '8px 16px',
-                        borderRadius: '100px',
-                        fontSize: '0.85rem',
-                        fontWeight: 600,
-                        textDecoration: 'none',
-                        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
-                      }}
-                    >
-                      📦 Download (.zip)
+                      📥 Download Setup (72 MB .zip)
                     </a>
 
                     <button
                       onClick={() => {
-                        const downloadUrl = `${window.location.origin}/RemoteG-Setup.zip`;
+                        const downloadUrl = `https://files.catbox.moe/4nvr0r.zip`;
                         navigator.clipboard.writeText(downloadUrl);
-                        alert(`WhatsApp Zip Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                        alert(`WhatsApp Direct Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
                       }}
                       style={{
                         display: 'inline-flex',
