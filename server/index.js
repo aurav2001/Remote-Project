@@ -7,27 +7,29 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+const fs = require('fs');
+
+// Direct Setup & Installer Download endpoints (Handles clicks from Web Controller UI)
+app.get(['/download', '/RemoteG-Setup.exe'], (req, res) => {
+  const exePath = path.join(__dirname, '../client-electron/dist-build/RemoteG Setup 1.0.0.exe');
+  if (fs.existsSync(exePath)) {
+    return res.download(exePath, 'RemoteG-Setup.exe');
+  }
+  // Redirect to GitHub Release direct download URL if binary is hosted on GitHub Releases, or releases page fallback
+  return res.redirect('https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.zip');
+});
+
+app.get('/RemoteG-Setup.zip', (req, res) => {
+  const zipPath = path.join(__dirname, '../client-electron/RemoteG-Setup.zip');
+  if (fs.existsSync(zipPath)) {
+    return res.download(zipPath, 'RemoteG-Setup.zip');
+  }
+  return res.redirect('https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.zip');
+});
+
 // Serve compiled Web Controller frontend static assets directly on Render
 const distPath = path.join(__dirname, '../controller-web/dist');
 app.use(express.static(distPath));
-
-const fs = require('fs');
-
-// Direct Setup Download endpoint
-app.get('/download', (req, res) => {
-  const exePath = path.join(__dirname, '../client-electron/dist-build/RemoteG Setup 1.0.0.exe');
-  const zipPath = path.join(__dirname, '../client-electron/RemoteG-Setup.zip');
-  
-  if (fs.existsSync(exePath)) {
-    return res.download(exePath, 'RemoteG-Setup.exe');
-  } else if (fs.existsSync(zipPath)) {
-    return res.download(zipPath, 'RemoteG-Setup.zip');
-  } else {
-    // If running on cloud host (e.g. Render) without local binary, redirect to GitHub Releases fallback
-    console.warn('[Server]: Local installer binary missing on server. Redirecting to GitHub Releases...');
-    return res.redirect('https://github.com/aurav2001/Remote-Project/releases');
-  }
-});
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
