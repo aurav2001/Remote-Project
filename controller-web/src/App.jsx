@@ -954,8 +954,16 @@ function App() {
                       </div>
 
                       {/* OS info */}
-                      <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '10px' }}>
-                        🖥️ {device.systemInfo ? `${device.systemInfo.platform || 'Windows'} ${device.systemInfo.arch || 'x64'}` : 'Windows Remote Machine'}
+                      <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <div>🖥️ {device.systemInfo ? `${device.systemInfo.platform || 'Windows'}` : 'Windows Remote Machine'}</div>
+                        {(device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser) && (
+                          <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
+                        )}
+                        {(device.systemInfo?.publicIp || device.liveMetrics?.publicIp) && (
+                          <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
+                            🌐 WAN: <span style={{ color: '#34d399' }}>{device.systemInfo?.publicIp || device.liveMetrics?.publicIp}</span> • LAN: {device.systemInfo?.ip || device.liveMetrics?.ip || '127.0.0.1'}
+                          </div>
+                        )}
                       </div>
 
                       {/* Live Telemetry Gauges */}
@@ -1486,9 +1494,40 @@ function App() {
                         <span>System Uptime:</span>
                         <strong>⏱️ {liveMetrics.uptime}</strong>
                       </div>
+                      {liveMetrics.lastReboot && (
+                        <div className="info-row">
+                          <span>Last Reboot:</span>
+                          <strong style={{ fontSize: '0.78rem' }}>📅 {liveMetrics.lastReboot}</strong>
+                        </div>
+                      )}
                       <div className="info-row">
                         <span>OS Platform:</span>
                         <strong>{liveMetrics.platform}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Identity & Network Card */}
+                  <div className="metric-card">
+                    <div className="metric-header">
+                      <span className="metric-title">👤 Identity & Network Details</span>
+                    </div>
+                    <div className="info-rows">
+                      <div className="info-row">
+                        <span>Domain User:</span>
+                        <strong style={{ color: '#38bdf8' }}>{liveMetrics.loggedUser || 'N/A'}</strong>
+                      </div>
+                      <div className="info-row">
+                        <span>Domain / Host:</span>
+                        <strong>{liveMetrics.domain || 'WORKGROUP'}</strong>
+                      </div>
+                      <div className="info-row">
+                        <span>Public IP (WAN):</span>
+                        <strong style={{ color: '#34d399' }}>🌐 {liveMetrics.publicIp || 'N/A'}</strong>
+                      </div>
+                      <div className="info-row">
+                        <span>Private IP (LAN):</span>
+                        <strong style={{ color: '#a5b4fc' }}>🔌 {liveMetrics.ip || 'N/A'}</strong>
                       </div>
                     </div>
                   </div>
@@ -1538,8 +1577,16 @@ function App() {
                   <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.hostname || 'N/A'}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>🌐 IP Address:</span>
-                  <strong style={{ color: '#34d399' }}>{hostSystemInfo.ip || 'N/A'}</strong>
+                  <span style={{ color: '#94a3b8' }}>👤 Logged-in User:</span>
+                  <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.loggedUser || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>🌐 Public IP (WAN):</span>
+                  <strong style={{ color: '#34d399' }}>{hostSystemInfo.publicIp || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>🔌 Private IP (LAN):</span>
+                  <strong style={{ color: '#a5b4fc' }}>{hostSystemInfo.ip || 'N/A'}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
                   <span style={{ color: '#94a3b8' }}>⚡ Processor (CPU):</span>
@@ -1550,6 +1597,14 @@ function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
                   <span style={{ color: '#94a3b8' }}>💾 RAM Memory:</span>
                   <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.ram || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>📅 Last Reboot:</span>
+                  <strong style={{ color: '#f8fafc', fontSize: '0.8rem' }}>{hostSystemInfo.lastReboot || 'N/A'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#94a3b8' }}>📦 Agent Version:</span>
+                  <strong style={{ color: '#818cf8' }}>v{hostSystemInfo.agentVersion || '1.0.0'}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94a3b8' }}>💻 OS Platform:</span>

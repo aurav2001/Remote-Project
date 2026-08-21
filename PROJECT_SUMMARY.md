@@ -48,6 +48,11 @@ RemoteG is a full-featured, low-latency Remote Desktop application allowing user
    - Supports 1-click Quick Script Presets (`ipconfig`, `systeminfo`, `Get-Process`, `Flush DNS`, `Ping`).
    - Monospace terminal console UI with green/cyan prompt syntax, command history navigation (Up/Down arrows), and error highlighting.
 
+6. **Enterprise Host Metadata & Network Identity (Atera-Style)**:
+   - Added async WAN Public IP resolver (`api.ipify.org`).
+   - Added Domain User detection (`DOMAIN\Username`), Active Directory / Workgroup Domain name, Exact Last Reboot Timestamp, and Host Agent Version (`v1.0.0`).
+   - Rendered in RMM Dashboard Cards, Specs Modal, and Live Health Drawer in React Web Controller (`controller-web`).
+
 ---
 
 ## 🚀 How to Run / Deploy Next Time

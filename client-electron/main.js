@@ -149,6 +149,30 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
+// Helper function to fetch WAN Public IP asynchronously with timeout
+function getPublicIp() {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const req = https.get('https://api.ipify.org?format=json', { timeout: 2500 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed.ip || 'N/A');
+        } catch (e) {
+          resolve('N/A');
+        }
+      });
+    });
+    req.on('error', () => resolve('N/A'));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve('N/A');
+    });
+  });
+}
+
 // IPC Handler to get system information (Host Device Specs)
 ipcMain.handle('get-system-info', async () => {
   const os = require('os');
@@ -173,11 +197,40 @@ ipcMain.handle('get-system-info', async () => {
   const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Standard CPU';
   const totalRamGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
 
+  const username = (os.userInfo ? os.userInfo().username : null) || process.env.USERNAME || 'Admin';
+  const userDomain = process.env.USERDOMAIN || process.env.COMPUTERNAME || 'WORKGROUP';
+  const domainUser = `${userDomain}\\${username}`;
+
+  const uptimeSec = os.uptime();
+  const rebootTime = new Date(Date.now() - (uptimeSec * 1000));
+  const lastReboot = rebootTime.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+
+  const publicIp = await getPublicIp();
+
+  let agentVersion = '1.0.0';
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    agentVersion = pkg.version || '1.0.0';
+  } catch (e) {}
+
   const info = {
     hostname: os.hostname(),
     cpu: cpuModel,
     ram: `${totalRamGb} GB`,
     ip: ipAddress,
+    publicIp: publicIp,
+    loggedUser: domainUser,
+    domain: userDomain,
+    lastReboot: lastReboot,
+    agentVersion: agentVersion,
     platform: `${os.type()} ${os.arch()}`
   };
   console.log('[Main Process]: Returning Host System Info:', info);
@@ -299,6 +352,9 @@ function formatUptime(seconds) {
   return `${mins}m`;
 }
 
+let cachedPublicIp = 'N/A';
+let lastPublicIpFetch = 0;
+
 function collectLiveMetrics() {
   // 1. CPU
   const currCpu = getCpuTimes();
@@ -337,6 +393,27 @@ function collectLiveMetrics() {
   const cpus = os.cpus();
   const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Standard CPU';
 
+  const username = (os.userInfo ? os.userInfo().username : null) || process.env.USERNAME || 'Admin';
+  const userDomain = process.env.USERDOMAIN || process.env.COMPUTERNAME || 'WORKGROUP';
+  const domainUser = `${userDomain}\\${username}`;
+
+  const uptimeSec = os.uptime();
+  const rebootTime = new Date(Date.now() - (uptimeSec * 1000));
+  const lastReboot = rebootTime.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+
+  if (Date.now() - lastPublicIpFetch > 600000 || cachedPublicIp === 'N/A') {
+    lastPublicIpFetch = Date.now();
+    getPublicIp().then(ip => { cachedPublicIp = ip; }).catch(() => {});
+  }
+
   updateNetworkSpeed();
 
   return {
@@ -344,6 +421,10 @@ function collectLiveMetrics() {
     platform: `${os.type()} ${os.release()} (${os.arch()})`,
     cpuModel,
     ip: ipAddress,
+    publicIp: cachedPublicIp,
+    loggedUser: domainUser,
+    domain: userDomain,
+    lastReboot,
     cpuPercent,
     ramUsedGb,
     ramTotalGb,
@@ -353,7 +434,7 @@ function collectLiveMetrics() {
     diskPercent: lastDiskAndBattery.diskPercent,
     downloadSpeed: lastNetSpeed.download,
     uploadSpeed: lastNetSpeed.upload,
-    uptime: formatUptime(os.uptime()),
+    uptime: formatUptime(uptimeSec),
     batteryPercent: lastDiskAndBattery.batteryPercent,
     isCharging: lastDiskAndBattery.isCharging
   };
