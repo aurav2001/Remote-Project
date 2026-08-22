@@ -1136,7 +1136,7 @@ function App() {
                   </span>
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
                     <a
-                      href="https://files.catbox.moe/4nvr0r.zip"
+                      href="https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.zip"
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -1158,7 +1158,7 @@ function App() {
 
                     <button
                       onClick={() => {
-                        const downloadUrl = `https://files.catbox.moe/4nvr0r.zip`;
+                        const downloadUrl = `https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.zip`;
                         navigator.clipboard.writeText(downloadUrl);
                         alert(`WhatsApp Direct Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
                       }}

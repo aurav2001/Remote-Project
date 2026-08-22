@@ -10,13 +10,20 @@ app.use(cors());
 const fs = require('fs');
 
 // Direct Setup & Installer Download endpoints (Handles clicks from Web Controller UI)
-app.get(['/download', '/RemoteG-Setup.exe', '/RemoteG-Setup.zip'], (req, res) => {
+app.get(['/download', '/RemoteG-Setup.zip'], (req, res) => {
+  const zipPath = path.join(__dirname, '../client-electron/RemoteG-Setup.zip');
+  if (fs.existsSync(zipPath)) {
+    return res.download(zipPath, 'RemoteG-Setup.zip');
+  }
+  return res.redirect('https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.zip');
+});
+
+app.get('/RemoteG-Setup.exe', (req, res) => {
   const exePath = path.join(__dirname, '../client-electron/dist-build/RemoteG Setup 1.0.0.exe');
   if (fs.existsSync(exePath)) {
     return res.download(exePath, 'RemoteG-Setup.exe');
   }
-  // Fast high-speed direct CDN fallback for Render cloud deployment
-  return res.redirect('https://files.catbox.moe/4nvr0r.zip');
+  return res.redirect('https://github.com/aurav2001/Remote-Project/releases/download/v1.0.0/RemoteG-Setup.exe');
 });
 
 // Serve compiled Web Controller frontend static assets directly on Render
