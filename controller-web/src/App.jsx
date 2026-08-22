@@ -48,6 +48,7 @@ function App() {
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
   const [socketFrame, setSocketFrame] = useState(null);
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
+  const [isNavCollapsed, setIsNavCollapsed] = useState(false);
 
   // Central Dashboard RMM States
   const [activeHosts, setActiveHosts] = useState([]);
@@ -1190,89 +1191,106 @@ function App() {
       </div>
 
       <div className="viewer-layout" style={{ display: status === 'connected' ? 'flex' : 'none' }}>
-          <div className="control-bar">
-            <div className="control-bar-left">
-              <span className="session-tag">🟢 Node: {roomId}</span>
-              <span className="stream-badge">LIVE</span>
-
-              {/* Compact Quick Action Buttons */}
-              <button
-                onClick={() => setShowHealthDrawer(prev => !prev)}
-                className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
-                title="View Live CPU, RAM, Disk, and Network Health"
+          <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
+            <div className="control-bar-header">
+              {!isNavCollapsed && (
+                <div className="session-info-pill">
+                  <span className="session-tag">🟢 Node: {roomId}</span>
+                  <span className="stream-badge">LIVE</span>
+                </div>
+              )}
+              <button 
+                onClick={() => setIsNavCollapsed(prev => !prev)} 
+                className="btn-collapse-toggle"
+                title={isNavCollapsed ? "Expand Navigation Toolbar" : "Collapse Navigation Toolbar"}
               >
-                📊 Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
+                {isNavCollapsed ? '▶' : '◀'}
               </button>
-
-              <button
-                onClick={() => setShowTerminalDrawer(prev => !prev)}
-                className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
-                title="Open Remote PowerShell & CMD Terminal"
-              >
-                💻 Terminal
-              </button>
-
-              {/* Sleek Compact Action Menu Dropdown */}
-              <div className="tools-dropdown-wrapper">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowToolsDropdown(prev => !prev);
-                  }}
-                  className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
-                  title="Open Actions & Utilities Menu"
-                >
-                  ⚡ Actions <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>▼</span>
-                </button>
-
-                {showToolsDropdown && (
-                  <div className="tools-dropdown-menu">
-                    {hostSystemInfo && (
-                      <button 
-                        onClick={() => { setShowSpecsModal(true); setShowToolsDropdown(false); }} 
-                        className="dropdown-item"
-                      >
-                        <span className="dropdown-icon">💻</span>
-                        <div>
-                          <strong>Hardware Specs</strong>
-                          <small>{hostSystemInfo.hostname || 'Device Specs'}</small>
-                        </div>
-                      </button>
-                    )}
-
-                    <button 
-                      onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }} 
-                      className="dropdown-item"
-                    >
-                      <span className="dropdown-icon">📋</span>
-                      <div>
-                        <strong>Sync Clipboard</strong>
-                        <small>Push local text to Remote PC</small>
-                      </div>
-                    </button>
-
-                    <button 
-                      onClick={() => {
-                        const directUrl = `${window.location.origin}/?code=${roomId}`;
-                        navigator.clipboard.writeText(directUrl);
-                        alert(`Direct Access Link copied to clipboard:\n${directUrl}`);
-                        setShowToolsDropdown(false);
-                      }} 
-                      className="dropdown-item"
-                    >
-                      <span className="dropdown-icon">🔗</span>
-                      <div>
-                        <strong>Copy Direct Link</strong>
-                        <small>1-Click bookmark link</small>
-                      </div>
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
-            <button className="btn-disconnect" onClick={cleanup}>
-              Terminate Session
-            </button>
+
+            {!isNavCollapsed && (
+              <>
+                <div className="control-bar-left">
+                  {/* Compact Quick Action Buttons */}
+                  <button
+                    onClick={() => setShowHealthDrawer(prev => !prev)}
+                    className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
+                    title="View Live CPU, RAM, Disk, and Network Health"
+                  >
+                    📊 Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
+                  </button>
+
+                  <button
+                    onClick={() => setShowTerminalDrawer(prev => !prev)}
+                    className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
+                    title="Open Remote PowerShell & CMD Terminal"
+                  >
+                    💻 Terminal
+                  </button>
+
+                  {/* Sleek Compact Action Menu Dropdown */}
+                  <div className="tools-dropdown-wrapper">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowToolsDropdown(prev => !prev);
+                      }}
+                      className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
+                      title="Open Actions & Utilities Menu"
+                    >
+                      ⚡ Actions <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>▼</span>
+                    </button>
+
+                    {showToolsDropdown && (
+                      <div className="tools-dropdown-menu">
+                        {hostSystemInfo && (
+                          <button 
+                            onClick={() => { setShowSpecsModal(true); setShowToolsDropdown(false); }} 
+                            className="dropdown-item"
+                          >
+                            <span className="dropdown-icon">💻</span>
+                            <div>
+                              <strong>Hardware Specs</strong>
+                              <small>{hostSystemInfo.hostname || 'Device Specs'}</small>
+                            </div>
+                          </button>
+                        )}
+
+                        <button 
+                          onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }} 
+                          className="dropdown-item"
+                        >
+                          <span className="dropdown-icon">📋</span>
+                          <div>
+                            <strong>Sync Clipboard</strong>
+                            <small>Push local text to Remote PC</small>
+                          </div>
+                        </button>
+
+                        <button 
+                          onClick={() => {
+                            const directUrl = `${window.location.origin}/?code=${roomId}`;
+                            navigator.clipboard.writeText(directUrl);
+                            alert(`Direct Access Link copied to clipboard:\n${directUrl}`);
+                            setShowToolsDropdown(false);
+                          }} 
+                          className="dropdown-item"
+                        >
+                          <span className="dropdown-icon">🔗</span>
+                          <div>
+                            <strong>Copy Direct Link</strong>
+                            <small>1-Click bookmark link</small>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button className="btn-disconnect" onClick={cleanup}>
+                  Terminate Session
+                </button>
+              </>
+            )}
           </div>
 
           {/* Silent Remote Terminal Drawer */}
