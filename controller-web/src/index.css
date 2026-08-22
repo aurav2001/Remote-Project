@@ -411,11 +411,15 @@ body {
 
 .control-bar-left {
   display: flex;
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column !important;
+  align-items: stretch !important;
   gap: 8px;
-  flex-shrink: 0;
+  width: 100%;
   overflow: visible !important;
+}
+
+.tools-dropdown-wrapper {
+  width: 100%;
 }
 
 .session-tag {
