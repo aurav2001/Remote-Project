@@ -947,7 +947,7 @@ function App() {
                   <div key={device.roomId} className="device-node-card">
                     <div>
                       <div className="node-card-header">
-                        <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                        <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', paddingRight: '4px' }}>
                           <span className="node-icon">💻</span>
                           <div style={{ minWidth: 0, overflow: 'hidden' }}>
                             <h3 className="node-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.hostname}</h3>
@@ -955,28 +955,28 @@ function App() {
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <span className="stream-badge" style={{
-                            background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
-                            borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
-                            color: device.isOnline ? '#34d399' : '#94a3b8'
-                          }}>
-                            {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
-                          </span>
+                        <span className="stream-badge" style={{
+                          background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
+                          borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
+                          color: device.isOnline ? '#34d399' : '#94a3b8',
+                          marginRight: '28px',
+                          flexShrink: 0
+                        }}>
+                          {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
+                        </span>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm(`Remove host "${device.hostname}" (${device.roomId}) from dashboard?`)) {
-                                removeDevice(device.roomId);
-                              }
-                            }}
-                            className="btn-remove-device"
-                            title="Remove Host PC from Dashboard"
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Remove host "${device.hostname}" (${device.roomId}) from dashboard?`)) {
+                              removeDevice(device.roomId);
+                            }
+                          }}
+                          className="btn-remove-device"
+                          title="Remove Host PC from Dashboard"
+                        >
+                          🗑️
+                        </button>
                       </div>
 
                       {/* OS info */}
