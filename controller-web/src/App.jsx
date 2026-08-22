@@ -1222,21 +1222,24 @@ function App() {
 
       <div className="viewer-layout" style={{ display: status === 'connected' ? 'flex' : 'none' }}>
           <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
-            {isNavCollapsed ? (
-              <div 
-                className="nav-tab-handle"
-                onClick={() => setIsNavCollapsed(false)}
-                title="Click to Expand AnyDesk Control Toolbar"
+            <div className="control-bar-header">
+              {!isNavCollapsed && (
+                <div className="session-info-pill">
+                  <span className="session-tag">🟢 Node: {roomId}</span>
+                  <span className="stream-badge">LIVE</span>
+                </div>
+              )}
+              <button 
+                onClick={() => setIsNavCollapsed(prev => !prev)} 
+                className="btn-collapse-toggle"
+                title={isNavCollapsed ? "Expand Navigation Toolbar" : "Collapse Navigation Toolbar"}
               >
-                <span className="session-tag" style={{ padding: '2px 6px', fontSize: '0.75rem', background: 'transparent', border: 'none' }}>
-                  🟢 Node: {roomId}
-                </span>
-                <span className="tab-arrow">▼</span>
-              </div>
-            ) : (
-              <div className="control-bar-left">
-                <span className="session-tag">🟢 Node: {roomId}</span>
+                {isNavCollapsed ? '▶' : '◀'}
+              </button>
+            </div>
 
+            {!isNavCollapsed && (
+              <div className="control-bar-left">
                 {/* Compact Quick Action Buttons */}
                 <button
                   onClick={() => setShowHealthDrawer(prev => !prev)}
@@ -1312,16 +1315,8 @@ function App() {
                   )}
                 </div>
 
-                <button className="btn-disconnect" onClick={cleanup} style={{ padding: '6px 14px', fontSize: '0.8rem' }}>
-                  Terminate
-                </button>
-
-                <button 
-                  onClick={() => setIsNavCollapsed(true)} 
-                  className="btn-collapse-toggle"
-                  title="Collapse Navigation Toolbar"
-                >
-                  ▲
+                <button className="btn-disconnect" onClick={cleanup}>
+                  Terminate Session
                 </button>
               </div>
             )}
