@@ -1244,15 +1244,15 @@ function App() {
       <div className="viewer-layout" style={{ display: status === 'connected' ? 'flex' : 'none' }}>
           <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
             {isNavCollapsed ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="session-tag" style={{ padding: '2px 10px', fontSize: '0.75rem' }}>🟢 Node: {roomId}</span>
-                <button 
-                  onClick={() => setIsNavCollapsed(false)} 
-                  className="btn-collapse-toggle"
-                  title="Expand Navigation Toolbar"
-                >
-                  ▼
-                </button>
+              <div 
+                className="nav-tab-handle"
+                onClick={() => setIsNavCollapsed(false)}
+                title="Click to Expand AnyDesk Control Toolbar"
+              >
+                <span className="session-tag" style={{ padding: '2px 6px', fontSize: '0.75rem', background: 'transparent', border: 'none' }}>
+                  🟢 Node: {roomId}
+                </span>
+                <span className="tab-arrow">▼</span>
               </div>
             ) : (
               <div className="control-bar-left">

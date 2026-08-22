@@ -305,7 +305,7 @@ body {
 
 .control-bar {
   position: fixed;
-  top: 12px;
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -313,13 +313,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 6px 14px;
-  background: rgba(15, 23, 42, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 100px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  padding: 6px 16px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: none;
+  border-radius: 0 0 16px 16px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.75);
   z-index: 99999;
   width: max-content;
   max-width: 95vw;
@@ -330,8 +331,35 @@ body {
 }
 
 .control-bar.collapsed {
-  padding: 4px 12px;
-  border-radius: 100px;
+  padding: 3px 12px;
+  border-radius: 0 0 12px 12px;
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(255, 255, 255, 0.1);
+  border-top: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.control-bar.collapsed:hover {
+  background: rgba(15, 23, 42, 0.98);
+  border-color: rgba(129, 140, 248, 0.4);
+  box-shadow: 0 6px 20px rgba(129, 140, 248, 0.25);
+}
+
+.nav-tab-handle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.tab-arrow {
+  font-size: 0.68rem;
+  color: #818cf8;
+  transition: transform 0.2s ease;
 }
 
 .control-bar-header {
