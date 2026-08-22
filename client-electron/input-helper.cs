@@ -56,11 +56,17 @@ class InputHelper {
                 else if (command == "click" && parts.Length >= 2) {
                     string button = parts[1].ToLower();
                     if (button == "left") {
-                        mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                        System.Threading.Thread.Sleep(15);
+                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     } else if (button == "right") {
-                        mouse_event(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                        mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                        System.Threading.Thread.Sleep(15);
+                        mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     } else if (button == "middle") {
-                        mouse_event(MOUSEEVENTF_MIDDLEDOWN | MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                        mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
+                        System.Threading.Thread.Sleep(15);
+                        mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
                     }
                 } 
                 else if (command == "mousedown" && parts.Length >= 2) {
@@ -71,6 +77,7 @@ class InputHelper {
                 } 
                 else if (command == "mouseup" && parts.Length >= 2) {
                     string button = parts[1].ToLower();
+                    System.Threading.Thread.Sleep(10);
                     if (button == "left") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     else if (button == "right") mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     else if (button == "middle") mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
@@ -83,7 +90,7 @@ class InputHelper {
                 else if (command == "keydown" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
-                    keybd_event(vk, 0, flags | KEYEVENTF_KEYDOWN, 0);
+                    keybd_event(vk, 0, flags, 0);
                 }
                 else if (command == "keyup" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);

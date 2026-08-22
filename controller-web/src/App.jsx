@@ -1691,6 +1691,7 @@ function App() {
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onMouseMove={handleMouseMove}
+              onClick={handleClick}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
