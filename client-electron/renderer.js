@@ -452,9 +452,11 @@ window.electronAPI.onSocket('terminal-command', (data) => {
   handleTerminalCommand(data);
 });
 
-// Incoming hardware control events over socket fallback
+// Incoming hardware control events over socket fallback (only process if DataChannel is NOT open)
 window.electronAPI.onSocket('control-event', (data) => {
-  window.electronAPI.sendControlEvent(data);
+  if (!activeDataChannel || activeDataChannel.readyState !== 'open') {
+    window.electronAPI.sendControlEvent(data);
+  }
 });
 
 // Incoming clipboard sync over socket fallback

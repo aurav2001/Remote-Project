@@ -1669,8 +1669,6 @@ function App() {
             className="video-container"
             tabIndex={0} // Makes container focusable to receive keyboard events
             onClick={focusControl}
-            onKeyDown={handleKeyDown}
-            onKeyUp={handleKeyUp}
             onWheel={handleWheel}
           >
             <video
@@ -1693,7 +1691,6 @@ function App() {
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onMouseMove={handleMouseMove}
-              onClick={handleClick}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
