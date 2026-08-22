@@ -674,43 +674,22 @@ function App() {
     }
   };
 
-  // Mouse event helper - maps browser coordinates to host screen coordinates with exact aspect-ratio alignment
+  // Mouse event helper - maps browser coordinates to host screen coordinates with exact 1-to-1 full-screen alignment
   const sendMouseEvent = (type, e) => {
     const targetEl = e.currentTarget || videoRef.current;
     if (!targetEl || (status !== 'connected' && status !== 'ready')) return;
 
     const rect = targetEl.getBoundingClientRect();
-    const width = targetEl.videoWidth || targetEl.naturalWidth || 1280;
-    const height = targetEl.videoHeight || targetEl.naturalHeight || 720;
+    const width = targetEl.videoWidth || targetEl.naturalWidth || 1920;
+    const height = targetEl.videoHeight || targetEl.naturalHeight || 1080;
 
-    if (!width || !height || !rect.width || !rect.height) return;
+    if (!rect.width || !rect.height) return;
 
-    // Calculate actual rendered dimensions inside the element
-    const containerAspect = rect.width / rect.height;
-    const streamAspect = width / height;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    let renderWidth, renderHeight, offsetX, offsetY;
-
-    if (containerAspect > streamAspect) {
-      renderHeight = rect.height;
-      renderWidth = rect.height * streamAspect;
-      offsetX = (rect.width - renderWidth) / 2;
-      offsetY = 0;
-    } else {
-      renderWidth = rect.width;
-      renderHeight = rect.width / streamAspect;
-      offsetX = 0;
-      offsetY = (rect.height - renderHeight) / 2;
-    }
-
-    const mouseX = e.clientX - rect.left - offsetX;
-    const mouseY = e.clientY - rect.top - offsetY;
-
-    const clampedX = Math.max(0, Math.min(renderWidth, mouseX));
-    const clampedY = Math.max(0, Math.min(renderHeight, mouseY));
-
-    const normX = clampedX / renderWidth;
-    const normY = clampedY / renderHeight;
+    const normX = Math.max(0, Math.min(1, mouseX / rect.width));
+    const normY = Math.max(0, Math.min(1, mouseY / rect.height));
 
     const targetX = normX * width;
     const targetY = normY * height;
@@ -1702,7 +1681,7 @@ function App() {
               onContextMenu={handleContextMenu}
               onWheel={handleWheel}
               style={{
-                objectFit: 'contain',
+                objectFit: 'fill',
                 width: '100%',
                 height: '100%',
                 display: 'block',
@@ -1721,7 +1700,7 @@ function App() {
                 onDoubleClick={handleDoubleClick}
                 onContextMenu={handleContextMenu}
                 style={{
-                  objectFit: 'contain',
+                  objectFit: 'fill',
                   width: '100%',
                   height: '100%',
                   display: 'block',
