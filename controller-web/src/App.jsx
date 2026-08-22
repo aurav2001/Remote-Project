@@ -306,6 +306,16 @@ function App() {
     });
   };
 
+  const removeDevice = (codeToRemove) => {
+    if (!codeToRemove) return;
+    setRecentDevices(prev => {
+      const updated = prev.filter(c => c !== codeToRemove);
+      localStorage.setItem('remoteg_recent_devices', JSON.stringify(updated));
+      return updated;
+    });
+    setActiveHosts(prev => prev.filter(h => h.roomId !== codeToRemove));
+  };
+
   const handleConnect = (e, codeToConnect) => {
     if (e) e.preventDefault();
     const finalRoomId = (codeToConnect || targetRoomId).trim();
@@ -945,13 +955,28 @@ function App() {
                           </div>
                         </div>
 
-                        <span className="stream-badge" style={{
-                          background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
-                          borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
-                          color: device.isOnline ? '#34d399' : '#94a3b8'
-                        }}>
-                          {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="stream-badge" style={{
+                            background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
+                            borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
+                            color: device.isOnline ? '#34d399' : '#94a3b8'
+                          }}>
+                            {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
+                          </span>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Remove host "${device.hostname}" (${device.roomId}) from dashboard?`)) {
+                                removeDevice(device.roomId);
+                              }
+                            }}
+                            className="btn-remove-device"
+                            title="Remove Host PC from Dashboard"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
 
                       {/* OS info */}
@@ -1092,25 +1117,51 @@ function App() {
                     </span>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {recentDevices.map(code => (
-                        <button
+                        <div
                           key={code}
-                          onClick={() => handleConnect(null, code)}
-                          disabled={status === 'connecting'}
                           style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
                             background: 'rgba(255,255,255,0.08)',
                             border: '1px solid rgba(255,255,255,0.15)',
-                            color: '#818cf8',
-                            padding: '6px 12px',
                             borderRadius: '100px',
-                            fontSize: '0.85rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease'
+                            padding: '3px 6px 3px 12px'
                           }}
-                          title={`Connect to ${code}`}
                         >
-                          {code}
-                        </button>
+                          <button
+                            onClick={() => handleConnect(null, code)}
+                            disabled={status === 'connecting'}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#818cf8',
+                              fontSize: '0.85rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              padding: 0
+                            }}
+                            title={`Connect to ${code}`}
+                          >
+                            {code}
+                          </button>
+                          <button
+                            onClick={() => removeDevice(code)}
+                            title={`Remove ${code}`}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#94a3b8',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              borderRadius: '50%',
+                              lineHeight: 1
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
