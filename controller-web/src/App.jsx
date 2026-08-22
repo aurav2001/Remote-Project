@@ -716,14 +716,12 @@ function App() {
       sendMouseEvent('mousemove', e);
     }
   };
-  const handleClick = (e) => sendMouseEvent('click', e);
   const handleMouseDown = (e) => sendMouseEvent('mousedown', e);
   const handleMouseUp = (e) => sendMouseEvent('mouseup', e);
   const handleDoubleClick = (e) => sendMouseEvent('doubleclick', e);
   
   const handleContextMenu = (e) => {
-    e.preventDefault(); // Prevent browser right-click context menu
-    sendMouseEvent('click', e); // Simulate right click
+    e.preventDefault(); // Prevent browser right-click context menu (mousedown/mouseup handles native right click)
   };
 
   const handleWheel = (e) => {
@@ -1669,7 +1667,6 @@ function App() {
                 if (e.target && e.target.paused) e.target.play().catch(err => {});
               }}
               onMouseMove={handleMouseMove}
-              onClick={handleClick}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
@@ -1689,7 +1686,6 @@ function App() {
                 src={socketFrame}
                 alt="Remote Screen Stream Fallback"
                 onMouseMove={handleMouseMove}
-                onClick={handleClick}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
                 onDoubleClick={handleDoubleClick}
