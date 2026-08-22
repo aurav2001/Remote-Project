@@ -47,9 +47,10 @@ body {
   overflow: hidden;
 }
 
+.video-container,
 .video-container video,
 .video-container img {
-  cursor: crosshair !important;
+  cursor: default !important;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }

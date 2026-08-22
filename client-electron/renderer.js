@@ -306,7 +306,11 @@ async function createPeerConnection() {
 
   videoTracks.forEach(track => {
     track.enabled = true;
-    console.log('[Host]: Adding HD screen video track to PeerConnection:', track.id, 'readyState:', track.readyState);
+    // Set contentHint to 'detail' for ultra-sharp text and crisp desktop graphics
+    if ('contentHint' in track) {
+      track.contentHint = 'detail';
+    }
+    console.log('[Host]: Adding Crisp HD screen video track to PeerConnection:', track.id);
     const sender = peerConnection.addTrack(track, localStream);
     if (sender && sender.setParameters) {
       try {
@@ -314,8 +318,9 @@ async function createPeerConnection() {
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
-        params.encodings[0].maxBitrate = 8000000; // 8 Mbps Ultra-HD High Bitrate
+        params.encodings[0].maxBitrate = 12000000; // 12 Mbps High Quality Bitrate
         params.encodings[0].maxFramerate = 60;
+        params.degradationPreference = 'maintain-resolution'; // Force WebRTC to preserve crisp resolution always
         sender.setParameters(params).catch(e => console.warn('Bitrate param error:', e));
       } catch (err) {}
     }
