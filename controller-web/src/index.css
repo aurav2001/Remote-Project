@@ -385,6 +385,10 @@ body {
   box-sizing: border-box;
 }
 
+.session-info-pill .stream-badge {
+  width: 100%;
+}
+
 .stream-badge {
   display: inline-flex;
   align-items: center;
@@ -400,7 +404,7 @@ body {
   animation: pulse 2s infinite;
   white-space: nowrap;
   flex-shrink: 0;
-  width: 100%;
+  width: auto;
   box-sizing: border-box;
 }
 
@@ -1074,9 +1078,7 @@ body {
 }
 
 .btn-remove-device {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  position: static;
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: #ef4444;
@@ -1090,7 +1092,7 @@ body {
   font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  z-index: 10;
+  flex-shrink: 0;
 }
 
 .btn-remove-device:hover {
