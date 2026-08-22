@@ -947,15 +947,15 @@ function App() {
                   <div key={device.roomId} className="device-node-card">
                     <div>
                       <div className="node-card-header">
-                        <div className="node-title-group">
+                        <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
                           <span className="node-icon">💻</span>
-                          <div>
-                            <h3 className="node-name">{device.hostname}</h3>
+                          <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                            <h3 className="node-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.hostname}</h3>
                             <span className="node-code">ID: {device.roomId}</span>
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                           <span className="stream-badge" style={{
                             background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
                             borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
@@ -1700,7 +1700,7 @@ function App() {
                 objectFit: 'contain',
                 width: '100%',
                 height: '100%',
-                display: isWebRtcActive ? 'block' : 'none',
+                display: 'block',
                 background: '#000'
               }}
             />
