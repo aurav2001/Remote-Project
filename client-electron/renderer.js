@@ -230,13 +230,6 @@ async function startSharing(sourceId) {
       }
     });
 
-    const localVideo = document.getElementById('local-video');
-    if (localVideo) {
-      localVideo.srcObject = localStream;
-      localVideo.style.display = 'none';
-      localVideo.play().catch(e => {});
-    }
-
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = true;

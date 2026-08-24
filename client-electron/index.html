@@ -3,26 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Remote Desktop Client - Host</title>
+  <title>UnioTechIT - Remote Host Agent</title>
   <!-- Google Fonts: Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-      --glass-bg: rgba(255, 255, 255, 0.03);
-      --glass-border: rgba(255, 255, 255, 0.08);
-      --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-      
-      --color-primary: #818cf8;
-      --color-primary-glow: rgba(129, 140, 248, 0.4);
-      --color-success: #34d399;
-      --color-success-glow: rgba(52, 211, 153, 0.4);
-      --color-error: #f87171;
-      --color-error-glow: rgba(248, 113, 113, 0.4);
+      --bg-dark: #0b0f19;
+      --card-bg: #151c2e;
+      --card-border: #232f48;
+      --color-primary: #6366f1;
+      --color-accent: #38bdf8;
+      --color-success: #10b981;
+      --color-error: #ef4444;
       --color-text: #f8fafc;
       --color-text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
     }
 
     ::-webkit-scrollbar {
@@ -31,124 +36,62 @@
       height: 0 !important;
     }
 
-    * {
-      box-sizing: border-box;
-      scrollbar-width: none !important;
-      -ms-overflow-style: none !important;
-    }
-
     html, body {
       height: 100vh;
       width: 100vw;
-      margin: 0;
-      padding: 0;
       overflow: hidden;
+      background: var(--bg-dark);
+      color: var(--color-text);
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
     body {
-      font-family: 'Outfit', sans-serif;
-      background: var(--bg-gradient);
-      color: var(--color-text);
-      height: 100vh;
-      width: 100vw;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
-      padding: 16px;
-      box-sizing: border-box;
+      padding: 20px;
     }
 
     .container {
-      background: var(--glass-bg);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
-      box-shadow: var(--glass-shadow);
-      border-radius: 24px;
-      padding: 24px 32px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 28px 32px;
       width: 100%;
-      max-width: 460px;
-      overflow: hidden;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
+      max-width: 440px;
       text-align: center;
-      position: relative;
-      z-index: 1;
-      box-sizing: border-box;
-      transition: all 0.3s ease;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
 
-    .container::-webkit-scrollbar {
-      display: none;
-      width: 0;
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 18px;
     }
 
-    .container::before {
-      content: '';
-      position: absolute;
-      top: -2px;
-      left: -2px;
-      right: -2px;
-      bottom: -2px;
-      background: linear-gradient(135deg, var(--color-primary), transparent, var(--color-success));
-      border-radius: 26px;
-      z-index: -1;
-      opacity: 0.15;
-      transition: opacity 0.5s ease;
-    }
-
-    .container:hover::before {
-      opacity: 0.3;
-    }
-
-    /* Decorative background glowing spheres */
-    .glow-sphere {
-      position: absolute;
-      border-radius: 50%;
-      filter: blur(80px);
-      z-index: 0;
-      opacity: 0.15;
-      pointer-events: none;
-    }
-
-    .sphere-1 {
-      top: 10%;
-      left: 10%;
-      width: 300px;
-      height: 300px;
-      background: var(--color-primary);
-      animation: float 8s ease-in-out infinite alternate;
-    }
-
-    .sphere-2 {
-      bottom: 10%;
-      right: 10%;
-      width: 250px;
-      height: 250px;
-      background: var(--color-success);
-      animation: float 10s ease-in-out infinite alternate-reverse;
-    }
-
-    @keyframes float {
-      0% { transform: translateY(0) scale(1); }
-      100% { transform: translateY(-20px) scale(1.05); }
+    .header img {
+      height: 52px;
+      max-width: 200px;
+      object-fit: contain;
+      margin-bottom: 2px;
     }
 
     .header h1 {
-      font-size: 2rem;
+      font-size: 1.7rem;
       font-weight: 800;
-      margin-bottom: 8px;
-      background: linear-gradient(135deg, #fff 30%, var(--color-primary) 100%);
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
     .header p {
       color: var(--color-text-muted);
-      font-size: 0.95rem;
-      margin-bottom: 30px;
+      font-size: 0.82rem;
+      font-weight: 500;
     }
 
     .status-badge {
@@ -157,11 +100,11 @@
       gap: 8px;
       padding: 6px 16px;
       border-radius: 100px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--glass-border);
-      margin-bottom: 24px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      margin-bottom: 20px;
     }
 
     .status-dot {
@@ -169,40 +112,31 @@
       height: 8px;
       border-radius: 50%;
       background-color: var(--color-error);
-      box-shadow: 0 0 10px var(--color-error-glow);
     }
 
     .status-dot.connecting {
-      background-color: var(--color-primary);
-      box-shadow: 0 0 10px var(--color-primary-glow);
-      animation: pulse 1.5s infinite;
+      background-color: #f59e0b;
     }
 
     .status-dot.connected {
       background-color: var(--color-success);
-      box-shadow: 0 0 10px var(--color-success-glow);
-      animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
     }
 
     .room-card {
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--glass-border);
-      border-radius: 16px;
-      padding: 24px;
-      margin-bottom: 24px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
     }
 
     .room-card-label {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: var(--color-text-muted);
       margin-bottom: 8px;
+      font-weight: 600;
     }
 
     .room-id-container {
@@ -213,16 +147,16 @@
     }
 
     .room-id {
-      font-size: 2.5rem;
+      font-size: 2.3rem;
       font-weight: 800;
-      letter-spacing: 2px;
-      color: var(--color-primary);
-      text-shadow: 0 0 12px var(--color-primary-glow);
+      letter-spacing: 3px;
+      color: #38bdf8;
+      font-family: 'Outfit', monospace;
     }
 
     .btn-copy {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--glass-border);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
       color: var(--color-text);
       border-radius: 8px;
       width: 36px;
@@ -231,115 +165,83 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background 0.15s ease;
     }
 
     .btn-copy:hover {
-      background: var(--color-primary);
-      color: #000;
-      border-color: var(--color-primary);
-      box-shadow: 0 0 10px var(--color-primary-glow);
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #38bdf8;
     }
 
     .input-group {
       text-align: left;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .input-group label {
       display: block;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       color: var(--color-text-muted);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       font-weight: 600;
     }
 
     .select-screen {
       width: 100%;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--glass-border);
+      background: #0f172a;
+      border: 1px solid var(--card-border);
       color: var(--color-text);
-      padding: 12px 16px;
-      border-radius: 12px;
+      padding: 10px 14px;
+      border-radius: 10px;
       outline: none;
       font-family: inherit;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       cursor: pointer;
-      appearance: none;
-      background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 16px center;
-      background-size: 16px;
-      transition: all 0.2s ease;
-    }
-
-    .select-screen:hover, .select-screen:focus {
-      border-color: var(--color-primary);
-      box-shadow: 0 0 10px rgba(129, 140, 248, 0.15);
-    }
-
-    .select-screen option {
-      background-color: #0f172a;
-      color: var(--color-text);
     }
 
     .btn-start {
       width: 100%;
-      background: linear-gradient(135deg, var(--color-primary) 0%, #6366f1 100%);
+      background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
       color: #ffffff;
       border: none;
-      padding: 14px;
-      border-radius: 12px;
-      font-size: 1rem;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 0.95rem;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 15px rgba(129, 140, 248, 0.3);
+      transition: opacity 0.15s ease;
     }
 
     .btn-start:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(129, 140, 248, 0.45);
-    }
-
-    .btn-start:active {
-      transform: translateY(0);
+      opacity: 0.92;
     }
 
     .btn-start:disabled {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--color-text-muted);
+      background: #1e293b;
+      color: #64748b;
       cursor: not-allowed;
-      box-shadow: none;
-      transform: none;
-    }
-
-    #local-video {
-      display: none !important;
     }
 
     .info-footer {
-      font-size: 0.8rem;
+      font-size: 0.76rem;
       color: var(--color-text-muted);
-      margin-top: 30px;
+      margin-top: 22px;
+      line-height: 1.4;
     }
   </style>
 </head>
 <body>
-  <!-- Decorative background spheres -->
-  <div class="glow-sphere sphere-1"></div>
-  <div class="glow-sphere sphere-2"></div>
-
   <div class="container">
-    <div class="header" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;">
-      <img src="logo.png" alt="UnioTechIT Logo" style="height: 60px; max-width: 220px; object-fit: contain; filter: drop-shadow(0 4px 12px rgba(56, 189, 248, 0.4)); margin-bottom: 2px;" />
-      <h1 style="margin: 0; font-size: 1.8rem; background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">UnioTechIT</h1>
-      <p style="margin: 0; font-size: 0.82rem; color: #94a3b8;">System Agent Node &bull; Unattended Access</p>
+    <div class="header">
+      <img src="logo.png" alt="UnioTechIT Logo" />
+      <h1>UnioTechIT</h1>
+      <p>System Agent Node &bull; Unattended Access</p>
     </div>
 
     <div class="status-badge">
       <div id="status-dot" class="status-dot"></div>
-      <span id="status-text">Disconnected</span>
+      <span id="status-text">Ready &bull; Waiting for Controller</span>
     </div>
 
     <div class="room-card">
@@ -361,16 +263,14 @@
     </div>
 
     <div class="input-group">
-      <label for="screen-select">Select Monitor / Window to Stream</label>
+      <label for="screen-select">Select Display to Stream</label>
       <select id="screen-select" class="select-screen">
-        <option value="">Detecting screens...</option>
+        <option value="screen:0:0">Primary Display (Auto)</option>
       </select>
     </div>
 
-    <button id="btn-start" class="btn-start">Start Screen Sharing</button>
+    <button id="btn-start" class="btn-start">Screen Streaming Active</button>
     
-    <video id="local-video" autoplay playsinline muted></video>
-
     <div class="info-footer">
       ⚡ <strong>Unattended Direct Access Active:</strong> This machine is ready for remote connection automatically on launch.
     </div>

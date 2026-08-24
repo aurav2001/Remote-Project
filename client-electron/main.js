@@ -3,13 +3,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
-// Disable hardware acceleration on host UI window to prevent DirectX / Desktop Duplication GPU lock & freezing on click
-app.disableHardwareAcceleration();
-
 // Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
 try {
-  app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('disable-gpu-compositing');
   // Expose real local IPv4 addresses (192.168.x.x) instead of anonymized .local mDNS hostnames for direct P2P connection on same Wi-Fi
   app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
   app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
@@ -19,6 +14,7 @@ try {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+  app.commandLine.appendSwitch('enable-zero-copy');
 
   const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {
@@ -235,25 +231,25 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handler to get screen sources
+// IPC Handler to get screen sources (Ultra-fast, 0-latency screen query without heavy window thumbnails)
 ipcMain.handle('get-screen-sources', async () => {
-  console.log('[Main Process]: get-screen-sources IPC handler invoked!');
   try {
-    console.log('[Main Process]: Invoking desktopCapturer.getSources...');
     const sources = await desktopCapturer.getSources({ 
-      types: ['screen', 'window'],
-      thumbnailSize: { width: 150, height: 150 }
+      types: ['screen'],
+      thumbnailSize: { width: 0, height: 0 },
+      fetchWindowIcons: false
     });
-    console.log('[Main Process]: Found sources count:', sources.length);
+    if (!sources || sources.length === 0) {
+      return [{ id: 'screen:0:0', name: 'Primary Display (Screen 1)' }];
+    }
     const mapped = sources.map(source => ({
       id: source.id,
-      name: source.name
+      name: source.name || 'Primary Display'
     }));
-    console.log('[Main Process]: Returning mapped sources:', JSON.stringify(mapped));
     return mapped;
   } catch (error) {
     console.error('[Main Process]: Error fetching screen sources:', error);
-    return [];
+    return [{ id: 'screen:0:0', name: 'Primary Display (Screen 1)' }];
   }
 });
 
