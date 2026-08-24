@@ -1,7 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Globalization;
-using System.Text;
 
 class InputHelper {
     [DllImport("user32.dll")]
@@ -16,16 +15,6 @@ class InputHelper {
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
-    [DllImport("user32.dll")]
-    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll")]
-    static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
     const uint MOUSEEVENTF_RIGHTDOWN = 0x08;
@@ -38,25 +27,6 @@ class InputHelper {
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
 
-    const int SW_HIDE = 0;
-    const int SW_MINIMIZE = 6;
-    const int SW_SHOWMINNOACTIVE = 7;
-    const int SW_FORCEMINIMIZE = 11;
-
-    static void HideHostWindows() {
-        try {
-            EnumWindows((hWnd, lParam) => {
-                StringBuilder sb = new StringBuilder(256);
-                GetWindowText(hWnd, sb, 256);
-                string title = sb.ToString();
-                if (!string.IsNullOrEmpty(title) && (title.Contains("UnioTechIT") || title.Contains("Remote Desktop Client") || title.Contains("Host Agent"))) {
-                    ShowWindow(hWnd, SW_HIDE);
-                }
-                return true;
-            }, IntPtr.Zero);
-        } catch { }
-    }
-
     static void Main(string[] args) {
         Console.WriteLine("INPUT_HELPER_READY");
         string line;
@@ -66,10 +36,7 @@ class InputHelper {
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
-                if (command == "hidehost" || command == "minimizehost") {
-                    HideHostWindows();
-                }
-                else if (command == "movenorm" && parts.Length >= 3) {
+                if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
                     float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
                     int screenW = GetSystemMetrics(0); // Primary Screen Width

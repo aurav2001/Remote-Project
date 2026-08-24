@@ -172,16 +172,14 @@ function createWindow() {
   });
 }
 
-// IPC Handler to hide host window to System Tray on remote connection (avoids Windows SW_MINIMIZE DWM screen stream freeze)
+// IPC Handler to hide host window to System Tray on remote connection
 ipcMain.handle('minimize-host-window', () => {
-  console.log('[Main Process]: Hiding host window to System Tray (preserves full 60fps desktop screen capture without DWM hold)...');
+  console.log('[Main Process]: Hiding host window to System Tray (preserves full 60fps desktop screen capture)...');
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.hide();
     }
   } catch (e) {}
-  // Native Win32 SW_HIDE via C# helper
-  sendInputHelperCommand('hidehost');
 });
 
 // Active File Transfer WriteStreams Map
@@ -307,13 +305,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handler to get screen sources (Ultra-fast, 0-latency screen query without heavy window thumbnails)
+// IPC Handler to get screen sources
 ipcMain.handle('get-screen-sources', async () => {
   try {
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'],
-      thumbnailSize: { width: 0, height: 0 },
-      fetchWindowIcons: false
+      thumbnailSize: { width: 150, height: 150 }
     });
     if (!sources || sources.length === 0) {
       return [{ id: 'screen:0:0', name: 'Primary Display (Screen 1)' }];
