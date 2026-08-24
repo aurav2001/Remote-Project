@@ -303,13 +303,10 @@ async function loadSources() {
   }
 }
 
-let hasAutoMinimized = false;
-
 function onStreamConnected() {
   updateStatus('connected', 'Connected & Streaming');
   stopSocketFrameRelay();
-  if (!hasAutoMinimized && window.electronAPI && window.electronAPI.minimizeHostWindow) {
-    hasAutoMinimized = true;
+  if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
     console.log('[Host]: Triggering auto-minimize on stream connection...');
     window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
   }
@@ -440,6 +437,9 @@ async function createPeerConnection() {
 }
 
 async function handleControllerJoined() {
+  if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
+    window.electronAPI.minimizeHostWindow().catch(err => {});
+  }
   if (isInitiatingOffer) return;
 
   // Prevent destroying active connected peer session on duplicate ready signals

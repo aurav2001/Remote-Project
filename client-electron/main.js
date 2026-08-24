@@ -557,6 +557,10 @@ setInterval(() => {
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
   try {
+    // Multi-layer guarantee: auto-minimize host window on first remote event so it never blocks remote clicks
+    if (mainWindow && !mainWindow.isMinimized()) {
+      mainWindow.minimize();
+    }
     const { type, x, y, nx, ny, button, keyCode } = data;
 
     if (type === 'mousemove') {
