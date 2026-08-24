@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -119,10 +119,18 @@ ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Ch
   try {
     const os = require('os');
     const safeFileName = path.basename(fileName || 'received_file');
-    const downloadsDir = path.join(os.homedir(), 'Downloads');
+    let downloadsDir = '';
+    try {
+      downloadsDir = app.getPath('downloads');
+    } catch (e) {
+      downloadsDir = path.join(os.homedir(), 'Downloads');
+    }
 
-    if (!fs.existsSync(downloadsDir)) {
-      fs.mkdirSync(downloadsDir, { recursive: true });
+    if (!downloadsDir || !fs.existsSync(downloadsDir)) {
+      downloadsDir = path.join(os.homedir(), 'Downloads');
+      if (!fs.existsSync(downloadsDir)) {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+      }
     }
 
     let transfer = activeFileTransfers.get(transferId);
@@ -160,7 +168,15 @@ ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Ch
     if (isLastChunk && transfer && transfer.stream) {
       transfer.stream.end();
       activeFileTransfers.delete(transferId);
-      console.log(`[Main Process]: File transfer complete: ${transfer.fileName} (${transfer.bytesWritten} bytes saved)`);
+      console.log(`[Main Process]: File transfer complete: ${transfer.fileName} (${transfer.bytesWritten} bytes saved to ${transfer.filePath})`);
+      
+      // Automatically open Windows File Explorer and highlight the received file on target PC
+      try {
+        shell.showItemInFolder(transfer.filePath);
+      } catch (e) {
+        console.warn('Could not highlight file in folder:', e);
+      }
+
       return {
         success: true,
         fileName: transfer.fileName,

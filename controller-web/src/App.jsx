@@ -1969,9 +1969,9 @@ function App() {
           </div>
 
           <div className="file-toast-footer">
-            <span>
+            <span style={{ wordBreak: 'break-all', maxWidth: '80%' }}>
               {fileTransfer.isComplete 
-                ? '✅ Saved in remote Downloads folder' 
+                ? `✅ Saved: ${fileTransfer.savedPath || 'Downloads'}` 
                 : `Transferring ${fileTransfer.progress}%...`}
             </span>
             <strong>{fileTransfer.progress}%</strong>
