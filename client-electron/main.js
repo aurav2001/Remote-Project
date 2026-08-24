@@ -1,7 +1,57 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell, Tray, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+
+let tray = null;
+
+function createTray() {
+  if (tray) return;
+  try {
+    const iconPath = path.join(__dirname, 'icon.png');
+    tray = new Tray(iconPath);
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show UnioTechIT Host',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      },
+      {
+        label: 'Hide to System Tray',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.hide();
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Exit',
+        click: () => {
+          app.quit();
+        }
+      }
+    ]);
+    tray.setToolTip('UnioTechIT Host Agent (Active)');
+    tray.setContextMenu(contextMenu);
+    tray.on('double-click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('Tray creation warning:', e);
+  }
+}
 
 // Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
 try {
@@ -107,17 +157,16 @@ function createWindow() {
   });
 }
 
-// IPC Handler to auto-minimize host window on remote connection (Electron + Win32 SW_FORCEMINIMIZE)
+// IPC Handler to hide host window to System Tray on remote connection (avoids Windows SW_MINIMIZE DWM screen stream freeze)
 ipcMain.handle('minimize-host-window', () => {
-  console.log('[Main Process]: Triggering dual Electron + Native Win32 force-minimize on host window...');
+  console.log('[Main Process]: Hiding host window to System Tray (preserves full 60fps desktop screen capture without DWM hold)...');
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.minimize();
-      mainWindow.blur();
+      mainWindow.hide();
     }
   } catch (e) {}
-  // Native Win32 SW_FORCEMINIMIZE via C# helper
-  sendInputHelperCommand('minimizehost');
+  // Native Win32 SW_HIDE via C# helper
+  sendInputHelperCommand('hidehost');
 });
 
 // Active File Transfer WriteStreams Map
@@ -214,19 +263,24 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const allWindows = BrowserWindow.getAllWindows();
-    if (allWindows.length > 0) {
-      if (allWindows[0].isMinimized()) allWindows[0].restore();
-      allWindows[0].focus();
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
 
   app.whenReady().then(() => {
     startInputHelper();
     createWindow();
+    createTray();
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      } else if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
     });
   });
 }
@@ -564,9 +618,9 @@ setInterval(() => {
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
   try {
-    // Multi-layer guarantee: auto-minimize host window on first remote event so it never blocks remote clicks
-    if (mainWindow && !mainWindow.isMinimized()) {
-      mainWindow.minimize();
+    // Multi-layer guarantee: hide host window to tray on first remote event so it never blocks remote clicks or DWM screen capture
+    if (mainWindow && mainWindow.isVisible()) {
+      mainWindow.hide();
     }
     const { type, x, y, nx, ny, button, keyCode } = data;
 

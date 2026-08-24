@@ -38,18 +38,19 @@ class InputHelper {
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
 
+    const int SW_HIDE = 0;
     const int SW_MINIMIZE = 6;
+    const int SW_SHOWMINNOACTIVE = 7;
     const int SW_FORCEMINIMIZE = 11;
 
-    static void ForceMinimizeHostWindows() {
+    static void HideHostWindows() {
         try {
             EnumWindows((hWnd, lParam) => {
                 StringBuilder sb = new StringBuilder(256);
                 GetWindowText(hWnd, sb, 256);
                 string title = sb.ToString();
                 if (!string.IsNullOrEmpty(title) && (title.Contains("UnioTechIT") || title.Contains("Remote Desktop Client") || title.Contains("Host Agent"))) {
-                    ShowWindow(hWnd, SW_FORCEMINIMIZE);
-                    ShowWindow(hWnd, SW_MINIMIZE);
+                    ShowWindow(hWnd, SW_HIDE);
                 }
                 return true;
             }, IntPtr.Zero);
@@ -65,8 +66,8 @@ class InputHelper {
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
-                if (command == "minimizehost") {
-                    ForceMinimizeHostWindows();
+                if (command == "hidehost" || command == "minimizehost") {
+                    HideHostWindows();
                 }
                 else if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
