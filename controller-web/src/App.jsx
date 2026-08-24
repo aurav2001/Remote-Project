@@ -1676,7 +1676,7 @@ function App() {
                 objectFit: 'fill',
                 width: '100%',
                 height: '100%',
-                display: 'block',
+                display: (!isWebRtcActive && socketFrame) ? 'none' : 'block',
                 background: '#000'
               }}
             />

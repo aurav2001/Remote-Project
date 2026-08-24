@@ -200,11 +200,8 @@ async function startSharing(sourceId) {
         mandatory: {
           chromeMediaSource: 'desktop',
           chromeMediaSourceId: sourceId,
-          minWidth: 1920,
           maxWidth: 3840,
-          minHeight: 1080,
           maxHeight: 2160,
-          minFrameRate: 30,
           maxFrameRate: 60
         }
       }
