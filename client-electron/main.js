@@ -8,6 +8,10 @@ try {
   // Expose real local IPv4 addresses (192.168.x.x) instead of anonymized .local mDNS hostnames for direct P2P connection on same Wi-Fi
   app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
   app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+  // Disable background throttling & occlusion to prevent screen stream freezing when host window is minimized
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
   const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {
@@ -19,6 +23,7 @@ try {
 }
 
 let inputHelperProcess = null;
+let mainWindow = null;
 
 // Initialize the C# native input helper process
 function startInputHelper() {
@@ -72,13 +77,14 @@ function sendInputHelperCommand(cmd) {
 }
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 520,
     height: 640,
     resizable: false,
     autoHideMenuBar: true,
     title: 'RemoteG System Host Agent',
     webPreferences: {
+      backgroundThrottling: false, // Ensures screen video capture never freezes when window is minimized or covered!
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -94,6 +100,14 @@ function createWindow() {
     console.log(`[Renderer Console]: ${message}`);
   });
 }
+
+// IPC Handler to auto-minimize host window on remote connection
+ipcMain.handle('minimize-host-window', () => {
+  if (mainWindow && !mainWindow.isMinimized()) {
+    console.log('[Main Process]: Auto-minimizing host window on successful remote connection...');
+    mainWindow.minimize();
+  }
+});
 
 // Single Instance Lock: Prevents duplicate host instances from running concurrently
 const gotTheLock = app.requestSingleInstanceLock();

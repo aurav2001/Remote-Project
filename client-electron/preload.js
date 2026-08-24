@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendControlEvent: (event) => ipcRenderer.send('control-event', event),
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),
   writeClipboard: (text) => ipcRenderer.send('write-clipboard', text),
+  minimizeHostWindow: () => ipcRenderer.invoke('minimize-host-window'),
   onHostClipboardChanged: (callback) => {
     ipcRenderer.on('host-clipboard-changed', (event, text) => callback(text));
   },

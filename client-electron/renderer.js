@@ -367,6 +367,9 @@ async function createPeerConnection() {
     if (peerConnection.connectionState === 'connected') {
       updateStatus('connected', 'Connected & Streaming');
       stopSocketFrameRelay();
+      if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
+        window.electronAPI.minimizeHostWindow().catch(() => {});
+      }
     } else if (peerConnection.connectionState === 'disconnected') {
       updateStatus('connecting', 'Network blip. Reconnecting stream...');
       startSocketFrameRelay();
