@@ -3,8 +3,13 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+// Disable hardware acceleration on host UI window to prevent DirectX / Desktop Duplication GPU lock & freezing on click
+app.disableHardwareAcceleration();
+
 // Set a clean userData path in the user's local Temp directory to bypass permission/cache errors
 try {
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
   // Expose real local IPv4 addresses (192.168.x.x) instead of anonymized .local mDNS hostnames for direct P2P connection on same Wi-Fi
   app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
   app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
@@ -447,6 +452,7 @@ updateNetworkSpeed();
 
 // Periodic update intervals (light 30s background poll)
 setInterval(updateDiskAndBattery, 30000);
+setInterval(updateNetworkSpeed, 10000);
 
 function formatUptime(seconds) {
   const hrs = Math.floor(seconds / 3600);
@@ -516,8 +522,6 @@ function collectLiveMetrics() {
     lastPublicIpFetch = Date.now();
     getPublicIp().then(ip => { cachedPublicIp = ip; }).catch(() => {});
   }
-
-  updateNetworkSpeed();
 
   return {
     hostname: os.hostname(),

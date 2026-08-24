@@ -620,9 +620,12 @@ if (btnCopy) {
 
 if (btnResetCode) {
   btnResetCode.addEventListener('click', () => {
-    if (confirm('Are you sure you want to regenerate your Permanent Access Code?')) {
-      resetPermanentCode();
-    }
+    resetPermanentCode();
+    // Visual feedback
+    btnResetCode.style.transform = 'rotate(360deg)';
+    setTimeout(() => {
+      btnResetCode.style.transform = 'none';
+    }, 400);
   });
 }
 
