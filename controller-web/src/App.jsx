@@ -69,6 +69,11 @@ function App() {
   const [historyIdx, setHistoryIdx] = useState(-1);
   const terminalLogsRef = useRef(null);
 
+  // P2P File Transfer States
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [fileTransfer, setFileTransfer] = useState(null);
+  const fileInputRef = useRef(null);
+
   // Connect to signaling server on mount to receive real-time active hosts
   useEffect(() => {
     const globalSocket = io(SIGNALING_SERVER, {
@@ -388,6 +393,24 @@ function App() {
       }
     });
 
+    // Receive file transfer completion acknowledgment via signaling fallback
+    socket.on('file-transfer-ack', (data) => {
+      if (data && data.success) {
+        setFileTransfer(prev => prev && prev.transferId === data.transferId ? {
+          ...prev,
+          isUploading: false,
+          isComplete: true,
+          progress: 100,
+          savedFileName: data.fileName,
+          savedPath: data.filePath
+        } : prev);
+        setClipboardToast({
+          text: `📁 File "${data.fileName}" saved to remote Downloads folder!`,
+          isSelf: true
+        });
+      }
+    });
+
     // Both host and controller are in the room
     socket.on('ready', ({ systemInfo } = {}) => {
       console.log('Host is ready, waiting for WebRTC offer...');
@@ -540,6 +563,19 @@ function App() {
             setLiveMetrics(data.metrics);
           } else if (data.type === 'clipboard-sync' && data.text) {
             handleReceiveRemoteClipboard(data.text);
+          } else if (data.type === 'file-transfer-ack' && data.success) {
+            setFileTransfer(prev => prev && prev.transferId === data.transferId ? {
+              ...prev,
+              isUploading: false,
+              isComplete: true,
+              progress: 100,
+              savedFileName: data.fileName,
+              savedPath: data.filePath
+            } : prev);
+            setClipboardToast({
+              text: `📁 File "${data.fileName}" saved to remote Downloads folder!`,
+              isSelf: true
+            });
           } else if (data.type === 'terminal-result') {
             setTerminalLogs(prev => {
               const exists = prev.some(item => item.id === data.id);
@@ -671,6 +707,138 @@ function App() {
       dataChannelRef.current.send(JSON.stringify(eventData));
     } else if (socketRef.current) {
       socketRef.current.emit('control-event', eventData);
+    }
+  };
+
+  // P2P File Transfer Chunking Engine (Streams 60KB chunks safely over DataChannel / Socket)
+  const sendTransferPayload = (payload) => {
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      try {
+        dataChannelRef.current.send(JSON.stringify(payload));
+        return true;
+      } catch (err) {
+        console.warn('[Controller]: DataChannel send chunk error:', err);
+      }
+    }
+    if (socketRef.current) {
+      socketRef.current.emit('file-transfer-chunk', payload);
+      return true;
+    }
+    return false;
+  };
+
+  const sendFile = (file) => {
+    if (!file) return;
+    const transferId = 'transfer_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const CHUNK_SIZE = 60 * 1024; // 60 KB chunks
+    const fileSizeMb = (file.size / (1024 * 1024)).toFixed(2);
+    const fileSizeFormatted = file.size > 1024 * 1024 ? `${fileSizeMb} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+
+    setFileTransfer({
+      transferId,
+      fileName: file.name,
+      fileSizeFormatted,
+      totalBytes: file.size,
+      bytesSent: 0,
+      progress: 0,
+      speed: '0 KB/s',
+      isUploading: true,
+      isComplete: false,
+      error: null
+    });
+
+    const startTime = Date.now();
+    let offset = 0;
+    let chunkIndex = 0;
+
+    const readNextChunk = () => {
+      if (offset >= file.size) return;
+
+      const slice = file.slice(offset, offset + CHUNK_SIZE);
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const arrayBuffer = e.target.result;
+        let binary = '';
+        const bytes = new Uint8Array(arrayBuffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Chunk = btoa(binary);
+
+        const isFirstChunk = chunkIndex === 0;
+        const isLastChunk = offset + slice.size >= file.size;
+
+        const payload = {
+          type: 'file-transfer-chunk',
+          transferId,
+          fileName: file.name,
+          fileSize: file.size,
+          base64Chunk,
+          chunkIndex,
+          isFirstChunk,
+          isLastChunk
+        };
+
+        sendTransferPayload(payload);
+
+        offset += slice.size;
+        chunkIndex++;
+
+        const elapsedSec = (Date.now() - startTime) / 1000 || 0.1;
+        const currentSpeedBytes = offset / elapsedSec;
+        const speedStr = currentSpeedBytes > 1024 * 1024 
+          ? `${(currentSpeedBytes / (1024 * 1024)).toFixed(1)} MB/s` 
+          : `${Math.round(currentSpeedBytes / 1024)} KB/s`;
+
+        const progress = Math.min(100, Math.round((offset / file.size) * 100));
+
+        setFileTransfer(prev => prev && prev.transferId === transferId ? {
+          ...prev,
+          bytesSent: offset,
+          progress,
+          speed: speedStr,
+          isUploading: !isLastChunk,
+          isComplete: isLastChunk ? true : prev.isComplete
+        } : prev);
+
+        if (!isLastChunk) {
+          if (dataChannelRef.current && dataChannelRef.current.bufferedAmount > 256 * 1024) {
+            setTimeout(readNextChunk, 20);
+          } else {
+            setTimeout(readNextChunk, 4);
+          }
+        }
+      };
+
+      reader.readAsArrayBuffer(slice);
+    };
+
+    readNextChunk();
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDraggingOver) setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      console.log('[Controller]: Drag & Drop File detected:', file.name, file.size);
+      sendFile(file);
     }
   };
 
@@ -1296,6 +1464,20 @@ function App() {
                       </button>
 
                       <button 
+                        onClick={() => { 
+                          if (fileInputRef.current) fileInputRef.current.click();
+                          setShowToolsDropdown(false); 
+                        }} 
+                        className="dropdown-item"
+                      >
+                        <span className="dropdown-icon">📁</span>
+                        <div>
+                          <strong>Transfer File</strong>
+                          <small>Upload file to remote Downloads</small>
+                        </div>
+                      </button>
+
+                      <button 
                         onClick={() => {
                           const directUrl = `${window.location.origin}/?code=${roomId}`;
                           navigator.clipboard.writeText(directUrl);
@@ -1641,13 +1823,39 @@ function App() {
             </div>
           )}
 
+          {/* Hidden File Input for Actions Menu Upload */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            style={{ display: 'none' }} 
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                sendFile(e.target.files[0]);
+                e.target.value = '';
+              }
+            }} 
+          />
+
           <div 
             ref={containerRef}
             className="video-container"
             tabIndex={0} // Makes container focusable to receive keyboard events
             onClick={focusControl}
             onWheel={handleWheel}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
+            {/* Drag & Drop Visual Glow Overlay */}
+            {isDraggingOver && (
+              <div className="file-drop-overlay">
+                <div className="file-drop-card">
+                  <div className="file-drop-icon">📥</div>
+                  <h3>Drop File to Upload</h3>
+                  <p>Streaming directly to remote PC's <strong>Downloads</strong> folder</p>
+                </div>
+              </div>
+            )}
             <video
               ref={setVideoRef}
               autoPlay
@@ -1723,6 +1931,51 @@ function App() {
             Copy
           </button>
           <button onClick={() => setClipboardToast(null)} className="btn-toast-close">✕</button>
+        </div>
+      )}
+
+      {/* P2P Live File Transfer Progress Modal / Banner */}
+      {fileTransfer && (
+        <div className="file-transfer-toast">
+          <div className="file-toast-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="file-toast-icon">{fileTransfer.isComplete ? '✅' : '📤'}</span>
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: '#f8fafc', display: 'block' }}>{fileTransfer.fileName}</strong>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                  {fileTransfer.fileSizeFormatted} {fileTransfer.speed && !fileTransfer.isComplete ? `• ${fileTransfer.speed}` : ''}
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={() => setFileTransfer(null)} 
+              className="btn-file-toast-close"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="file-progress-track">
+            <div 
+              className="file-progress-fill" 
+              style={{ 
+                width: `${fileTransfer.progress}%`,
+                background: fileTransfer.isComplete 
+                  ? 'linear-gradient(90deg, #10b981 0%, #34d399 100%)' 
+                  : 'linear-gradient(90deg, #38bdf8 0%, #818cf8 100%)'
+              }}
+            />
+          </div>
+
+          <div className="file-toast-footer">
+            <span>
+              {fileTransfer.isComplete 
+                ? '✅ Saved in remote Downloads folder' 
+                : `Transferring ${fileTransfer.progress}%...`}
+            </span>
+            <strong>{fileTransfer.progress}%</strong>
+          </div>
         </div>
       )}
     </div>

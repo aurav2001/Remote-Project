@@ -145,6 +145,33 @@ async function handleTerminalCommand(data) {
   } catch (err) {
     console.error('[Host]: Failed executing terminal command:', err);
   }
+// Handle incoming P2P File Transfer Chunk
+async function handleIncomingFileChunk(data) {
+  if (!data || !data.transferId) return;
+  try {
+    const res = await window.electronAPI.saveFileChunk(data);
+    if (data.isLastChunk && res && res.success) {
+      console.log('[Host]: Successfully received file:', res.fileName, 'Saved to:', res.filePath);
+      const ackPayload = {
+        type: 'file-transfer-ack',
+        transferId: data.transferId,
+        fileName: res.fileName,
+        filePath: res.filePath,
+        bytesWritten: res.bytesWritten,
+        success: true
+      };
+      if (activeDataChannel && activeDataChannel.readyState === 'open') {
+        try {
+          activeDataChannel.send(JSON.stringify(ackPayload));
+        } catch (e) {}
+      }
+      if (roomId) {
+        window.electronAPI.emitSocket('file-transfer-ack', ackPayload);
+      }
+    }
+  } catch (err) {
+    console.error('[Host]: Failed processing incoming file chunk:', err);
+  }
 }
 
 let frameInterval = null;
@@ -373,6 +400,10 @@ async function createPeerConnection() {
           window.electronAPI.writeClipboard(data.text);
           return;
         }
+        if (data.type === 'file-transfer-chunk') {
+          handleIncomingFileChunk(data);
+          return;
+        }
         if (data.type === 'terminal-command') {
           handleTerminalCommand(data);
         } else {
@@ -490,6 +521,11 @@ window.electronAPI.onSocket('clipboard-sync', (data) => {
     console.log('[Host]: Received remote clipboard text via socket fallback:', data.text.substring(0, 30));
     window.electronAPI.writeClipboard(data.text);
   }
+});
+
+// Incoming file transfer chunks over socket fallback
+window.electronAPI.onSocket('file-transfer-chunk', (data) => {
+  handleIncomingFileChunk(data);
 });
 
 // Sync Host OS Clipboard changes to Controller

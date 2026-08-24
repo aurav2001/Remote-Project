@@ -112,6 +112,76 @@ ipcMain.handle('minimize-host-window', () => {
   }
 });
 
+// Active File Transfer WriteStreams Map
+const activeFileTransfers = new Map();
+
+ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Chunk, isFirstChunk, isLastChunk, fileSize }) => {
+  try {
+    const os = require('os');
+    const safeFileName = path.basename(fileName || 'received_file');
+    const downloadsDir = path.join(os.homedir(), 'Downloads');
+
+    if (!fs.existsSync(downloadsDir)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
+
+    let transfer = activeFileTransfers.get(transferId);
+
+    if (isFirstChunk || !transfer) {
+      let finalFilePath = path.join(downloadsDir, safeFileName);
+      // Auto-increment filename if duplicate exists
+      if (fs.existsSync(finalFilePath)) {
+        const ext = path.extname(safeFileName);
+        const nameWithoutExt = path.basename(safeFileName, ext);
+        let counter = 1;
+        while (fs.existsSync(path.join(downloadsDir, `${nameWithoutExt} (${counter})${ext}`))) {
+          counter++;
+        }
+        finalFilePath = path.join(downloadsDir, `${nameWithoutExt} (${counter})${ext}`);
+      }
+
+      const writeStream = fs.createWriteStream(finalFilePath, { flags: 'w' });
+      transfer = {
+        filePath: finalFilePath,
+        fileName: path.basename(finalFilePath),
+        stream: writeStream,
+        bytesWritten: 0
+      };
+      activeFileTransfers.set(transferId, transfer);
+      console.log(`[Main Process]: Starting file transfer: ${transfer.fileName} -> ${finalFilePath}`);
+    }
+
+    if (base64Chunk && transfer && transfer.stream) {
+      const buffer = Buffer.from(base64Chunk, 'base64');
+      transfer.stream.write(buffer);
+      transfer.bytesWritten += buffer.length;
+    }
+
+    if (isLastChunk && transfer && transfer.stream) {
+      transfer.stream.end();
+      activeFileTransfers.delete(transferId);
+      console.log(`[Main Process]: File transfer complete: ${transfer.fileName} (${transfer.bytesWritten} bytes saved)`);
+      return {
+        success: true,
+        fileName: transfer.fileName,
+        filePath: transfer.filePath,
+        bytesWritten: transfer.bytesWritten
+      };
+    }
+
+    return { success: true, pending: true };
+  } catch (err) {
+    console.error('[Main Process]: Error saving file chunk:', err);
+    if (activeFileTransfers.has(transferId)) {
+      try {
+        activeFileTransfers.get(transferId).stream.end();
+      } catch (e) {}
+      activeFileTransfers.delete(transferId);
+    }
+    return { success: false, error: err.message };
+  }
+});
+
 // Single Instance Lock: Prevents duplicate host instances from running concurrently
 const gotTheLock = app.requestSingleInstanceLock();
 
