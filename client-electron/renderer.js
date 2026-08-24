@@ -62,10 +62,17 @@ function generateRoomId() {
 
 // Get or initialize persistent access code from localStorage
 function getOrInitPermanentCode() {
-  let savedCode = localStorage.getItem('remoteg_permanent_access_code');
+  let savedCode = null;
+  try {
+    savedCode = localStorage.getItem('remoteg_permanent_access_code');
+  } catch (e) {
+    console.warn('localStorage read warning:', e);
+  }
   if (!savedCode || savedCode.length !== 6) {
     savedCode = generateRoomId();
-    localStorage.setItem('remoteg_permanent_access_code', savedCode);
+    try {
+      localStorage.setItem('remoteg_permanent_access_code', savedCode);
+    } catch (e) {}
   }
   roomId = savedCode;
   if (roomIdText) {
@@ -271,11 +278,19 @@ async function startSharing(sourceId) {
 // Load available screen sources
 async function loadSources() {
   try {
-    const sources = await window.electronAPI.getScreenSources();
+    updateStatus('connecting', 'Waiting for Controller...');
+    if (btnStart) btnStart.disabled = false;
+
+    let sources = [];
+    if (window.electronAPI && window.electronAPI.getScreenSources) {
+      sources = await window.electronAPI.getScreenSources();
+    }
+    
     if (screenSelect) {
       screenSelect.innerHTML = '';
-      if (sources.length === 0) {
-        screenSelect.innerHTML = '<option value="">No screens found</option>';
+      if (!sources || sources.length === 0) {
+        screenSelect.innerHTML = '<option value="screen:0:0">Primary Screen (Auto)</option>';
+        await startSharing('screen:0:0');
         return;
       }
       sources.sort((a, b) => (a.id.startsWith('screen') ? -1 : 1));
@@ -289,7 +304,7 @@ async function loadSources() {
 
     if (btnStart) btnStart.disabled = false;
 
-    if (!isSharingStarted && sources.length > 0) {
+    if (!isSharingStarted && sources && sources.length > 0) {
       const primarySourceId = sources[0].id;
       console.log('[Host]: Auto-starting screen capture for primary source:', primarySourceId);
       await startSharing(primarySourceId);
@@ -297,8 +312,16 @@ async function loadSources() {
   } catch (error) {
     console.error('Error loading sources:', error);
     if (screenSelect) {
-      screenSelect.innerHTML = '<option value="">Failed to load screens</option>';
+      screenSelect.innerHTML = '<option value="screen:0:0">Default Screen</option>';
     }
+    if (btnStart) {
+      btnStart.disabled = false;
+      btnStart.innerText = 'Start Screen Sharing';
+    }
+    // Attempt fallback capture on error
+    try {
+      await startSharing('screen:0:0');
+    } catch (e) {}
   }
 }
 

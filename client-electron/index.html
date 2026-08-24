@@ -376,6 +376,21 @@
     </div>
   </div>
 
+  <!-- Instant Room ID Initializer to ensure code is never blank/dashed on load -->
+  <script>
+    (function() {
+      try {
+        var savedCode = localStorage.getItem('remoteg_permanent_access_code');
+        if (!savedCode || savedCode.length !== 6) {
+          savedCode = Math.floor(100000 + Math.random() * 900000).toString();
+          localStorage.setItem('remoteg_permanent_access_code', savedCode);
+        }
+        var el = document.getElementById('room-id');
+        if (el) el.innerText = savedCode;
+      } catch(e) {}
+    })();
+  </script>
+
   <!-- Load renderer script -->
   <script src="renderer.js"></script>
 </body>
