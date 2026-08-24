@@ -145,6 +145,8 @@ async function handleTerminalCommand(data) {
   } catch (err) {
     console.error('[Host]: Failed executing terminal command:', err);
   }
+}
+
 // Handle incoming P2P File Transfer Chunk
 async function handleIncomingFileChunk(data) {
   if (!data || !data.transferId) return;
