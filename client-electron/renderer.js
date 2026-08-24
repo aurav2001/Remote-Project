@@ -312,6 +312,44 @@ function onStreamConnected() {
   }
 }
 
+function setupDataChannel(channel) {
+  if (!channel) return;
+  activeDataChannel = channel;
+  startDataChannelHeartbeat();
+  channel.onopen = () => {
+    console.log('[Host]: DataChannel opened!');
+    onStreamConnected();
+  };
+  channel.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'ping') {
+        if (channel.readyState === 'open') {
+          channel.send(JSON.stringify({ type: 'pong' }));
+        }
+        return;
+      }
+      if (data.type === 'pong') return;
+      if (data.type === 'clipboard-sync' && data.text) {
+        console.log('[Host]: Received remote controller clipboard text:', data.text.substring(0, 30));
+        window.electronAPI.writeClipboard(data.text);
+        return;
+      }
+      if (data.type === 'file-transfer-chunk') {
+        handleIncomingFileChunk(data);
+        return;
+      }
+      if (data.type === 'terminal-command') {
+        handleTerminalCommand(data);
+      } else {
+        window.electronAPI.sendControlEvent(data);
+      }
+    } catch (err) {
+      console.error('[Host]: Error parsing DataChannel event:', err);
+    }
+  };
+}
+
 // Setup WebRTC Peer Connection
 async function createPeerConnection() {
   hasAutoMinimized = false;
@@ -359,43 +397,17 @@ async function createPeerConnection() {
     }
   };
 
+  // 1. Create DataChannel on Offerer so SCTP application media section is negotiated in SDP offer
+  try {
+    const dc = peerConnection.createDataChannel('controlEvents');
+    setupDataChannel(dc);
+  } catch (e) {
+    console.warn('Host createDataChannel error:', e);
+  }
+
   peerConnection.ondatachannel = (event) => {
-    console.log('[Host]: Direct P2P WebRTC DataChannel established!');
-    activeDataChannel = event.channel;
-    startDataChannelHeartbeat();
-    onStreamConnected();
-    activeDataChannel.onopen = () => {
-      console.log('[Host]: DataChannel opened!');
-      onStreamConnected();
-    };
-    activeDataChannel.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'ping') {
-          if (activeDataChannel && activeDataChannel.readyState === 'open') {
-            activeDataChannel.send(JSON.stringify({ type: 'pong' }));
-          }
-          return;
-        }
-        if (data.type === 'pong') return;
-        if (data.type === 'clipboard-sync' && data.text) {
-          console.log('[Host]: Received remote controller clipboard text:', data.text.substring(0, 30));
-          window.electronAPI.writeClipboard(data.text);
-          return;
-        }
-        if (data.type === 'file-transfer-chunk') {
-          handleIncomingFileChunk(data);
-          return;
-        }
-        if (data.type === 'terminal-command') {
-          handleTerminalCommand(data);
-        } else {
-          window.electronAPI.sendControlEvent(data);
-        }
-      } catch (err) {
-        console.error('[Host]: Error parsing DataChannel event:', err);
-      }
-    };
+    console.log('[Host]: Direct P2P WebRTC DataChannel established via ondatachannel!');
+    setupDataChannel(event.channel);
   };
 
   peerConnection.onconnectionstatechange = () => {

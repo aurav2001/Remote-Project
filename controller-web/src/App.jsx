@@ -540,10 +540,12 @@ function App() {
       setStatus('connected');
     };
 
-    // Create WebRTC DataChannel for direct P2P low-latency control events & live system metrics & terminal
-    try {
-      const dataChannel = pc.createDataChannel('controlEvents');
+    // Listen for WebRTC DataChannel established by Host (Offerer)
+    pc.ondatachannel = (event) => {
+      const dataChannel = event.channel;
       dataChannelRef.current = dataChannel;
+      console.log('[Controller]: Direct P2P WebRTC DataChannel established from host!');
+
       dataChannel.onopen = () => {
         console.log('[Controller]: Direct P2P WebRTC DataChannel opened! Ultra-low latency mode active.');
       };
@@ -589,9 +591,7 @@ function App() {
       dataChannel.onclose = () => {
         console.log('[Controller]: WebRTC DataChannel closed.');
       };
-    } catch (err) {
-      console.warn('Failed to create WebRTC DataChannel:', err);
-    }
+    };
 
     // Set remote description (SDP Offer)
     const sdpOffer = new RTCSessionDescription({
