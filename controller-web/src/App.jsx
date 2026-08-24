@@ -472,10 +472,6 @@ function App() {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnectionRef.current = pc;
 
-    try {
-      pc.addTransceiver('video', { direction: 'recvonly' });
-    } catch (e) {}
-
     const isValidCandidate = (cand) => {
       return cand && (cand.candidate !== '' && cand.candidate !== undefined) && (cand.sdpMid !== null || cand.sdpMLineIndex !== null);
     };

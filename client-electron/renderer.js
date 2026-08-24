@@ -343,24 +343,11 @@ async function createPeerConnection() {
 
   videoTracks.forEach(track => {
     track.enabled = true;
-    // Set contentHint to 'detail' for ultra-sharp text and crisp desktop graphics
     if ('contentHint' in track) {
       track.contentHint = 'detail';
     }
     console.log('[Host]: Adding Crisp HD screen video track to PeerConnection:', track.id);
-    const sender = peerConnection.addTrack(track, localStream);
-    if (sender && sender.setParameters) {
-      try {
-        const params = sender.getParameters();
-        if (!params.encodings || params.encodings.length === 0) {
-          params.encodings = [{}];
-        }
-        params.encodings[0].maxBitrate = 8000000; // 8 Mbps High Quality Bitrate
-        params.encodings[0].maxFramerate = 60;
-        params.degradationPreference = 'maintain-framerate'; // Ensures smooth 60fps framerate never holds/freezes on minimize
-        sender.setParameters(params).catch(e => console.warn('Bitrate param error:', e));
-      } catch (err) {}
-    }
+    peerConnection.addTrack(track, localStream);
   });
 
   peerConnection.onicecandidate = (event) => {
@@ -437,9 +424,6 @@ async function createPeerConnection() {
 }
 
 async function handleControllerJoined() {
-  if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
-    window.electronAPI.minimizeHostWindow().catch(err => {});
-  }
   if (isInitiatingOffer) return;
 
   // Prevent destroying active connected peer session on duplicate ready signals
@@ -471,6 +455,10 @@ async function handleControllerJoined() {
         sdp: offer.sdp
       }
     });
+
+    if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
+      window.electronAPI.minimizeHostWindow().catch(err => {});
+    }
   } catch (err) {
     console.error('Error initiating WebRTC offer:', err);
   } finally {
