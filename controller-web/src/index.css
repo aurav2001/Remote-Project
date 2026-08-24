@@ -319,8 +319,9 @@ body {
 
 .control-bar {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  bottom: 20px;
+  left: 20px;
+  top: auto;
   transform: none;
   display: flex;
   flex-direction: column;
@@ -1508,7 +1509,8 @@ body {
 
 .tools-dropdown-menu {
   position: absolute;
-  top: 0;
+  bottom: 0;
+  top: auto;
   left: 100%;
   margin-left: 12px;
   z-index: 99999 !important;
