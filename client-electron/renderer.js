@@ -81,6 +81,9 @@ function getOrInitPermanentCode() {
   return roomId;
 }
 
+// Initialize code immediately on load
+getOrInitPermanentCode();
+
 // Reset/Regenerate permanent access code
 function resetPermanentCode() {
   const newCode = generateRoomId();
@@ -260,8 +263,8 @@ async function startSharing(sourceId) {
     startSocketFrameRelay();
 
     if (btnStart) {
-      btnStart.innerText = 'Streaming Screen (Auto-Started)';
-      btnStart.disabled = true;
+      btnStart.innerText = 'Screen Streaming Active';
+      btnStart.disabled = false;
     }
     if (screenSelect) {
       screenSelect.disabled = false;

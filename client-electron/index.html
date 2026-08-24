@@ -363,11 +363,11 @@
     <div class="input-group">
       <label for="screen-select">Select Monitor / Window to Stream</label>
       <select id="screen-select" class="select-screen">
-        <option value="">Loading sources...</option>
+        <option value="">Detecting screens...</option>
       </select>
     </div>
 
-    <button id="btn-start" class="btn-start" disabled>Sharing Screen (Auto-Started)</button>
+    <button id="btn-start" class="btn-start">Start Screen Sharing</button>
     
     <video id="local-video" autoplay playsinline muted></video>
 
@@ -376,7 +376,7 @@
     </div>
   </div>
 
-  <!-- Instant Room ID Initializer to ensure code is never blank/dashed on load -->
+  <!-- Instant Room ID Initializer -->
   <script>
     (function() {
       try {
