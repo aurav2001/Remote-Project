@@ -445,8 +445,8 @@ function updateNetworkSpeed() {
 updateDiskAndBattery();
 updateNetworkSpeed();
 
-// Periodic update intervals
-setInterval(updateDiskAndBattery, 5000);
+// Periodic update intervals (light 30s background poll)
+setInterval(updateDiskAndBattery, 30000);
 
 function formatUptime(seconds) {
   const hrs = Math.floor(seconds / 3600);

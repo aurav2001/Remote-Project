@@ -191,27 +191,11 @@ const relayCanvas = document.createElement('canvas');
 const relayCtx = relayCanvas.getContext('2d');
 
 function startSocketFrameRelay() {
-  if (frameInterval) return;
-  console.log('[Host]: Starting Hybrid Canvas Frame Stream Fallback...');
-  const localVideo = document.getElementById('local-video');
-
-  frameInterval = setInterval(() => {
-    if (!localVideo || localVideo.readyState < 2 || localVideo.videoWidth === 0) return;
-    relayCanvas.width = 1280;
-    relayCanvas.height = 720;
-    relayCtx.drawImage(localVideo, 0, 0, relayCanvas.width, relayCanvas.height);
-    try {
-      const jpegData = relayCanvas.toDataURL('image/jpeg', 0.5);
-      if (roomId) {
-        window.electronAPI.emitSocket('screen-frame', { roomId, frame: jpegData });
-      }
-    } catch (e) {}
-  }, 100);
+  // Light fallback - disabled by default to save 100% CPU for smooth WebRTC 60fps streaming
 }
 
 function stopSocketFrameRelay() {
   if (frameInterval) {
-    console.log('[Host]: WebRTC stream connected. Pausing socket frame relay.');
     clearInterval(frameInterval);
     frameInterval = null;
   }
@@ -259,8 +243,6 @@ async function startSharing(sourceId) {
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
     }
-
-    startSocketFrameRelay();
 
     if (btnStart) {
       btnStart.innerText = 'Screen Streaming Active';
@@ -336,11 +318,7 @@ function onStreamConnected() {
   if (!hasAutoMinimized && window.electronAPI && window.electronAPI.minimizeHostWindow) {
     hasAutoMinimized = true;
     console.log('[Host]: Triggering auto-minimize on stream connection...');
-    setTimeout(() => {
-      if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
-        window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
-      }
-    }, 250);
+    window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
   }
 }
 
