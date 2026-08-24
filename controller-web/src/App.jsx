@@ -129,6 +129,8 @@ function App() {
       console.log('Binding remote stream to video element srcObject and invoking play()');
       videoRef.current.srcObject = remoteStreamRef.current;
       videoRef.current.play().catch(err => console.warn('Video autoplay warning:', err));
+      // Auto-trigger host agent window minimize to ensure clear unblocked remote screen
+      sendControlData({ type: 'minimize-host' });
     }
   }, [status]);
 
@@ -1454,6 +1456,21 @@ function App() {
                           </div>
                         </button>
                       )}
+
+                      <button 
+                        onClick={() => {
+                          sendControlData({ type: 'minimize-host' });
+                          setShowToolsDropdown(false);
+                        }} 
+                        className="dropdown-item"
+                        title="Force-minimize the Host Agent window on the remote machine"
+                      >
+                        <span className="dropdown-icon">🗕</span>
+                        <div>
+                          <strong>Minimize Host Window</strong>
+                          <small>Hide Agent to Taskbar</small>
+                        </div>
+                      </button>
 
                       <button 
                         onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }} 

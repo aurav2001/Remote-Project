@@ -84,6 +84,8 @@ function createWindow() {
     width: 520,
     height: 640,
     resizable: false,
+    minimizable: true,
+    maximizable: false,
     autoHideMenuBar: true,
     title: 'UnioTechIT System Host Agent',
     icon: path.join(__dirname, 'icon.png'),
@@ -105,12 +107,17 @@ function createWindow() {
   });
 }
 
-// IPC Handler to auto-minimize host window on remote connection
+// IPC Handler to auto-minimize host window on remote connection (Electron + Win32 SW_FORCEMINIMIZE)
 ipcMain.handle('minimize-host-window', () => {
-  if (mainWindow && !mainWindow.isMinimized()) {
-    console.log('[Main Process]: Auto-minimizing host window on successful remote connection...');
-    mainWindow.minimize();
-  }
+  console.log('[Main Process]: Triggering dual Electron + Native Win32 force-minimize on host window...');
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize();
+      mainWindow.blur();
+    }
+  } catch (e) {}
+  // Native Win32 SW_FORCEMINIMIZE via C# helper
+  sendInputHelperCommand('minimizehost');
 });
 
 // Active File Transfer WriteStreams Map
