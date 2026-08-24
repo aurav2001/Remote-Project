@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.remoteg.remote",
-    "productName": "RemoteG",
+    "productName": "UnioTechIT",
     "directories": {
       "output": "dist-build"
     },
@@ -26,7 +26,8 @@
       "index.html",
       "renderer.js",
       "input-helper.exe",
-      "icon.png"
+      "icon.png",
+      "logo.png"
     ],
     "asar": true,
     "asarUnpack": [

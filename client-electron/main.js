@@ -82,7 +82,8 @@ function createWindow() {
     height: 640,
     resizable: false,
     autoHideMenuBar: true,
-    title: 'RemoteG System Host Agent',
+    title: 'UnioTechIT System Host Agent',
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       backgroundThrottling: false, // Ensures screen video capture never freezes when window is minimized or covered!
       preload: path.join(__dirname, 'preload.js'),

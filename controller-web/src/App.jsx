@@ -816,10 +816,10 @@ function App() {
       <div className="dashboard-root" style={{ display: status === 'connected' ? 'none' : 'block' }}>
           {/* Top Navbar Header */}
           <div className="dashboard-nav">
-            <div className="dashboard-brand">
-              <div className="dashboard-brand-icon">⚡</div>
+            <div className="dashboard-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <img src="/logo.png" alt="UnioTechIT Logo" style={{ height: '38px', maxWidth: '160px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(56, 189, 248, 0.4))' }} />
               <div>
-                <h2>RemoteG Central Portal</h2>
+                <h2 style={{ margin: 0, fontSize: '1.2rem', background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UnioTechIT Central Portal</h2>
               </div>
             </div>
 
@@ -1059,9 +1059,10 @@ function App() {
               <div className="glow-sphere sphere-2"></div>
               
               <div className="login-card">
-                <div className="card-header">
-                  <h1>RemoteG Control</h1>
-                  <p>Connect to a Remote System Node</p>
+                <div className="card-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                  <img src="/logo.png" alt="UnioTechIT Logo" style={{ height: '65px', maxWidth: '240px', objectFit: 'contain', filter: 'drop-shadow(0 4px 16px rgba(56, 189, 248, 0.4))', marginBottom: '4px' }} />
+                  <h1 style={{ margin: 0, background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UnioTechIT Control</h1>
+                  <p style={{ margin: 0 }}>Connect to a Remote System Node</p>
                 </div>
 
                 <form onSubmit={handleConnect} className="login-form">
@@ -1368,7 +1369,7 @@ function App() {
               {/* Console Output Window */}
               <div className="terminal-output" ref={terminalLogsRef}>
                 <div className="terminal-welcome">
-                  RemoteG Silent Background Shell [{shellType.toUpperCase()}] connected.<br />
+                  UnioTechIT Silent Background Shell [{shellType.toUpperCase()}] connected.<br />
                   Commands run silently on host machine without displaying any windows on the target PC screen.
                 </div>
 
