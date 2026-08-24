@@ -712,19 +712,21 @@ function App() {
 
   // P2P File Transfer Chunking Engine (Streams 60KB chunks safely over DataChannel / Socket)
   const sendTransferPayload = (payload) => {
+    const fullPayload = { roomId, ...payload };
+    let sent = false;
     if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
       try {
-        dataChannelRef.current.send(JSON.stringify(payload));
-        return true;
+        dataChannelRef.current.send(JSON.stringify(fullPayload));
+        sent = true;
       } catch (err) {
         console.warn('[Controller]: DataChannel send chunk error:', err);
       }
     }
-    if (socketRef.current) {
-      socketRef.current.emit('file-transfer-chunk', payload);
-      return true;
+    if (!sent && socketRef.current) {
+      socketRef.current.emit('file-transfer-chunk', fullPayload);
+      sent = true;
     }
-    return false;
+    return sent;
   };
 
   const sendFile = (file) => {
@@ -744,6 +746,7 @@ function App() {
       speed: '0 KB/s',
       isUploading: true,
       isComplete: false,
+      statusText: 'Transferring...',
       error: null
     });
 
@@ -800,7 +803,7 @@ function App() {
           progress,
           speed: speedStr,
           isUploading: !isLastChunk,
-          isComplete: isLastChunk ? true : prev.isComplete
+          statusText: isLastChunk ? 'Saving on target PC...' : 'Transferring...'
         } : prev);
 
         if (!isLastChunk) {

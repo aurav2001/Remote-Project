@@ -202,6 +202,25 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay File Transfer Chunk (controller -> host)
+  socket.on('file-transfer-chunk', (data) => {
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      if (room.host) {
+        io.to(room.host).emit('file-transfer-chunk', data);
+      }
+    }
+  });
+
+  // Relay File Transfer Acknowledgment (host -> controller)
+  socket.on('file-transfer-ack', (data) => {
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('file-transfer-ack', data);
+    }
+  });
+
   // Handle Disconnect with brief grace period for Wi-Fi reconnects
   socket.on('disconnect', (reason) => {
     console.log(`User disconnected: ${socket.id}, reason: ${reason}`);
