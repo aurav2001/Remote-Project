@@ -129,6 +129,12 @@ function sendInputHelperCommand(cmd) {
   }
 }
 
+let isQuitting = false;
+
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 520,
@@ -150,6 +156,15 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
   // mainWindow.webContents.openDevTools();
+
+  // Intercept window close (X button) to hide into System Tray instead of terminating WebRTC session
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      console.log('[Main Process]: Window close intercepted — hiding to System Tray to keep remote session active.');
+      mainWindow.hide();
+    }
+  });
   
   // Relay renderer console.log to main process terminal
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
