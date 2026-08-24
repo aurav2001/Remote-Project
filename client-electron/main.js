@@ -9,9 +9,11 @@ try {
   app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
   app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
   // Disable background throttling & occlusion to prevent screen stream freezing when host window is minimized
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
   const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {

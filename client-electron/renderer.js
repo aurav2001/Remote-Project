@@ -273,8 +273,25 @@ async function loadSources() {
   }
 }
 
+let hasAutoMinimized = false;
+
+function onStreamConnected() {
+  updateStatus('connected', 'Connected & Streaming');
+  stopSocketFrameRelay();
+  if (!hasAutoMinimized && window.electronAPI && window.electronAPI.minimizeHostWindow) {
+    hasAutoMinimized = true;
+    console.log('[Host]: Triggering auto-minimize on stream connection...');
+    setTimeout(() => {
+      if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
+        window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
+      }
+    }, 250);
+  }
+}
+
 // Setup WebRTC Peer Connection
 async function createPeerConnection() {
+  hasAutoMinimized = false;
   if (peerConnection) {
     try {
       peerConnection.close();
@@ -315,9 +332,9 @@ async function createPeerConnection() {
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
-        params.encodings[0].maxBitrate = 12000000; // 12 Mbps High Quality Bitrate
+        params.encodings[0].maxBitrate = 8000000; // 8 Mbps High Quality Bitrate
         params.encodings[0].maxFramerate = 60;
-        params.degradationPreference = 'maintain-resolution'; // Force WebRTC to preserve crisp resolution always
+        params.degradationPreference = 'maintain-framerate'; // Ensures smooth 60fps framerate never holds/freezes on minimize
         sender.setParameters(params).catch(e => console.warn('Bitrate param error:', e));
       } catch (err) {}
     }
@@ -336,6 +353,11 @@ async function createPeerConnection() {
     console.log('[Host]: Direct P2P WebRTC DataChannel established!');
     activeDataChannel = event.channel;
     startDataChannelHeartbeat();
+    onStreamConnected();
+    activeDataChannel.onopen = () => {
+      console.log('[Host]: DataChannel opened!');
+      onStreamConnected();
+    };
     activeDataChannel.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -365,11 +387,7 @@ async function createPeerConnection() {
   peerConnection.onconnectionstatechange = () => {
     console.log(`[Host]: Connection state changed to: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'connected') {
-      updateStatus('connected', 'Connected & Streaming');
-      stopSocketFrameRelay();
-      if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
-        window.electronAPI.minimizeHostWindow().catch(() => {});
-      }
+      onStreamConnected();
     } else if (peerConnection.connectionState === 'disconnected') {
       updateStatus('connecting', 'Network blip. Reconnecting stream...');
       startSocketFrameRelay();
@@ -380,6 +398,13 @@ async function createPeerConnection() {
       if (peerConnection.restartIce) {
         peerConnection.restartIce();
       }
+    }
+  };
+
+  peerConnection.oniceconnectionstatechange = () => {
+    console.log(`[Host]: ICE connection state changed to: ${peerConnection.iceConnectionState}`);
+    if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+      onStreamConnected();
     }
   };
 }
