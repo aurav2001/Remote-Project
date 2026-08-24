@@ -37,7 +37,24 @@ app.get('/api/health', (req, res) => {
 
 // Wildcard fallback for Single Page Application (SPA) routes
 app.get('*', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  return res.send(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>UnioTechIT Remote Desktop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body style="background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+    <div style="text-align:center;padding:40px 30px;background:#1e293b;border:1px solid rgba(129,140,248,0.3);border-radius:20px;box-shadow:0 20px 40px rgba(0,0,0,0.6);max-width:400px;">
+      <h1 style="background:linear-gradient(135deg, #38bdf8, #818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0 0 10px 0;font-size:1.8rem;">UnioTechIT Server</h1>
+      <p style="color:#94a3b8;margin:0 0 24px 0;font-size:0.9rem;">Signaling & Remote Desktop Core is Online ⚡</p>
+      <a href="/download" style="display:inline-block;background:linear-gradient(135deg, #10b981, #059669);color:#fff;padding:12px 24px;border-radius:100px;text-decoration:none;font-weight:600;font-size:0.9rem;box-shadow:0 4px 14px rgba(16,185,129,0.4);">📥 Download UnioTechIT Setup</a>
+    </div>
+  </body>
+</html>`);
 });
 
 const server = http.createServer(app);
