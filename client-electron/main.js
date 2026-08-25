@@ -435,8 +435,10 @@ prevCpuTimes = getCpuTimes();
 let lastNetBytes = null;
 let lastNetTime = Date.now();
 let lastNetSpeed = { download: '0 KB/s', upload: '0 KB/s' };
-
-let lastDiskAndBattery = {
+let lastSystemStats = {
+  ramTotalGb: null,
+  ramUsedGb: null,
+  ramPercent: null,
   diskFreeGb: 'N/A',
   diskTotalGb: 'N/A',
   diskPercent: 0,
@@ -444,29 +446,56 @@ let lastDiskAndBattery = {
   isCharging: false
 };
 
-// Asynchronously fetch Disk & Battery status via PowerShell
-function updateDiskAndBattery() {
-  const cmd = `powershell -NoProfile -Command "$disk = Get-CimInstance Win32_LogicalDisk -Filter \\"DeviceID='C:'\\"; $batt = Get-CimInstance Win32_Battery; $free = if($disk){$disk.FreeSpace}else{0}; $size = if($disk){$disk.Size}else{0}; $battVal = if($batt){$batt.EstimatedChargeRemaining}else{-1}; $battStatus = if($batt){$batt.BatteryStatus}else{-1}; Write-Output \\"$size|$free|$battVal|$battStatus\\""`;
-  
-  exec(cmd, { windowsHide: true }, (err, stdout) => {
+// Asynchronously fetch accurate Task Manager RAM, Disk C: & Battery status via PowerShell
+function updateSystemStats() {
+  const psScript = `
+$os = Get-CimInstance Win32_OperatingSystem
+$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+$batt = Get-CimInstance Win32_Battery
+
+$totalRamMb = [math]::Round($os.TotalVisibleMemorySize / 1024, 0)
+$freeRamMb = [math]::Round($os.FreePhysicalMemory / 1024, 0)
+$usedRamMb = $totalRamMb - $freeRamMb
+
+$diskTotalGb = if ($disk) { [math]::Round($disk.Size / 1073741824, 1) } else { 0 }
+$diskFreeGb = if ($disk) { [math]::Round($disk.FreeSpace / 1073741824, 1) } else { 0 }
+
+$batteryPct = if ($batt) { $batt.EstimatedChargeRemaining } else { -1 }
+$batteryStatus = if ($batt) { $batt.BatteryStatus } else { -1 }
+
+"$totalRamMb|$freeRamMb|$usedRamMb|$diskTotalGb|$diskFreeGb|$batteryPct|$batteryStatus"
+`.trim();
+
+  const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
+  exec(`powershell -NoProfile -EncodedCommand ${b64}`, { windowsHide: true }, (err, stdout) => {
     if (!err && stdout) {
       const parts = stdout.trim().split('|');
-      if (parts.length >= 2) {
-        const total = parseFloat(parts[0]);
-        const free = parseFloat(parts[1]);
-        if (total > 0) {
-          const used = total - free;
-          lastDiskAndBattery.diskTotalGb = (total / (1024 * 1024 * 1024)).toFixed(1);
-          lastDiskAndBattery.diskFreeGb = (free / (1024 * 1024 * 1024)).toFixed(1);
-          lastDiskAndBattery.diskPercent = Math.round((used / total) * 100);
+      if (parts.length >= 3) {
+        const totalMb = parseFloat(parts[0]);
+        const freeMb = parseFloat(parts[1]);
+        const usedMb = parseFloat(parts[2]);
+        if (totalMb > 0) {
+          lastSystemStats.ramTotalGb = (totalMb / 1024).toFixed(1);
+          lastSystemStats.ramUsedGb = (usedMb / 1024).toFixed(1);
+          lastSystemStats.ramPercent = Math.round((usedMb / totalMb) * 100);
         }
       }
-      if (parts.length >= 4) {
-        const battVal = parseInt(parts[2], 10);
-        const battStatus = parseInt(parts[3], 10);
+      if (parts.length >= 5) {
+        const dTot = parseFloat(parts[3]);
+        const dFree = parseFloat(parts[4]);
+        if (dTot > 0) {
+          lastSystemStats.diskTotalGb = dTot.toFixed(1);
+          lastSystemStats.diskFreeGb = dFree.toFixed(1);
+          const dUsed = dTot - dFree;
+          lastSystemStats.diskPercent = Math.round((dUsed / dTot) * 100);
+        }
+      }
+      if (parts.length >= 7) {
+        const battVal = parseInt(parts[5], 10);
+        const battStatus = parseInt(parts[6], 10);
         if (!isNaN(battVal) && battVal >= 0) {
-          lastDiskAndBattery.batteryPercent = battVal;
-          lastDiskAndBattery.isCharging = (battStatus === 2 || battStatus === 6 || battStatus === 7 || battStatus === 8);
+          lastSystemStats.batteryPercent = battVal;
+          lastSystemStats.isCharging = (battStatus === 2 || battStatus === 6 || battStatus === 7 || battStatus === 8);
         }
       }
     }
@@ -479,33 +508,29 @@ function updateNetworkSpeed() {
     if (!err && stdout) {
       const lines = stdout.split('\n');
       for (const line of lines) {
-        if (line.toLowerCase().includes('bytes')) {
-          const tokens = line.trim().split(/\s+/);
-          if (tokens.length >= 3) {
-            const rx = parseInt(tokens[1], 10);
-            const tx = parseInt(tokens[2], 10);
+        const trimmed = line.trim();
+        if (trimmed.startsWith('Bytes')) {
+          const nums = trimmed.match(/\d+/g);
+          if (nums && nums.length >= 2) {
+            const rxBytes = parseInt(nums[0], 10);
+            const txBytes = parseInt(nums[1], 10);
             const now = Date.now();
-            if (lastNetBytes && !isNaN(rx) && !isNaN(tx)) {
-              const timeDiff = (now - lastNetTime) / 1000;
-              if (timeDiff > 0) {
-                const rxRate = Math.max(0, (rx - lastNetBytes.rx) / timeDiff);
-                const txRate = Math.max(0, (tx - lastNetBytes.tx) / timeDiff);
 
-                const formatSpeed = (bytesPerSec) => {
-                  if (bytesPerSec >= 1024 * 1024) {
-                    return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
-                  } else {
-                    return `${Math.round(bytesPerSec / 1024)} KB/s`;
-                  }
-                };
+            if (lastNetBytes) {
+              const dt = (now - lastNetTime) / 1000;
+              if (dt > 0) {
+                const rxDiff = Math.max(0, rxBytes - lastNetBytes.rx);
+                const txDiff = Math.max(0, txBytes - lastNetBytes.tx);
 
-                lastNetSpeed = {
-                  download: formatSpeed(rxRate),
-                  upload: formatSpeed(txRate)
-                };
+                const rxKb = rxDiff / 1024 / dt;
+                const txKb = txDiff / 1024 / dt;
+
+                lastNetSpeed.download = rxKb > 1024 ? `${(rxKb / 1024).toFixed(1)} MB/s` : `${Math.round(rxKb)} KB/s`;
+                lastNetSpeed.upload = txKb > 1024 ? `${(txKb / 1024).toFixed(1)} MB/s` : `${Math.round(txKb)} KB/s`;
               }
             }
-            lastNetBytes = { rx, tx };
+
+            lastNetBytes = { rx: rxBytes, tx: txBytes };
             lastNetTime = now;
             break;
           }
@@ -515,13 +540,11 @@ function updateNetworkSpeed() {
   });
 }
 
-// Initial calls
-updateDiskAndBattery();
+// Initialize system metrics collection
+updateSystemStats();
 updateNetworkSpeed();
-
-// Periodic update intervals (light 30s background poll)
-setInterval(updateDiskAndBattery, 30000);
-setInterval(updateNetworkSpeed, 10000);
+setInterval(updateNetworkSpeed, 2000);
+setInterval(updateSystemStats, 10000);
 
 function formatUptime(seconds) {
   const hrs = Math.floor(seconds / 3600);
@@ -602,17 +625,17 @@ function collectLiveMetrics() {
     domain: userDomain,
     lastReboot,
     cpuPercent,
-    ramUsedGb,
-    ramTotalGb,
-    ramPercent,
-    diskFreeGb: lastDiskAndBattery.diskFreeGb,
-    diskTotalGb: lastDiskAndBattery.diskTotalGb,
-    diskPercent: lastDiskAndBattery.diskPercent,
+    ramUsedGb: lastSystemStats.ramUsedGb || ramUsedGb,
+    ramTotalGb: lastSystemStats.ramTotalGb || ramTotalGb,
+    ramPercent: lastSystemStats.ramPercent !== null ? lastSystemStats.ramPercent : ramPercent,
+    diskFreeGb: lastSystemStats.diskFreeGb,
+    diskTotalGb: lastSystemStats.diskTotalGb,
+    diskPercent: lastSystemStats.diskPercent,
     downloadSpeed: lastNetSpeed.download,
     uploadSpeed: lastNetSpeed.upload,
     uptime: formatUptime(uptimeSec),
-    batteryPercent: lastDiskAndBattery.batteryPercent,
-    isCharging: lastDiskAndBattery.isCharging
+    batteryPercent: lastSystemStats.batteryPercent,
+    isCharging: lastSystemStats.isCharging
   };
 }
 
