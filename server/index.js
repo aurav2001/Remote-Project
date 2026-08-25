@@ -11,17 +11,27 @@ const fs = require('fs');
 
 // Direct Setup & Installer Download endpoints (Handles clicks from Web Controller UI)
 app.get(['/download', '/RemoteG-Setup.zip', '/UnioTechIT-Setup.zip'], (req, res) => {
-  const zipPath = path.join(__dirname, '../client-electron/RemoteG-Setup.zip');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  const zipPath = path.join(__dirname, '../client-electron/UnioTechIT-Setup.zip');
+  const altZipPath = path.join(__dirname, '../client-electron/RemoteG-Setup.zip');
   if (fs.existsSync(zipPath)) {
     return res.download(zipPath, 'UnioTechIT-Setup.zip');
   }
-  return res.redirect('https://github.com/aurav2001/Remote-Project/raw/main/client-electron/RemoteG-Setup.zip');
+  if (fs.existsSync(altZipPath)) {
+    return res.download(altZipPath, 'UnioTechIT-Setup.zip');
+  }
+  return res.redirect('https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip');
 });
 
 app.get(['/UnioTechIT-Setup.exe', '/RemoteG-Setup.exe'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   const exePath = path.join(__dirname, '../client-electron/dist-build/UnioTechIT Setup 1.0.0.exe');
+  const altExePath = path.join(__dirname, '../UnioTechIT Setup 1.0.0.exe');
   if (fs.existsSync(exePath)) {
     return res.download(exePath, 'UnioTechIT-Setup.exe');
+  }
+  if (fs.existsSync(altExePath)) {
+    return res.download(altExePath, 'UnioTechIT-Setup.exe');
   }
   return res.redirect('https://github.com/aurav2001/Remote-Project/raw/main/UnioTechIT%20Setup%201.0.0.exe');
 });

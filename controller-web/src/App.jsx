@@ -74,6 +74,31 @@ function App() {
   const [fileTransfer, setFileTransfer] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Single-instance download protection to avoid duplicate downloads
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadSetup = () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+
+    const downloadUrl = `${SIGNALING_SERVER}/download`;
+    const tempLink = document.createElement('a');
+    tempLink.href = downloadUrl;
+    tempLink.setAttribute('download', 'UnioTechIT-Setup.zip');
+    tempLink.style.display = 'none';
+    document.body.appendChild(tempLink);
+    tempLink.click();
+    setTimeout(() => {
+      if (document.body.contains(tempLink)) {
+        document.body.removeChild(tempLink);
+      }
+    }, 200);
+
+    setTimeout(() => {
+      setIsDownloading(false);
+    }, 4000);
+  };
+
   // Connect to signaling server on mount to receive real-time active hosts
   useEffect(() => {
     const globalSocket = io(SIGNALING_SERVER, {
@@ -1334,26 +1359,29 @@ function App() {
                     💻 Need to control a new PC?
                   </span>
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <a
-                      href={`${SIGNALING_SERVER}/download`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={handleDownloadSetup}
+                      disabled={isDownloading}
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        background: isDownloading
+                          ? 'rgba(16, 185, 129, 0.4)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                         color: '#fff',
                         padding: '8px 16px',
                         borderRadius: '100px',
                         fontSize: '0.85rem',
                         fontWeight: 600,
-                        textDecoration: 'none',
-                        boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                        border: 'none',
+                        cursor: isDownloading ? 'not-allowed' : 'pointer',
+                        boxShadow: isDownloading ? 'none' : '0 4px 12px rgba(16, 185, 129, 0.3)',
+                        transition: 'all 0.2s ease'
                       }}
                     >
-                      📥 Download Setup (72 MB .zip)
-                    </a>
+                      {isDownloading ? '⏳ Starting Download...' : '📥 Download Setup (72 MB .zip)'}
+                    </button>
 
                     <button
                       onClick={() => {
