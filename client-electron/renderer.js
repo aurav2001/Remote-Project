@@ -6,7 +6,7 @@ const roomIdText = document.getElementById('room-id');
 const btnCopy = document.getElementById('btn-copy');
 const btnResetCode = document.getElementById('btn-reset-code');
 
-const SIGNALING_SERVER = 'https://remote-desktop-signaling-syj4.onrender.com';
+const SIGNALING_SERVER = 'https://remote-project.onrender.com';
 let localStream = null;
 let peerConnection = null;
 let activeDataChannel = null;
