@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm --prefix controller-web run build",
+  "outputDirectory": "controller-web/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

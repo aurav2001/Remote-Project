@@ -76,14 +76,14 @@ function App() {
 
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
+  const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
 
   const handleDownloadSetup = () => {
     if (isDownloading) return;
     setIsDownloading(true);
 
-    const downloadUrl = `${SIGNALING_SERVER}/download`;
     const tempLink = document.createElement('a');
-    tempLink.href = downloadUrl;
+    tempLink.href = GITHUB_DOWNLOAD_URL;
     tempLink.setAttribute('download', 'UnioTechIT-Setup.zip');
     tempLink.style.display = 'none';
     document.body.appendChild(tempLink);
@@ -1385,7 +1385,7 @@ function App() {
 
                     <button
                       onClick={() => {
-                        const downloadUrl = `${SIGNALING_SERVER}/download`;
+                        const downloadUrl = GITHUB_DOWNLOAD_URL;
                         navigator.clipboard.writeText(downloadUrl);
                         alert(`WhatsApp Direct Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
                       }}
