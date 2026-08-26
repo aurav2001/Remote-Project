@@ -5,10 +5,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Builds and production outputs
-dist/
 dist-build/
-!controller-web/dist/
-!controller-web/dist/**
 .env
 
 # OS & local binary outputs

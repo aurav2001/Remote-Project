@@ -37,8 +37,27 @@ app.get(['/UnioTechIT-Setup.exe', '/RemoteG-Setup.exe'], (req, res) => {
 });
 
 // Serve compiled Web Controller frontend static assets directly on Render
-const distPath = path.join(__dirname, '../controller-web/dist');
+function getStaticDistPath() {
+  const possiblePaths = [
+    path.join(__dirname, 'public'),
+    path.join(__dirname, '../controller-web/dist'),
+    path.join(__dirname, 'dist'),
+    path.join(process.cwd(), 'controller-web/dist'),
+    path.join(process.cwd(), 'server/public'),
+    path.join(process.cwd(), 'public')
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(path.join(p, 'index.html'))) {
+      return p;
+    }
+  }
+  return path.join(__dirname, 'public');
+}
+
+const distPath = getStaticDistPath();
 app.use(express.static(distPath));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '../controller-web/dist')));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -47,7 +66,8 @@ app.get('/api/health', (req, res) => {
 
 // Wildcard fallback for Single Page Application (SPA) routes
 app.get('*', (req, res) => {
-  const indexPath = path.join(distPath, 'index.html');
+  const currentDist = getStaticDistPath();
+  const indexPath = path.join(currentDist, 'index.html');
   if (fs.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
