@@ -118,6 +118,9 @@ function updateStatus(status, text) {
 
 // Register Host Room with Signaling Server
 async function registerHostOnServer() {
+  if (!roomId) {
+    await getOrInitPermanentCode();
+  }
   if (!socket || !socket.connected || !roomId) return;
   let systemInfo = null;
   try {
@@ -670,14 +673,15 @@ if (screenSelect) {
   });
 }
 
-// Ensure persistent Room ID is ready
-getOrInitPermanentCode();
-
-// Initialize socket immediately
-initSocket();
-
-if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', loadSources);
-} else {
-  loadSources();
+// Bootstrapping Host Application
+async function bootstrap() {
+  await getOrInitPermanentCode();
+  initSocket();
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', loadSources);
+  } else {
+    loadSources();
+  }
 }
+
+bootstrap();
