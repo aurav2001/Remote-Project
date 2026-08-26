@@ -79,13 +79,12 @@ app.post('/api/register-host', (req, res) => {
   }
   const cleanRoomId = String(roomId).trim();
   if (!rooms.has(cleanRoomId)) {
-    rooms.set(cleanRoomId, { host: 'active-agent', controller: null, systemInfo: null, liveMetrics: null, lastSeen: Date.now() });
+    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, lastSeen: Date.now() });
   }
   const room = rooms.get(cleanRoomId);
   room.lastSeen = Date.now();
   if (systemInfo) room.systemInfo = systemInfo;
   if (liveMetrics) room.liveMetrics = liveMetrics;
-  if (!room.host) room.host = 'active-agent';
 
   broadcastActiveHosts();
   res.json({ success: true, roomId: cleanRoomId });
@@ -325,12 +324,14 @@ io.on('connection', (socket) => {
           socket.to(roomId).emit('peer-disconnected', { role: 'controller' });
         }
 
-        // Clean up room if both host and controller are empty
+        // Clean up room if both host and controller are empty and no recent HTTP heartbeat
         if (!room.host && !room.controller) {
-          rooms.delete(roomId);
-          console.log(`Room ${roomId} deleted`);
-          broadcastActiveHosts();
+          if (!room.lastSeen || (Date.now() - room.lastSeen >= 30000)) {
+            rooms.delete(roomId);
+            console.log(`Room ${roomId} deleted`);
+          }
         }
+        broadcastActiveHosts();
       }, 3000);
     }
   });
