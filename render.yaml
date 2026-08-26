@@ -1,22 +1,13 @@
 services:
   - type: web
-    name: remote-desktop-signaling
+    name: remoteg-all-in-one
     runtime: node
     plan: free
-    rootDir: server
-    buildCommand: npm install
-    startCommand: node index.js
+    buildCommand: cd controller-web && npm install && npm run build && cd ../server && npm install
+    startCommand: cd server && node index.js
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: PORT
-        value: 5000
+        value: 10000
 
-  - type: web
-    name: remoteg-portal
-    runtime: node
-    plan: free
-    rootDir: controller-web
-    buildCommand: npm install && npm install serve && npm run build
-    startCommand: npx serve dist -s -l $PORT
-    envVars:
-      - key: PORT
-        value: 3000

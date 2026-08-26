@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const SIGNALING_SERVER = 'https://remote-project.onrender.com';
+const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) 
+  ? window.location.origin 
+  : 'https://remote-project.onrender.com';
 
 const rtcConfig = {
   iceServers: [
