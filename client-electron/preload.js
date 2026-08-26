@@ -1,8 +1,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const io = require('socket.io-client');
-
-let socket = null;
-const pendingListeners = []; // Queue listeners registered before socket exists
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
@@ -16,57 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHostClipboardChanged: (callback) => {
     ipcRenderer.on('host-clipboard-changed', (event, text) => callback(text));
   },
-  
-  // Socket.io Signaling wrapper
-  connectSocket: (url) => {
-    if (socket) {
-      if (socket.connected) {
-        window.dispatchEvent(new Event('socket-connected'));
-      }
-      return;
-    }
-    socket = io(url, {
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000
-    });
-    
-    // Attach any listeners that were registered before socket was created
-    pendingListeners.forEach(({ event, callback }) => {
-      socket.on(event, (data) => callback(data));
-    });
-    console.log(`[Preload] Attached ${pendingListeners.length} pending socket listeners.`);
-    pendingListeners.length = 0; // Clear the queue
-
-    // Register connection event relays
-    socket.on('connect', () => {
-      console.log('[Preload] Socket connected to signaling server');
-      window.dispatchEvent(new Event('socket-connected'));
-    });
-    socket.on('disconnect', () => {
-      console.log('[Preload] Socket disconnected from signaling server');
-      window.dispatchEvent(new Event('socket-disconnected'));
-    });
-  },
-  joinRoom: (roomId, role, systemInfo) => {
-    if (socket) socket.emit('join-room', { roomId, role, systemInfo });
-  },
   onSystemMetricsUpdate: (callback) => {
     ipcRenderer.on('system-metrics-update', (event, metrics) => callback(metrics));
-  },
-  onSocket: (event, callback) => {
-    if (socket) {
-      socket.on(event, (data) => callback(data));
-    } else {
-      // Socket doesn't exist yet — queue the listener for later
-      pendingListeners.push({ event, callback });
-    }
-  },
-  emitSocket: (event, data) => {
-    if (socket) {
-      socket.emit(event, data);
-    }
   }
 });

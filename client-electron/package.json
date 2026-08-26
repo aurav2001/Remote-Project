@@ -25,6 +25,7 @@
       "preload.js",
       "index.html",
       "renderer.js",
+      "socket.io.min.js",
       "input-helper.exe",
       "icon.png",
       "logo.png"

@@ -103,15 +103,33 @@ function App() {
 
   // Connect to signaling server on mount to receive real-time active hosts
   useEffect(() => {
+    // 1. Instant REST fetch for active hosts
+    const fetchHostsRest = async () => {
+      try {
+        const res = await fetch(`${SIGNALING_SERVER}/api/hosts`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setActiveHosts(data);
+          }
+        }
+      } catch (e) {}
+    };
+    fetchHostsRest();
+
+    // 2. Real-time WebSocket connection
     const globalSocket = io(SIGNALING_SERVER, {
       pingTimeout: 60000,
-      pingInterval: 25000
+      pingInterval: 25000,
+      reconnection: true,
+      reconnectionAttempts: Infinity
     });
 
     globalSocket.on('connect', () => {
       console.log('[Controller]: Global dashboard socket connected');
       setIsServerConnected(true);
       globalSocket.emit('get-active-hosts');
+      fetchHostsRest();
     });
 
     globalSocket.on('disconnect', () => {
@@ -123,7 +141,17 @@ function App() {
       setActiveHosts(hosts || []);
     });
 
+    // 3. 4-second poll interval to guarantee continuous live sync
+    const pollInterval = setInterval(() => {
+      if (globalSocket.connected) {
+        globalSocket.emit('get-active-hosts');
+      } else {
+        fetchHostsRest();
+      }
+    }, 4000);
+
     return () => {
+      clearInterval(pollInterval);
       globalSocket.disconnect();
     };
   }, []);

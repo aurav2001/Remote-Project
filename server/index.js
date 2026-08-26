@@ -64,6 +64,12 @@ app.get('/api/health', (req, res) => {
   res.send('Signaling Server is running.');
 });
 
+// REST endpoint for active hosts list
+app.get('/api/hosts', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.json(getActiveHostsList());
+});
+
 // Wildcard fallback for Single Page Application (SPA) routes
 app.get('*', (req, res) => {
   const currentDist = getStaticDistPath();
@@ -136,28 +142,30 @@ io.on('connection', (socket) => {
 
   // Join Room
   socket.on('join-room', ({ roomId, role, systemInfo }) => {
-    console.log(`Socket ${socket.id} joined room ${roomId} as ${role}`);
+    if (!roomId) return;
+    const cleanRoomId = String(roomId).trim();
+    console.log(`Socket ${socket.id} joined room ${cleanRoomId} as ${role}`);
     
     // Join socket.io room
-    socket.join(roomId);
-    socket.roomId = roomId;
+    socket.join(cleanRoomId);
+    socket.roomId = cleanRoomId;
     socket.role = role;
 
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, { host: null, controller: null, systemInfo: null });
+    if (!rooms.has(cleanRoomId)) {
+      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null });
     }
 
-    const room = rooms.get(roomId);
+    const room = rooms.get(cleanRoomId);
     if (role === 'host') {
       room.host = socket.id;
       if (systemInfo) {
         room.systemInfo = systemInfo;
       }
-      console.log(`Host registered for room ${roomId} with info:`, room.systemInfo);
+      console.log(`Host registered for room ${cleanRoomId} with info:`, room.systemInfo);
       broadcastActiveHosts();
     } else if (role === 'controller') {
       room.controller = socket.id;
-      console.log(`Controller registered for room ${roomId}`);
+      console.log(`Controller registered for room ${cleanRoomId}`);
       socket.emit('active-hosts-list', getActiveHostsList());
       // Send host info to controller if available
       if (room.systemInfo) {
@@ -167,8 +175,8 @@ io.on('connection', (socket) => {
 
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
-      io.to(roomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo });
-      console.log(`Room ${roomId} is ready for WebRTC connection`);
+      io.to(cleanRoomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo });
+      console.log(`Room ${cleanRoomId} is ready for WebRTC connection`);
     }
   });
 

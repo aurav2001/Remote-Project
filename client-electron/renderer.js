@@ -7,6 +7,7 @@ const btnCopy = document.getElementById('btn-copy');
 const btnResetCode = document.getElementById('btn-reset-code');
 
 const SIGNALING_SERVER = 'https://remote-project.onrender.com';
+let socket = null;
 let localStream = null;
 let peerConnection = null;
 let activeDataChannel = null;
@@ -74,28 +75,25 @@ function getOrInitPermanentCode() {
       localStorage.setItem('remoteg_permanent_access_code', savedCode);
     } catch (e) {}
   }
-  roomId = savedCode;
+  roomId = String(savedCode).trim();
   if (roomIdText) {
     roomIdText.innerText = roomId;
   }
   return roomId;
 }
 
-// Initialize code immediately on load
-getOrInitPermanentCode();
-
 // Reset/Regenerate permanent access code
 function resetPermanentCode() {
   const newCode = generateRoomId();
-  localStorage.setItem('remoteg_permanent_access_code', newCode);
-  roomId = newCode;
+  try {
+    localStorage.setItem('remoteg_permanent_access_code', newCode);
+  } catch (e) {}
+  roomId = String(newCode).trim();
   if (roomIdText) {
     roomIdText.innerText = roomId;
   }
   console.log('[Host]: Permanent Access Code reset to:', roomId);
-  if (window.electronAPI && roomId) {
-    window.electronAPI.joinRoom(roomId, 'host');
-  }
+  registerHostOnServer();
 }
 
 // Update connection status indicator
@@ -109,6 +107,144 @@ function updateStatus(status, text) {
   if (statusText) {
     statusText.innerText = text;
   }
+}
+
+// Register Host Room with Signaling Server
+async function registerHostOnServer() {
+  if (!socket || !socket.connected || !roomId) return;
+  let systemInfo = null;
+  try {
+    if (window.electronAPI && window.electronAPI.getSystemInfo) {
+      systemInfo = await window.electronAPI.getSystemInfo();
+    }
+  } catch (err) {
+    console.warn('Could not fetch system info:', err);
+  }
+  console.log('[Host]: Registering room with signaling server. Room ID:', roomId);
+  socket.emit('join-room', { roomId, role: 'host', systemInfo });
+}
+
+// Initialize Socket.io Connection Directly
+function initSocket() {
+  if (socket) return;
+  const ioFunc = window.io;
+  if (!ioFunc) {
+    console.error('[Host]: window.io is not defined! Retrying in 500ms...');
+    setTimeout(initSocket, 500);
+    return;
+  }
+
+  console.log('[Host]: Connecting to signaling server:', SIGNALING_SERVER);
+  socket = ioFunc(SIGNALING_SERVER, {
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000
+  });
+
+  socket.on('connect', () => {
+    console.log('[Host]: Connected to signaling server! Socket ID:', socket.id);
+    updateStatus('connecting', 'Waiting for Controller...');
+    registerHostOnServer();
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.warn('[Host]: Disconnected from signaling server:', reason);
+    if (!peerConnection || peerConnection.connectionState !== 'connected') {
+      updateStatus('', 'Reconnecting...');
+    }
+  });
+
+  // When controller is ready, initiate connection
+  socket.on('ready', handleControllerJoined);
+
+  // Receive SDP Answer from Controller
+  socket.on('webrtc-answer', async ({ answer }) => {
+    console.log('[Host]: Received WebRTC answer from controller.');
+    if (peerConnection && answer) {
+      try {
+        const sdpAnswer = new RTCSessionDescription({
+          type: answer.type || 'answer',
+          sdp: answer.sdp || (typeof answer === 'string' ? answer : answer.answer?.sdp)
+        });
+        await peerConnection.setRemoteDescription(sdpAnswer);
+        while (pendingIceCandidates.length > 0) {
+          const candidate = pendingIceCandidates.shift();
+          if (isValidCandidate(candidate)) {
+            try {
+              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+              console.warn('Skipping queued candidate:', e);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Host]: Failed setting remote description:', err);
+      }
+    }
+  });
+
+  // Receive ICE candidate from Controller
+  socket.on('ice-candidate', async ({ candidate }) => {
+    if (!isValidCandidate(candidate)) return;
+    if (peerConnection && peerConnection.remoteDescription) {
+      try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('Skipping candidate error:', e);
+      }
+    } else {
+      pendingIceCandidates.push(candidate);
+    }
+  });
+
+  // Terminal commands over socket fallback
+  socket.on('terminal-command', (data) => {
+    handleTerminalCommand(data);
+  });
+
+  // Incoming hardware control events over socket fallback
+  socket.on('control-event', (data) => {
+    if (!activeDataChannel || activeDataChannel.readyState !== 'open') {
+      if (window.electronAPI && window.electronAPI.sendControlEvent) {
+        window.electronAPI.sendControlEvent(data);
+      }
+    }
+  });
+
+  // Incoming clipboard sync over socket fallback
+  socket.on('clipboard-sync', (data) => {
+    if (data && data.text && window.electronAPI && window.electronAPI.writeClipboard) {
+      console.log('[Host]: Received remote clipboard text via socket fallback:', data.text.substring(0, 30));
+      window.electronAPI.writeClipboard(data.text);
+    }
+  });
+
+  // Incoming file transfer chunks over socket fallback
+  socket.on('file-transfer-chunk', (data) => {
+    handleIncomingFileChunk(data);
+  });
+
+  // When controller disconnects, reset peer connection & return to waiting state
+  socket.on('peer-disconnected', ({ role }) => {
+    if (role === 'controller') {
+      console.log('[Host]: Controller disconnected. Resetting peer connection.');
+      if (peerConnection) {
+        try { peerConnection.close(); } catch(e) {}
+        peerConnection = null;
+      }
+      activeDataChannel = null;
+      updateStatus('connecting', 'Waiting for Controller...');
+    }
+  });
+
+  // Keep-alive heartbeat: Re-announce host presence every 15s to keep room registered on Render
+  setInterval(() => {
+    if (socket && socket.connected && roomId) {
+      socket.emit('join-room', { roomId, role: 'host' });
+    }
+  }, 15000);
 }
 
 // DataChannel Heartbeat Ping to prevent CGNAT/Firewall UDP timeouts
@@ -128,6 +264,7 @@ async function handleTerminalCommand(data) {
   if (!data || !data.command) return;
   console.log('[Host]: Received remote terminal command:', data.command);
   try {
+    if (!window.electronAPI || !window.electronAPI.executeRemoteCommand) return;
     const res = await window.electronAPI.executeRemoteCommand({
       command: data.command,
       shellType: data.shellType || 'powershell'
@@ -149,8 +286,8 @@ async function handleTerminalCommand(data) {
         console.warn('[Host]: DataChannel terminal result error:', err);
       }
     }
-    if (roomId) {
-      window.electronAPI.emitSocket('terminal-result', resultPayload);
+    if (socket && socket.connected) {
+      socket.emit('terminal-result', resultPayload);
     }
   } catch (err) {
     console.error('[Host]: Failed executing terminal command:', err);
@@ -161,6 +298,7 @@ async function handleTerminalCommand(data) {
 async function handleIncomingFileChunk(data) {
   if (!data || !data.transferId) return;
   try {
+    if (!window.electronAPI || !window.electronAPI.saveFileChunk) return;
     const res = await window.electronAPI.saveFileChunk(data);
     if (data.isLastChunk && res && res.success) {
       console.log('[Host]: Successfully received file:', res.fileName, 'Saved to:', res.filePath);
@@ -177,8 +315,8 @@ async function handleIncomingFileChunk(data) {
           activeDataChannel.send(JSON.stringify(ackPayload));
         } catch (e) {}
       }
-      if (roomId) {
-        window.electronAPI.emitSocket('file-transfer-ack', ackPayload);
+      if (socket && socket.connected) {
+        socket.emit('file-transfer-ack', ackPayload);
       }
     }
   } catch (err) {
@@ -186,32 +324,14 @@ async function handleIncomingFileChunk(data) {
   }
 }
 
-let frameInterval = null;
-const relayCanvas = document.createElement('canvas');
-const relayCtx = relayCanvas.getContext('2d');
-
-function startSocketFrameRelay() {
-  // Light fallback - disabled by default to save 100% CPU for smooth WebRTC 60fps streaming
-}
-
-function stopSocketFrameRelay() {
-  if (frameInterval) {
-    clearInterval(frameInterval);
-    frameInterval = null;
-  }
-}
-
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
 
-  // Do not re-capture if we already have a live captured stream
   if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
       console.log('[Host]: Screen capture stream already active:', activeTrack.id);
-      startSocketFrameRelay();
-      window.electronAPI.connectSocket(SIGNALING_SERVER);
       return;
     }
   }
@@ -245,8 +365,6 @@ async function startSharing(sourceId) {
       screenSelect.disabled = false;
     }
     isSharingStarted = true;
-
-    window.electronAPI.connectSocket(SIGNALING_SERVER);
   } catch (error) {
     console.error('Error starting screen share:', error);
     updateStatus('', 'Screen Capture Error');
@@ -296,7 +414,6 @@ async function loadSources() {
       btnStart.disabled = false;
       btnStart.innerText = 'Start Screen Sharing';
     }
-    // Attempt fallback capture on error
     try {
       await startSharing('screen:0:0');
     } catch (e) {}
@@ -305,7 +422,6 @@ async function loadSources() {
 
 function onStreamConnected() {
   updateStatus('connected', 'Connected & Streaming');
-  stopSocketFrameRelay();
   if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
     console.log('[Host]: Triggering auto-minimize on stream connection...');
     window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
@@ -332,7 +448,9 @@ function setupDataChannel(channel) {
       if (data.type === 'pong') return;
       if (data.type === 'clipboard-sync' && data.text) {
         console.log('[Host]: Received remote controller clipboard text:', data.text.substring(0, 30));
-        window.electronAPI.writeClipboard(data.text);
+        if (window.electronAPI && window.electronAPI.writeClipboard) {
+          window.electronAPI.writeClipboard(data.text);
+        }
         return;
       }
       if (data.type === 'file-transfer-chunk') {
@@ -342,7 +460,9 @@ function setupDataChannel(channel) {
       if (data.type === 'terminal-command') {
         handleTerminalCommand(data);
       } else {
-        window.electronAPI.sendControlEvent(data);
+        if (window.electronAPI && window.electronAPI.sendControlEvent) {
+          window.electronAPI.sendControlEvent(data);
+        }
       }
     } catch (err) {
       console.error('[Host]: Error parsing DataChannel event:', err);
@@ -352,7 +472,6 @@ function setupDataChannel(channel) {
 
 // Setup WebRTC Peer Connection
 async function createPeerConnection() {
-  hasAutoMinimized = false;
   if (peerConnection) {
     try {
       peerConnection.close();
@@ -390,14 +509,15 @@ async function createPeerConnection() {
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate && isValidCandidate(event.candidate)) {
-      window.electronAPI.emitSocket('ice-candidate', {
-        roomId,
-        candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
-      });
+      if (socket && socket.connected) {
+        socket.emit('ice-candidate', {
+          roomId,
+          candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
+        });
+      }
     }
   };
 
-  // 1. Create DataChannel on Offerer so SCTP application media section is negotiated in SDP offer
   try {
     const dc = peerConnection.createDataChannel('controlEvents');
     setupDataChannel(dc);
@@ -416,11 +536,9 @@ async function createPeerConnection() {
       onStreamConnected();
     } else if (peerConnection.connectionState === 'disconnected') {
       updateStatus('connecting', 'Network blip. Reconnecting stream...');
-      startSocketFrameRelay();
     } else if (peerConnection.connectionState === 'failed') {
       console.warn('[Host]: WebRTC connection state failed. Attempting ICE restart...');
       updateStatus('connecting', 'Connection failed. Re-establishing...');
-      startSocketFrameRelay();
       if (peerConnection.restartIce) {
         peerConnection.restartIce();
       }
@@ -454,13 +572,15 @@ async function handleControllerJoined() {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
-    window.electronAPI.emitSocket('webrtc-offer', {
-      roomId,
-      offer: {
-        type: offer.type || 'offer',
-        sdp: offer.sdp
-      }
-    });
+    if (socket && socket.connected) {
+      socket.emit('webrtc-offer', {
+        roomId,
+        offer: {
+          type: offer.type || 'offer',
+          sdp: offer.sdp
+        }
+      });
+    }
 
     if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
       window.electronAPI.minimizeHostWindow().catch(err => {});
@@ -472,55 +592,6 @@ async function handleControllerJoined() {
   }
 }
 
-// Global Socket Listeners
-window.addEventListener('socket-connected', async () => {
-  console.log('Connected to signaling server as Host with ID:', roomId);
-  updateStatus('connecting', 'Waiting for Controller...');
-  let systemInfo = null;
-  try {
-    if (window.electronAPI && window.electronAPI.getSystemInfo) {
-      systemInfo = await window.electronAPI.getSystemInfo();
-    }
-  } catch (err) {
-    console.warn('Could not fetch system info:', err);
-  }
-  window.electronAPI.joinRoom(roomId, 'host', systemInfo);
-});
-
-window.addEventListener('socket-disconnected', () => {
-  console.log('Disconnected from signaling server');
-  if (!peerConnection || peerConnection.connectionState !== 'connected') {
-    updateStatus('', 'Disconnected');
-  } else {
-    console.warn('[Host]: Signaling socket blip, maintaining WebRTC P2P stream.');
-  }
-});
-
-// Terminal commands over socket fallback
-window.electronAPI.onSocket('terminal-command', (data) => {
-  handleTerminalCommand(data);
-});
-
-// Incoming hardware control events over socket fallback (only process if DataChannel is NOT open)
-window.electronAPI.onSocket('control-event', (data) => {
-  if (!activeDataChannel || activeDataChannel.readyState !== 'open') {
-    window.electronAPI.sendControlEvent(data);
-  }
-});
-
-// Incoming clipboard sync over socket fallback
-window.electronAPI.onSocket('clipboard-sync', (data) => {
-  if (data && data.text) {
-    console.log('[Host]: Received remote clipboard text via socket fallback:', data.text.substring(0, 30));
-    window.electronAPI.writeClipboard(data.text);
-  }
-});
-
-// Incoming file transfer chunks over socket fallback
-window.electronAPI.onSocket('file-transfer-chunk', (data) => {
-  handleIncomingFileChunk(data);
-});
-
 // Sync Host OS Clipboard changes to Controller
 if (window.electronAPI && window.electronAPI.onHostClipboardChanged) {
   window.electronAPI.onHostClipboardChanged((text) => {
@@ -531,8 +602,8 @@ if (window.electronAPI && window.electronAPI.onHostClipboardChanged) {
         activeDataChannel.send(payload);
       } catch (e) {}
     }
-    if (roomId) {
-      window.electronAPI.emitSocket('clipboard-sync', { roomId, text });
+    if (socket && socket.connected && roomId) {
+      socket.emit('clipboard-sync', { roomId, text });
     }
   });
 }
@@ -546,63 +617,11 @@ if (window.electronAPI && window.electronAPI.onSystemMetricsUpdate) {
         activeDataChannel.send(payload);
       } catch (e) {}
     }
-    if (roomId) {
-      window.electronAPI.emitSocket('system-metrics', { roomId, metrics });
+    if (socket && socket.connected && roomId) {
+      socket.emit('system-metrics', { roomId, metrics });
     }
   });
 }
-
-// When controller is ready, initiate connection
-window.electronAPI.onSocket('ready', handleControllerJoined);
-
-// Receive SDP Answer from Controller
-window.electronAPI.onSocket('webrtc-answer', async ({ answer }) => {
-  console.log('Received WebRTC answer from controller.');
-  if (peerConnection && answer) {
-    const sdpAnswer = new RTCSessionDescription({
-      type: answer.type || 'answer',
-      sdp: answer.sdp || (typeof answer === 'string' ? answer : answer.answer?.sdp)
-    });
-    await peerConnection.setRemoteDescription(sdpAnswer);
-    while (pendingIceCandidates.length > 0) {
-      const candidate = pendingIceCandidates.shift();
-      if (isValidCandidate(candidate)) {
-        try {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.warn('Skipping queued candidate:', e);
-        }
-      }
-    }
-  }
-});
-
-// Receive ICE candidate from Controller
-window.electronAPI.onSocket('ice-candidate', async ({ candidate }) => {
-  if (!isValidCandidate(candidate)) return;
-  if (peerConnection && peerConnection.remoteDescription) {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (e) {
-      console.warn('Skipping candidate error:', e);
-    }
-  } else {
-    pendingIceCandidates.push(candidate);
-  }
-});
-
-// When controller disconnects, reset peer connection & return to waiting state
-window.electronAPI.onSocket('peer-disconnected', ({ role }) => {
-  if (role === 'controller') {
-    console.log('[Host]: Controller disconnected. Resetting peer connection.');
-    if (peerConnection) {
-      try { peerConnection.close(); } catch(e) {}
-      peerConnection = null;
-    }
-    activeDataChannel = null;
-    updateStatus('connecting', 'Waiting for Controller...');
-  }
-});
 
 // Buttons & Event listeners
 if (btnCopy) {
@@ -621,7 +640,6 @@ if (btnCopy) {
 if (btnResetCode) {
   btnResetCode.addEventListener('click', () => {
     resetPermanentCode();
-    // Visual feedback
     btnResetCode.style.transform = 'rotate(360deg)';
     setTimeout(() => {
       btnResetCode.style.transform = 'none';
@@ -648,11 +666,8 @@ if (screenSelect) {
 // Ensure persistent Room ID is ready
 getOrInitPermanentCode();
 
-// Immediately connect to signaling server on launch
-if (window.electronAPI && window.electronAPI.connectSocket) {
-  console.log('[Host]: Initializing signaling server connection to:', SIGNALING_SERVER);
-  window.electronAPI.connectSocket(SIGNALING_SERVER);
-}
+// Initialize socket immediately
+initSocket();
 
 if (document.readyState === 'loading') {
   window.addEventListener('DOMContentLoaded', loadSources);
