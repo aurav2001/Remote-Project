@@ -752,20 +752,77 @@ ipcMain.on('write-clipboard', (event, text) => {
   }
 });
 
-// Periodic host system clipboard monitor (1-second interval)
-setInterval(() => {
+// --- PERSISTENT ROOM ACCESS CODE & HTTP HEARTBEAT REGISTRATION ---
+function getOrInitHostRoomId() {
   try {
-    const currentText = clipboard.readText();
-    if (currentText && currentText !== lastHostClipboardText && currentText.trim().length > 0) {
-      lastHostClipboardText = currentText;
-      const allWindows = BrowserWindow.getAllWindows();
-      for (const win of allWindows) {
-        if (!win.isDestroyed()) {
-          win.webContents.send('host-clipboard-changed', currentText);
-        }
-      }
+    const codeFile = path.join(app.getPath('userData'), 'permanent_access_code.txt');
+    if (fs.existsSync(codeFile)) {
+      const code = fs.readFileSync(codeFile, 'utf8').trim();
+      if (code.length === 6) return code;
     }
-  } catch (err) {}
-}, 1000);
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    fs.writeFileSync(codeFile, newCode, 'utf8');
+    return newCode;
+  } catch (e) {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+}
+
+let hostRoomId = getOrInitHostRoomId();
+
+ipcMain.handle('get-permanent-code', () => {
+  return hostRoomId;
+});
+
+ipcMain.handle('set-permanent-code', (event, newCode) => {
+  if (newCode && newCode.trim().length === 6) {
+    hostRoomId = newCode.trim();
+    try {
+      const codeFile = path.join(app.getPath('userData'), 'permanent_access_code.txt');
+      fs.writeFileSync(codeFile, hostRoomId, 'utf8');
+    } catch(e) {}
+    sendHttpHeartbeat();
+  }
+  return hostRoomId;
+});
+
+// Send direct HTTP POST Heartbeat to Signaling Server (Works on any PC, 0 dependencies)
+function sendHttpHeartbeat() {
+  if (!hostRoomId) return;
+  const https = require('https');
+  const payload = JSON.stringify({
+    roomId: hostRoomId,
+    systemInfo: {
+      hostname: os.hostname(),
+      platform: `${os.type()} ${os.arch()}`,
+      ip: '127.0.0.1'
+    }
+  });
+
+  const req = https.request({
+    hostname: 'remote-project.onrender.com',
+    port: 443,
+    path: '/api/register-host',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload)
+    },
+    timeout: 4000
+  }, (res) => {
+    // Heartbeat received
+  });
+
+  req.on('error', () => {});
+  req.on('timeout', () => req.destroy());
+  req.write(payload);
+  req.end();
+}
+
+// Immediately register on startup and send periodic heartbeat every 5 seconds
+app.whenReady().then(() => {
+  sendHttpHeartbeat();
+  setInterval(sendHttpHeartbeat, 5000);
+});
 
 

@@ -6,6 +6,7 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const fs = require('fs');
 
@@ -70,6 +71,26 @@ app.get('/api/hosts', (req, res) => {
   res.json(getActiveHostsList());
 });
 
+// HTTP Host Registration & Heartbeat Endpoint (Guarantees online presence from any PC)
+app.post('/api/register-host', (req, res) => {
+  const { roomId, systemInfo, liveMetrics } = req.body || {};
+  if (!roomId) {
+    return res.status(400).json({ error: 'roomId is required' });
+  }
+  const cleanRoomId = String(roomId).trim();
+  if (!rooms.has(cleanRoomId)) {
+    rooms.set(cleanRoomId, { host: 'active-agent', controller: null, systemInfo: null, liveMetrics: null, lastSeen: Date.now() });
+  }
+  const room = rooms.get(cleanRoomId);
+  room.lastSeen = Date.now();
+  if (systemInfo) room.systemInfo = systemInfo;
+  if (liveMetrics) room.liveMetrics = liveMetrics;
+  if (!room.host) room.host = 'active-agent';
+
+  broadcastActiveHosts();
+  res.json({ success: true, roomId: cleanRoomId });
+});
+
 // Wildcard fallback for Single Page Application (SPA) routes
 app.get('*', (req, res) => {
   const currentDist = getStaticDistPath();
@@ -110,14 +131,16 @@ const rooms = new Map();
 // Helper to compile list of active live host nodes
 function getActiveHostsList() {
   const list = [];
+  const now = Date.now();
   for (const [roomId, room] of rooms.entries()) {
-    if (room.host) {
+    const isAlive = (room.host && room.host !== null) || (room.lastSeen && (now - room.lastSeen < 25000));
+    if (isAlive) {
       list.push({
         roomId,
         systemInfo: room.systemInfo || null,
         liveMetrics: room.liveMetrics || null,
         isOnline: true,
-        lastSeen: new Date().toISOString()
+        lastSeen: room.lastSeen ? new Date(room.lastSeen).toISOString() : new Date().toISOString()
       });
     }
   }

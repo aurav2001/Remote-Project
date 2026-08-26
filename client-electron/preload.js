@@ -14,5 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onSystemMetricsUpdate: (callback) => {
     ipcRenderer.on('system-metrics-update', (event, metrics) => callback(metrics));
-  }
+  },
+  getPermanentCode: () => ipcRenderer.invoke('get-permanent-code'),
+  setPermanentCode: (code) => ipcRenderer.invoke('set-permanent-code', code)
 });

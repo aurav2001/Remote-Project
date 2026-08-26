@@ -61,19 +61,21 @@ function generateRoomId() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Get or initialize persistent access code from localStorage
-function getOrInitPermanentCode() {
+// Get or initialize persistent access code from main process / localStorage
+async function getOrInitPermanentCode() {
   let savedCode = null;
-  try {
-    savedCode = localStorage.getItem('remoteg_permanent_access_code');
-  } catch (e) {
-    console.warn('localStorage read warning:', e);
+  if (window.electronAPI && window.electronAPI.getPermanentCode) {
+    try {
+      savedCode = await window.electronAPI.getPermanentCode();
+    } catch(e) {}
+  }
+  if (!savedCode || savedCode.length !== 6) {
+    try {
+      savedCode = localStorage.getItem('remoteg_permanent_access_code');
+    } catch (e) {}
   }
   if (!savedCode || savedCode.length !== 6) {
     savedCode = generateRoomId();
-    try {
-      localStorage.setItem('remoteg_permanent_access_code', savedCode);
-    } catch (e) {}
   }
   roomId = String(savedCode).trim();
   if (roomIdText) {
@@ -83,8 +85,13 @@ function getOrInitPermanentCode() {
 }
 
 // Reset/Regenerate permanent access code
-function resetPermanentCode() {
+async function resetPermanentCode() {
   const newCode = generateRoomId();
+  if (window.electronAPI && window.electronAPI.setPermanentCode) {
+    try {
+      await window.electronAPI.setPermanentCode(newCode);
+    } catch(e) {}
+  }
   try {
     localStorage.setItem('remoteg_permanent_access_code', newCode);
   } catch (e) {}
