@@ -1542,7 +1542,7 @@ function App() {
           )}
       </div>
 
-      <div className="viewer-layout" style={{ display: status === 'connected' ? 'flex' : 'none' }}>
+      <div className="viewer-layout" style={{ display: (status === 'connected' || status === 'ready') ? 'flex' : 'none' }}>
           <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
             <div className="control-bar-header">
               {!isNavCollapsed && (
@@ -2024,6 +2024,39 @@ function App() {
                   <h3>Drop File to Upload</h3>
                   <p>Streaming directly to remote PC's <strong>Downloads</strong> folder</p>
                 </div>
+              </div>
+            )}
+
+            {/* Connecting Stream Loading Overlay */}
+            {(!isWebRtcActive && !socketFrame) && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'radial-gradient(ellipse at center, #111827 0%, #030712 100%)',
+                zIndex: 5
+              }}>
+                <div style={{
+                  width: '56px',
+                  height: '56px',
+                  border: '4px solid rgba(129, 140, 248, 0.2)',
+                  borderTopColor: '#818cf8',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                  marginBottom: '20px'
+                }}></div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#f8fafc', marginBottom: '8px' }}>
+                  Receiving Live Remote Desktop...
+                </h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.85rem', maxWidth: '380px', textAlign: 'center' }}>
+                  Establishing 60 FPS ultra-low latency WebRTC P2P Video Stream with Host ({roomId})
+                </p>
               </div>
             )}
             <video

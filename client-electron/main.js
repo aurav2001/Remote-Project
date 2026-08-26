@@ -283,6 +283,16 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    try {
+      session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+        desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+          callback({ video: sources[0] });
+        }).catch(() => {
+          callback({});
+        });
+      });
+    } catch (e) {}
+
     startInputHelper();
     createWindow();
     createTray();
