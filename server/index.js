@@ -230,7 +230,10 @@ io.on('connection', (socket) => {
 
   // Relay Hybrid Canvas Screen Frame Fallback (host -> controller)
   socket.on('screen-frame', ({ roomId, frame }) => {
-    socket.to(roomId).emit('screen-frame', { frame });
+    const targetRoom = String(roomId || socket.roomId || '').trim();
+    if (targetRoom && frame) {
+      socket.to(targetRoom).emit('screen-frame', { frame });
+    }
   });
 
   // Relay Input Control Events (mouse movement, click, keyboard press)

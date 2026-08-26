@@ -340,6 +340,15 @@ const hiddenVideo = document.createElement('video');
 hiddenVideo.muted = true;
 hiddenVideo.playsInline = true;
 hiddenVideo.autoplay = true;
+hiddenVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:320px;height:240px;opacity:0.01;pointer-events:none;z-index:-1;';
+try {
+  if (document.body) {
+    document.body.appendChild(hiddenVideo);
+  } else {
+    window.addEventListener('DOMContentLoaded', () => document.body.appendChild(hiddenVideo));
+  }
+} catch(e) {}
+
 const streamCanvas = document.createElement('canvas');
 const streamCtx = streamCanvas.getContext('2d', { alpha: false });
 
@@ -351,7 +360,7 @@ function startHybridFrameStreaming() {
   }
   frameStreamingInterval = setInterval(() => {
     if (!socket || !socket.connected || !roomId) return;
-    if (hiddenVideo.readyState >= 2 && hiddenVideo.videoWidth > 0) {
+    if (hiddenVideo.videoWidth > 0) {
       const targetWidth = Math.min(1280, hiddenVideo.videoWidth);
       const targetHeight = Math.round(targetWidth * (hiddenVideo.videoHeight / hiddenVideo.videoWidth));
       if (streamCanvas.width !== targetWidth || streamCanvas.height !== targetHeight) {
