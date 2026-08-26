@@ -3,8 +3,10 @@ const screenSelect = document.getElementById('screen-select');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const roomIdText = document.getElementById('room-id');
+const companyGroupText = document.getElementById('company-group-text');
 const btnCopy = document.getElementById('btn-copy');
 const btnResetCode = document.getElementById('btn-reset-code');
+const btnEditGroup = document.getElementById('btn-edit-group');
 
 const SIGNALING_SERVER = 'https://remote-project.onrender.com';
 let socket = null;
@@ -13,6 +15,7 @@ let peerConnection = null;
 let activeDataChannel = null;
 let heartbeatInterval = null;
 let roomId = '';
+let companyGroup = 'USPL';
 let isSharingStarted = false;
 let pendingIceCandidates = [];
 let isInitiatingOffer = false;
@@ -25,6 +28,7 @@ const rtcConfig = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:cloudflare.com:3478' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.nextcloud.com:443' },
     { urls: 'stun:global.stun.twilio.com:3478' },
@@ -61,6 +65,67 @@ function generateRoomId() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Get or initialize persistent company group
+async function getOrInitCompanyGroup() {
+  let savedGroup = null;
+  if (window.electronAPI && window.electronAPI.getCompanyGroup) {
+    try {
+      savedGroup = await window.electronAPI.getCompanyGroup();
+    } catch(e) {}
+  }
+  if (!savedGroup) {
+    try {
+      savedGroup = localStorage.getItem('remoteg_company_group');
+    } catch(e) {}
+  }
+  companyGroup = (savedGroup || 'USPL').trim().toUpperCase();
+  if (companyGroupText) {
+    companyGroupText.innerText = companyGroup;
+  }
+  return companyGroup;
+}
+
+// Set / Update Company Group Code
+async function updateCompanyGroup(newGroup) {
+  if (!newGroup || !newGroup.trim()) return;
+  const cleanGroup = newGroup.trim().toUpperCase();
+  companyGroup = cleanGroup;
+  if (companyGroupText) {
+    companyGroupText.innerText = cleanGroup;
+  }
+  if (window.electronAPI && window.electronAPI.setCompanyGroup) {
+    try {
+      await window.electronAPI.setCompanyGroup(cleanGroup);
+    } catch(e) {}
+  }
+  try {
+    localStorage.setItem('remoteg_company_group', cleanGroup);
+  } catch(e) {}
+  if (socket && socket.connected) {
+    socket.emit('update-company-group', { roomId, companyGroup: cleanGroup });
+  }
+  registerHostOnServer();
+}
+
+if (btnEditGroup) {
+  btnEditGroup.addEventListener('click', async () => {
+    const input = prompt('Enter Company / Organization Workspace Code (e.g. USPL, TechCorp, Default):', companyGroup);
+    if (input && input.trim()) {
+      await updateCompanyGroup(input.trim());
+    }
+  });
+}
+
+// Listen for remote group update from server / controller
+if (window.electronAPI && window.electronAPI.onCompanyGroupUpdated) {
+  window.electronAPI.onCompanyGroupUpdated((newGroup) => {
+    if (newGroup) {
+      companyGroup = newGroup.toUpperCase();
+      if (companyGroupText) companyGroupText.innerText = companyGroup;
+    }
+  });
+}
+
 // Get or initialize persistent access code from main process / localStorage
 async function getOrInitPermanentCode() {
   let savedCode = null;
@@ -81,6 +146,7 @@ async function getOrInitPermanentCode() {
   if (roomIdText) {
     roomIdText.innerText = roomId;
   }
+  await getOrInitCompanyGroup();
   return roomId;
 }
 
@@ -121,6 +187,9 @@ async function registerHostOnServer() {
   if (!roomId) {
     await getOrInitPermanentCode();
   }
+  if (!companyGroup) {
+    await getOrInitCompanyGroup();
+  }
   if (!socket || !socket.connected || !roomId) return;
   let systemInfo = null;
   try {
@@ -130,8 +199,11 @@ async function registerHostOnServer() {
   } catch (err) {
     console.warn('Could not fetch system info:', err);
   }
-  console.log('[Host]: Registering room with signaling server. Room ID:', roomId);
-  socket.emit('join-room', { roomId, role: 'host', systemInfo });
+  if (systemInfo) {
+    systemInfo.companyGroup = companyGroup;
+  }
+  console.log(`[Host]: Registering room on server. Room ID: ${roomId}, Company: ${companyGroup}`);
+  socket.emit('join-room', { roomId, role: 'host', systemInfo, companyGroup });
 }
 
 // Initialize Socket.io Connection Directly

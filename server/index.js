@@ -65,29 +65,60 @@ app.get('/api/health', (req, res) => {
   res.send('Signaling Server is running.');
 });
 
-// REST endpoint for active hosts list
+// REST endpoint for active hosts list (Supports optional ?company=GROUP filter)
 app.get('/api/hosts', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.json(getActiveHostsList());
+  const company = req.query.company ? String(req.query.company).trim().toUpperCase() : null;
+  const list = getActiveHostsList();
+  if (company && company !== 'ALL') {
+    return res.json(list.filter(h => (h.companyGroup || 'USPL').toUpperCase() === company));
+  }
+  res.json(list);
 });
 
 // HTTP Host Registration & Heartbeat Endpoint (Guarantees online presence from any PC)
 app.post('/api/register-host', (req, res) => {
-  const { roomId, systemInfo, liveMetrics } = req.body || {};
+  const { roomId, systemInfo, liveMetrics, companyGroup } = req.body || {};
   if (!roomId) {
     return res.status(400).json({ error: 'roomId is required' });
   }
   const cleanRoomId = String(roomId).trim();
   if (!rooms.has(cleanRoomId)) {
-    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, lastSeen: Date.now() });
+    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: 'USPL', lastSeen: Date.now() });
   }
   const room = rooms.get(cleanRoomId);
   room.lastSeen = Date.now();
   if (systemInfo) room.systemInfo = systemInfo;
   if (liveMetrics) room.liveMetrics = liveMetrics;
+  if (companyGroup) {
+    room.companyGroup = String(companyGroup).trim().toUpperCase();
+  } else if (systemInfo && systemInfo.companyGroup) {
+    room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
+  }
 
   broadcastActiveHosts();
-  res.json({ success: true, roomId: cleanRoomId });
+  res.json({ success: true, roomId: cleanRoomId, companyGroup: room.companyGroup });
+});
+
+// Set / Update Company Group for a Host Node
+app.post('/api/set-company-group', (req, res) => {
+  const { roomId, companyGroup } = req.body || {};
+  if (!roomId || !companyGroup) {
+    return res.status(400).json({ error: 'roomId and companyGroup are required' });
+  }
+  const cleanRoomId = String(roomId).trim();
+  const cleanGroup = String(companyGroup).trim().toUpperCase();
+  if (!rooms.has(cleanRoomId)) {
+    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: cleanGroup, lastSeen: Date.now() });
+  }
+  const room = rooms.get(cleanRoomId);
+  room.companyGroup = cleanGroup;
+  if (room.systemInfo) room.systemInfo.companyGroup = cleanGroup;
+  if (room.host) {
+    io.to(room.host).emit('company-group-updated', { companyGroup: cleanGroup });
+  }
+  broadcastActiveHosts();
+  res.json({ success: true, roomId: cleanRoomId, companyGroup: cleanGroup });
 });
 
 // Wildcard fallback for Single Page Application (SPA) routes
@@ -134,8 +165,10 @@ function getActiveHostsList() {
   for (const [roomId, room] of rooms.entries()) {
     const isAlive = (room.host && room.host !== null) || (room.lastSeen && (now - room.lastSeen < 25000));
     if (isAlive) {
+      const company = room.companyGroup || room.systemInfo?.companyGroup || 'USPL';
       list.push({
         roomId,
+        companyGroup: company,
         systemInfo: room.systemInfo || null,
         liveMetrics: room.liveMetrics || null,
         isOnline: true,
@@ -163,7 +196,7 @@ io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // Join Room
-  socket.on('join-room', ({ roomId, role, systemInfo }) => {
+  socket.on('join-room', ({ roomId, role, systemInfo, companyGroup }) => {
     if (!roomId) return;
     const cleanRoomId = String(roomId).trim();
     console.log(`Socket ${socket.id} joined room ${cleanRoomId} as ${role}`);
@@ -174,16 +207,22 @@ io.on('connection', (socket) => {
     socket.role = role;
 
     if (!rooms.has(cleanRoomId)) {
-      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null });
+      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, companyGroup: 'USPL', lastSeen: Date.now() });
     }
 
     const room = rooms.get(cleanRoomId);
+    if (companyGroup) {
+      room.companyGroup = String(companyGroup).trim().toUpperCase();
+    } else if (systemInfo && systemInfo.companyGroup) {
+      room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
+    }
+
     if (role === 'host') {
       room.host = socket.id;
       if (systemInfo) {
         room.systemInfo = systemInfo;
       }
-      console.log(`Host registered for room ${cleanRoomId} with info:`, room.systemInfo);
+      console.log(`Host registered for room ${cleanRoomId} (Group: ${room.companyGroup}) with info:`, room.systemInfo);
       broadcastActiveHosts();
     } else if (role === 'controller') {
       room.controller = socket.id;
@@ -191,20 +230,44 @@ io.on('connection', (socket) => {
       socket.emit('active-hosts-list', getActiveHostsList());
       // Send host info to controller if available
       if (room.systemInfo) {
-        socket.emit('host-info', { systemInfo: room.systemInfo });
+        socket.emit('host-info', { systemInfo: room.systemInfo, companyGroup: room.companyGroup });
       }
     }
 
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
-      io.to(cleanRoomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo });
+      io.to(cleanRoomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo, companyGroup: room.companyGroup });
       console.log(`Room ${cleanRoomId} is ready for WebRTC connection`);
     }
   });
 
+  // Reassign or update company group via socket
+  socket.on('update-company-group', ({ roomId, companyGroup }) => {
+    const targetRoom = String(roomId || socket.roomId || '').trim();
+    if (targetRoom && companyGroup) {
+      const cleanGroup = String(companyGroup).trim().toUpperCase();
+      if (!rooms.has(targetRoom)) {
+        rooms.set(targetRoom, { host: null, controller: null, systemInfo: null, companyGroup: cleanGroup, lastSeen: Date.now() });
+      }
+      const room = rooms.get(targetRoom);
+      room.companyGroup = cleanGroup;
+      if (room.systemInfo) room.systemInfo.companyGroup = cleanGroup;
+      if (room.host) {
+        io.to(room.host).emit('company-group-updated', { companyGroup: cleanGroup });
+      }
+      broadcastActiveHosts();
+    }
+  });
+
   // Allow controllers to explicitly request current active host nodes anytime
-  socket.on('get-active-hosts', () => {
-    socket.emit('active-hosts-list', getActiveHostsList());
+  socket.on('get-active-hosts', (query) => {
+    const company = query && query.company ? String(query.company).trim().toUpperCase() : null;
+    const list = getActiveHostsList();
+    if (company && company !== 'ALL') {
+      socket.emit('active-hosts-list', list.filter(h => (h.companyGroup || 'USPL').toUpperCase() === company));
+    } else {
+      socket.emit('active-hosts-list', list);
+    }
   });
 
   // Relay WebRTC Offer

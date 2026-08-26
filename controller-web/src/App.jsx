@@ -57,6 +57,21 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' or 'connect'
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'online', 'offline'
+  const [selectedWorkspace, setSelectedWorkspace] = useState(() => {
+    try {
+      return localStorage.getItem('unio_selected_workspace') || 'ALL';
+    } catch (e) {
+      return 'ALL';
+    }
+  });
+  const [customWorkspaces, setCustomWorkspaces] = useState(() => {
+    try {
+      const saved = localStorage.getItem('unio_custom_workspaces');
+      return saved ? JSON.parse(saved) : ['USPL'];
+    } catch(e) {
+      return ['USPL'];
+    }
+  });
   const [isServerConnected, setIsServerConnected] = useState(false);
   const [myLocalHostCode, setMyLocalHostCode] = useState(() => {
     try {
@@ -1096,6 +1111,56 @@ function App() {
     }
   };
 
+  // Auto-derive all detected unique workspaces
+  const allDetectedWorkspaces = Array.from(new Set([
+    'ALL',
+    'USPL',
+    ...customWorkspaces,
+    ...activeHosts.map(h => (h.companyGroup || h.systemInfo?.companyGroup || 'USPL').toUpperCase()).filter(Boolean)
+  ]));
+
+  const handleSelectWorkspace = (ws) => {
+    setSelectedWorkspace(ws);
+    try {
+      localStorage.setItem('unio_selected_workspace', ws);
+    } catch(e) {}
+  };
+
+  const handleAddWorkspace = () => {
+    const input = prompt('Enter Company / Group Workspace Code to filter or add (e.g. USPL, TechCorp, Google):');
+    if (input && input.trim()) {
+      const clean = input.trim().toUpperCase();
+      if (!customWorkspaces.includes(clean)) {
+        const updated = [...customWorkspaces, clean];
+        setCustomWorkspaces(updated);
+        try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch(e) {}
+      }
+      handleSelectWorkspace(clean);
+    }
+  };
+
+  const handleReassignGroup = async (e, roomId, currentGroup) => {
+    e.stopPropagation();
+    const newGroup = prompt(`Assign Company / Group Code for PC (ID: ${roomId}):`, currentGroup || 'USPL');
+    if (newGroup && newGroup.trim()) {
+      const clean = newGroup.trim().toUpperCase();
+      try {
+        await fetch(`${SIGNALING_SERVER}/api/set-company-group`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId, companyGroup: clean })
+        });
+        if (!customWorkspaces.includes(clean)) {
+          const updated = [...customWorkspaces, clean];
+          setCustomWorkspaces(updated);
+          try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch(e) {}
+        }
+      } catch (err) {
+        console.error('Failed to update group:', err);
+      }
+    }
+  };
+
   // Combine live active hosts from signaling server with saved recent devices
   const allTrackedDevices = Array.from(new Set([
     ...activeHosts.map(h => String(h.roomId || '').trim()).filter(Boolean),
@@ -1103,10 +1168,12 @@ function App() {
   ])).map(id => {
     const liveHost = activeHosts.find(h => String(h.roomId || '').trim() === id);
     const isSelf = Boolean(myLocalHostCode && id === String(myLocalHostCode).trim());
+    const companyGroup = (liveHost?.companyGroup || liveHost?.systemInfo?.companyGroup || 'USPL').toUpperCase();
     if (liveHost) {
       return {
         roomId: id,
         hostname: liveHost.systemInfo?.hostname || liveHost.liveMetrics?.hostname || `Device-${id}`,
+        companyGroup,
         isOnline: true,
         isSelf,
         systemInfo: liveHost.systemInfo || null,
@@ -1117,6 +1184,7 @@ function App() {
     return {
       roomId: id,
       hostname: `Device-${id}`,
+      companyGroup: 'USPL',
       isOnline: false,
       isSelf,
       systemInfo: null,
@@ -1125,20 +1193,27 @@ function App() {
     };
   });
 
-  const filteredDevices = allTrackedDevices.filter(device => {
+  // Filter first by selected company workspace for multi-tenant isolation
+  const workspaceDevices = allTrackedDevices.filter(device => {
+    if (selectedWorkspace === 'ALL') return true;
+    return (device.companyGroup || 'USPL').toUpperCase() === selectedWorkspace.toUpperCase();
+  });
+
+  const filteredDevices = workspaceDevices.filter(device => {
     if (hideSelfDevice && device.isSelf) return false;
     const hostname = String(device.hostname || '').toLowerCase();
     const q = String(searchQuery || '').toLowerCase().trim();
     const roomId = String(device.roomId || '');
-    const matchesSearch = !q || hostname.includes(q) || roomId.includes(q);
+    const group = String(device.companyGroup || '').toLowerCase();
+    const matchesSearch = !q || hostname.includes(q) || roomId.includes(q) || group.includes(q);
     if (statusFilter === 'online') return matchesSearch && device.isOnline;
     if (statusFilter === 'offline') return matchesSearch && !device.isOnline;
     return matchesSearch;
   });
 
-  const totalCount = allTrackedDevices.length;
-  const onlineCount = allTrackedDevices.filter(d => d.isOnline).length;
-  const onlineWithMetrics = allTrackedDevices.filter(d => d.isOnline && d.liveMetrics);
+  const totalCount = workspaceDevices.length;
+  const onlineCount = workspaceDevices.filter(d => d.isOnline).length;
+  const onlineWithMetrics = workspaceDevices.filter(d => d.isOnline && d.liveMetrics);
   const avgCpu = onlineWithMetrics.length > 0 
     ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.cpuPercent || 0), 0) / onlineWithMetrics.length) 
     : 0;
@@ -1193,6 +1268,55 @@ function App() {
           {/* Main View Area */}
           {activeTab === 'dashboard' ? (
             <div className="dashboard-content">
+
+              {/* Company / Organization Workspace Ribbon */}
+              <div className="workspace-selector-ribbon">
+                <div className="workspace-ribbon-header">
+                  <span className="workspace-ribbon-title">🏢 Company Workspace Filter:</span>
+                  <span className="workspace-ribbon-subtitle">
+                    {selectedWorkspace === 'ALL'
+                      ? 'Viewing all connected companies (Admin Mode)'
+                      : `Active Isolated Workspace: ${selectedWorkspace}`}
+                  </span>
+                </div>
+
+                <div className="workspace-pills-list">
+                  {allDetectedWorkspaces.map(ws => {
+                    const isSelected = selectedWorkspace === ws;
+                    const count = ws === 'ALL' 
+                      ? allTrackedDevices.length 
+                      : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws).length;
+                    const onlineWs = ws === 'ALL'
+                      ? allTrackedDevices.filter(d => d.isOnline).length
+                      : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws && d.isOnline).length;
+                    
+                    return (
+                      <button
+                        key={ws}
+                        className={`workspace-pill-btn ${isSelected ? 'active' : ''}`}
+                        onClick={() => handleSelectWorkspace(ws)}
+                      >
+                        <span className="ws-pill-name">{ws === 'ALL' ? '🌐 All Workspaces' : `🏢 ${ws}`}</span>
+                        <span className="ws-counter-badge" style={{
+                          background: onlineWs > 0 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
+                          color: onlineWs > 0 ? '#34d399' : '#94a3b8'
+                        }}>
+                          {onlineWs > 0 ? `${onlineWs} Live` : `${count}`}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    className="workspace-add-btn"
+                    onClick={handleAddWorkspace}
+                    title="Filter or register another Company Workspace Code"
+                  >
+                    ➕ Add / Switch Group
+                  </button>
+                </div>
+              </div>
+
               {/* Summary Stats Row */}
               <div className="dashboard-stats-grid">
                 <div className="rmm-stat-card">
@@ -1234,13 +1358,27 @@ function App() {
                   <span className="search-icon">🔍</span>
                   <input
                     type="text"
-                    placeholder="Search machines by Hostname, ID, or OS..."
+                    placeholder="Search machines by Hostname, ID, Company, or OS..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {/* Workspace Dropdown for compact filtering */}
+                  <select
+                    value={selectedWorkspace}
+                    onChange={(e) => handleSelectWorkspace(e.target.value)}
+                    className="filter-select"
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                  >
+                    {allDetectedWorkspaces.map(ws => (
+                      <option key={ws} value={ws}>
+                        {ws === 'ALL' ? '🏢 All Companies' : `🏢 Company: ${ws}`}
+                      </option>
+                    ))}
+                  </select>
+
                   {myLocalHostCode ? (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#94a3b8', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
                       <input 
@@ -1273,7 +1411,7 @@ function App() {
                     onChange={(e) => setStatusFilter(e.target.value)}
                     className="filter-select"
                   >
-                    <option value="all">All Devices ({totalCount})</option>
+                    <option value="all">All Status ({totalCount})</option>
                     <option value="online">Online Only ({onlineCount})</option>
                     <option value="offline">Offline Only ({totalCount - onlineCount})</option>
                   </select>
@@ -1282,9 +1420,52 @@ function App() {
 
               {/* Devices Card Grid */}
               <div className="devices-card-grid">
-                {filteredDevices.map(device => (
+                {filteredDevices.length === 0 ? (
+                  <div style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '16px', color: '#94a3b8' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🏢</div>
+                    <h3 style={{ margin: '0 0 6px 0', color: '#f8fafc' }}>No PC nodes found in "{selectedWorkspace}" workspace</h3>
+                    <p style={{ margin: '0 0 16px 0', fontSize: '0.85rem' }}>Switch workspace above or set your Host Agent to group code "{selectedWorkspace}"</p>
+                    <button
+                      onClick={() => handleSelectWorkspace('ALL')}
+                      style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '100px', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      🌐 Show All Workspaces
+                    </button>
+                  </div>
+                ) : filteredDevices.map(device => (
                   <div key={device.roomId} className="device-node-card">
                     <div>
+                      {/* Company Workspace Tag & Self indicator */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div
+                          onClick={(e) => handleReassignGroup(e, device.roomId, device.companyGroup)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            background: 'rgba(56, 189, 248, 0.12)',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            color: '#38bdf8',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            letterSpacing: '0.5px'
+                          }}
+                          title="Click to reassign company group for this PC"
+                        >
+                          <span>🏢 {device.companyGroup || 'USPL'}</span>
+                          <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>✏️</span>
+                        </div>
+
+                        {device.isSelf && (
+                          <span style={{ fontSize: '0.7rem', color: '#818cf8', fontWeight: 600, background: 'rgba(129, 140, 248, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                            🛡️ This Machine
+                          </span>
+                        )}
+                      </div>
+
                       <div className="node-card-header">
                         <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
                           <span className="node-icon">💻</span>

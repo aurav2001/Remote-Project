@@ -16,5 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('system-metrics-update', (event, metrics) => callback(metrics));
   },
   getPermanentCode: () => ipcRenderer.invoke('get-permanent-code'),
-  setPermanentCode: (code) => ipcRenderer.invoke('set-permanent-code', code)
+  setPermanentCode: (code) => ipcRenderer.invoke('set-permanent-code', code),
+  getCompanyGroup: () => ipcRenderer.invoke('get-company-group'),
+  setCompanyGroup: (group) => ipcRenderer.invoke('set-company-group', group),
+  onCompanyGroupUpdated: (callback) => {
+    ipcRenderer.on('company-group-updated', (event, group) => callback(group));
+  }
 });

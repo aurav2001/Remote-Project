@@ -420,6 +420,7 @@ ipcMain.handle('get-system-info', async () => {
 
   const info = {
     hostname: os.hostname(),
+    companyGroup: typeof hostCompanyGroup !== 'undefined' ? hostCompanyGroup : 'USPL',
     cpu: cpuModel,
     ram: `${totalRamGb} GB`,
     ip: ipAddress,
@@ -772,7 +773,7 @@ ipcMain.on('write-clipboard', (event, text) => {
   }
 });
 
-// --- PERSISTENT ROOM ACCESS CODE & HTTP HEARTBEAT REGISTRATION ---
+// --- PERSISTENT ROOM ACCESS CODE, COMPANY WORKSPACE & HTTP HEARTBEAT REGISTRATION ---
 function getOrInitHostRoomId() {
   try {
     const codeFile = path.join(app.getPath('userData'), 'permanent_access_code.txt');
@@ -788,7 +789,23 @@ function getOrInitHostRoomId() {
   }
 }
 
+function getOrInitCompanyGroup() {
+  try {
+    const groupFile = path.join(app.getPath('userData'), 'company_group.txt');
+    if (fs.existsSync(groupFile)) {
+      const group = fs.readFileSync(groupFile, 'utf8').trim();
+      if (group) return group.toUpperCase();
+    }
+    const defaultGroup = 'USPL';
+    fs.writeFileSync(groupFile, defaultGroup, 'utf8');
+    return defaultGroup;
+  } catch (e) {
+    return 'USPL';
+  }
+}
+
 let hostRoomId = getOrInitHostRoomId();
+let hostCompanyGroup = getOrInitCompanyGroup();
 
 ipcMain.handle('get-permanent-code', () => {
   return hostRoomId;
@@ -806,14 +823,32 @@ ipcMain.handle('set-permanent-code', (event, newCode) => {
   return hostRoomId;
 });
 
+ipcMain.handle('get-company-group', () => {
+  return hostCompanyGroup;
+});
+
+ipcMain.handle('set-company-group', (event, newGroup) => {
+  if (newGroup && newGroup.trim()) {
+    hostCompanyGroup = newGroup.trim().toUpperCase();
+    try {
+      const groupFile = path.join(app.getPath('userData'), 'company_group.txt');
+      fs.writeFileSync(groupFile, hostCompanyGroup, 'utf8');
+    } catch(e) {}
+    sendHttpHeartbeat();
+  }
+  return hostCompanyGroup;
+});
+
 // Send direct HTTP POST Heartbeat to Signaling Server (Works on any PC, 0 dependencies)
 function sendHttpHeartbeat() {
   if (!hostRoomId) return;
   const https = require('https');
   const payload = JSON.stringify({
     roomId: hostRoomId,
+    companyGroup: hostCompanyGroup,
     systemInfo: {
       hostname: os.hostname(),
+      companyGroup: hostCompanyGroup,
       platform: `${os.type()} ${os.arch()}`,
       ip: '127.0.0.1'
     }
