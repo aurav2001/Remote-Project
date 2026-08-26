@@ -57,15 +57,12 @@ class InputHelper {
                     string button = parts[1].ToLower();
                     if (button == "left") {
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                        System.Threading.Thread.Sleep(15);
                         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     } else if (button == "right") {
                         mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                        System.Threading.Thread.Sleep(15);
                         mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     } else if (button == "middle") {
                         mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
-                        System.Threading.Thread.Sleep(15);
                         mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
                     }
                 } 
@@ -77,7 +74,6 @@ class InputHelper {
                 } 
                 else if (command == "mouseup" && parts.Length >= 2) {
                     string button = parts[1].ToLower();
-                    System.Threading.Thread.Sleep(10);
                     if (button == "left") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     else if (button == "right") mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     else if (button == "middle") mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);

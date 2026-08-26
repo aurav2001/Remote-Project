@@ -1010,9 +1010,9 @@ function App() {
       localCursorRef.current.style.opacity = '0';
       return;
     }
-    const targetEl = e.currentTarget || videoRef.current;
-    if (!targetEl) return;
-    const rect = targetEl.getBoundingClientRect();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
