@@ -65,7 +65,7 @@ function App() {
       return '';
     }
   });
-  const [hideSelfDevice, setHideSelfDevice] = useState(true);
+  const [hideSelfDevice, setHideSelfDevice] = useState(false);
 
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
@@ -1286,22 +1286,16 @@ function App() {
                     <div className="node-card-footer">
                       <button
                         onClick={() => handleConnect(null, device.roomId)}
-                        disabled={device.isSelf || !device.isOnline || status === 'connecting'}
+                        disabled={!device.isOnline || status === 'connecting'}
                         className="btn-card-action"
                         style={{
-                          background: device.isSelf
-                            ? 'rgba(56, 189, 248, 0.1)'
-                            : device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
-                          color: device.isSelf
-                            ? '#38bdf8'
-                            : device.isOnline ? '#fff' : '#64748b',
-                          boxShadow: (!device.isSelf && device.isOnline) ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none',
-                          cursor: device.isSelf ? 'not-allowed' : 'pointer',
-                          opacity: device.isSelf ? 0.75 : 1
+                          background: device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
+                          color: device.isOnline ? '#fff' : '#64748b',
+                          boxShadow: device.isOnline ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none'
                         }}
                       >
                         {device.isSelf
-                          ? '🔒 This PC (Local Host)'
+                          ? '⚡ Connect (This PC)'
                           : '⚡ 1-Click Connect'}
                       </button>
 
