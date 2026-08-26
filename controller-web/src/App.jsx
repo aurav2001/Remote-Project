@@ -180,6 +180,56 @@ function App() {
   const remoteStreamRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
 
+  // Fetch and sync active live hosts continuously for Dashboard
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchLiveHosts = async () => {
+      try {
+        const res = await fetch(`${SIGNALING_SERVER}/api/hosts`, { cache: 'no-store' });
+        if (res.ok) {
+          const hosts = await res.json();
+          if (isMounted && Array.isArray(hosts)) {
+            setActiveHosts(hosts);
+            setIsServerConnected(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Error polling /api/hosts:', err);
+      }
+    };
+
+    fetchLiveHosts();
+    const interval = setInterval(fetchLiveHosts, 2000);
+
+    const dashSocket = io(SIGNALING_SERVER, {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000
+    });
+
+    dashSocket.on('connect', () => {
+      setIsServerConnected(true);
+      dashSocket.emit('get-active-hosts');
+    });
+
+    dashSocket.on('active-hosts-list', (hosts) => {
+      if (isMounted && Array.isArray(hosts)) {
+        setActiveHosts(hosts);
+      }
+    });
+
+    dashSocket.on('disconnect', () => {
+      setIsServerConnected(false);
+    });
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      dashSocket.disconnect();
+    };
+  }, []);
+
   // Clean up WebRTC and socket on unmount
   useEffect(() => {
     return () => {
