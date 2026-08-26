@@ -334,6 +334,44 @@ async function handleIncomingFileChunk(data) {
   }
 }
 
+// --- HYBRID JPEG FRAME STREAMER (Zero-drop fallback for WebRTC NAT blocks) ---
+let frameStreamingInterval = null;
+const hiddenVideo = document.createElement('video');
+hiddenVideo.muted = true;
+hiddenVideo.playsInline = true;
+hiddenVideo.autoplay = true;
+const streamCanvas = document.createElement('canvas');
+const streamCtx = streamCanvas.getContext('2d', { alpha: false });
+
+function startHybridFrameStreaming() {
+  if (frameStreamingInterval) clearInterval(frameStreamingInterval);
+  if (localStream) {
+    hiddenVideo.srcObject = localStream;
+    hiddenVideo.play().catch(e => {});
+  }
+  frameStreamingInterval = setInterval(() => {
+    if (!socket || !socket.connected || !roomId) return;
+    if (hiddenVideo.readyState >= 2 && hiddenVideo.videoWidth > 0) {
+      const targetWidth = Math.min(1280, hiddenVideo.videoWidth);
+      const targetHeight = Math.round(targetWidth * (hiddenVideo.videoHeight / hiddenVideo.videoWidth));
+      if (streamCanvas.width !== targetWidth || streamCanvas.height !== targetHeight) {
+        streamCanvas.width = targetWidth;
+        streamCanvas.height = targetHeight;
+      }
+      streamCtx.drawImage(hiddenVideo, 0, 0, targetWidth, targetHeight);
+      const frameData = streamCanvas.toDataURL('image/jpeg', 0.60);
+      socket.emit('screen-frame', { roomId, frame: frameData });
+    }
+  }, 100); // 10-15 FPS fast smooth fallback stream
+}
+
+function stopHybridFrameStreaming() {
+  if (frameStreamingInterval) {
+    clearInterval(frameStreamingInterval);
+    frameStreamingInterval = null;
+  }
+}
+
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (!sourceId) return;
@@ -342,6 +380,7 @@ async function startSharing(sourceId) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
       console.log('[Host]: Screen capture stream already active:', activeTrack.id);
+      startHybridFrameStreaming();
       return;
     }
   }
@@ -365,6 +404,7 @@ async function startSharing(sourceId) {
         track.enabled = true;
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
+      startHybridFrameStreaming();
     }
 
     if (btnStart) {
