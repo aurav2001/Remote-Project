@@ -1,7 +1,17 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+
+// Critical flags to prevent Chromium from throttling screen capture & timers in background
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('high-dpi-support', '1');
+
+try {
+  powerSaveBlocker.start('prevent-app-suspension');
+} catch(e) {}
 
 let tray = null;
 
@@ -172,12 +182,12 @@ function createWindow() {
   });
 }
 
-// IPC Handler to hide host window to System Tray on remote connection
+// IPC Handler to minimize host window on remote connection
 ipcMain.handle('minimize-host-window', () => {
-  console.log('[Main Process]: Hiding host window to System Tray (preserves full 60fps desktop screen capture)...');
+  console.log('[Main Process]: Minimizing host window (keeps background video capture 100% active)...');
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.hide();
+      mainWindow.minimize();
     }
   } catch (e) {}
 });

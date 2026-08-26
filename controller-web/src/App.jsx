@@ -247,8 +247,6 @@ function App() {
       if (videoRef.current.paused) {
         videoRef.current.play().catch(err => console.warn('Video autoplay warning:', err));
       }
-      // Auto-trigger host agent window minimize to ensure clear unblocked remote screen
-      sendControlData({ type: 'minimize-host' });
     }
   }, [status]);
 
