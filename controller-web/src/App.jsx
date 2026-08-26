@@ -164,6 +164,7 @@ function App() {
   }, [terminalLogs]);
 
   const socketRef = useRef(null);
+  const activeRoomIdRef = useRef('');
   const peerConnectionRef = useRef(null);
   const dataChannelRef = useRef(null);
   const videoRef = useRef(null);
@@ -380,9 +381,10 @@ function App() {
 
   const handleConnect = (e, codeToConnect) => {
     if (e) e.preventDefault();
-    const finalRoomId = (codeToConnect || targetRoomId).trim();
+    const finalRoomId = String(codeToConnect || targetRoomId || '').trim();
     if (!finalRoomId) return;
 
+    activeRoomIdRef.current = finalRoomId;
     saveRecentDevice(finalRoomId);
     setStatus('connecting');
     setRoomId(finalRoomId);
@@ -397,7 +399,7 @@ function App() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('Connected to signaling server');
+      console.log('Connected to signaling server for room:', finalRoomId);
       socket.emit('join-room', { roomId: finalRoomId, role: 'controller' });
     });
 
@@ -535,7 +537,7 @@ function App() {
     pc.onicecandidate = (event) => {
       if (event.candidate && isValidCandidate(event.candidate) && socketRef.current) {
         socketRef.current.emit('ice-candidate', {
-          roomId: targetRoomId.trim(),
+          roomId: activeRoomIdRef.current || targetRoomId.trim(),
           candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
         });
       }
@@ -673,7 +675,7 @@ function App() {
 
     // Send SDP Answer to Host
     socketRef.current.emit('webrtc-answer', {
-      roomId: targetRoomId.trim(),
+      roomId: activeRoomIdRef.current || targetRoomId.trim(),
       answer: {
         type: answer.type || 'answer',
         sdp: answer.sdp

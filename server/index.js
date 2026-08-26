@@ -187,20 +187,23 @@ io.on('connection', (socket) => {
 
   // Relay WebRTC Offer
   socket.on('webrtc-offer', ({ roomId, offer }) => {
-    console.log(`Relaying WebRTC offer for room ${roomId}`);
-    socket.to(roomId).emit('webrtc-offer', { offer });
+    const targetRoom = String(roomId || socket.roomId || '').trim();
+    console.log(`Relaying WebRTC offer for room ${targetRoom}`);
+    socket.to(targetRoom).emit('webrtc-offer', { offer });
   });
 
   // Relay WebRTC Answer
   socket.on('webrtc-answer', ({ roomId, answer }) => {
-    console.log(`Relaying WebRTC answer for room ${roomId}`);
-    socket.to(roomId).emit('webrtc-answer', { answer });
+    const targetRoom = String(roomId || socket.roomId || '').trim();
+    console.log(`Relaying WebRTC answer for room ${targetRoom}`);
+    socket.to(targetRoom).emit('webrtc-answer', { answer });
   });
 
   // Relay ICE Candidates
   socket.on('ice-candidate', ({ roomId, candidate }) => {
-    console.log(`Relaying ICE candidate for room ${roomId}`);
-    socket.to(roomId).emit('ice-candidate', { candidate });
+    const targetRoom = String(roomId || socket.roomId || '').trim();
+    console.log(`Relaying ICE candidate for room ${targetRoom}`);
+    socket.to(targetRoom).emit('ice-candidate', { candidate });
   });
 
   // Relay Hybrid Canvas Screen Frame Fallback (host -> controller)
