@@ -438,12 +438,6 @@ async function createPeerConnection() {
 async function handleControllerJoined() {
   if (isInitiatingOffer) return;
 
-  // Prevent destroying active connected peer session on duplicate ready signals
-  if (peerConnection && (peerConnection.connectionState === 'connected' || peerConnection.iceConnectionState === 'connected')) {
-    console.log('[Host]: PeerConnection is already CONNECTED and streaming. Ignoring duplicate offer trigger.');
-    return;
-  }
-
   isInitiatingOffer = true;
 
   try {
@@ -592,8 +586,16 @@ window.electronAPI.onSocket('ice-candidate', async ({ candidate }) => {
     } catch (e) {
       console.warn('Skipping candidate error:', e);
     }
-  } else {
-    pendingIceCandidates.push(candidate);
+// When controller disconnects, reset peer connection & return to waiting state
+window.electronAPI.onSocket('peer-disconnected', ({ role }) => {
+  if (role === 'controller') {
+    console.log('[Host]: Controller disconnected. Resetting peer connection.');
+    if (peerConnection) {
+      try { peerConnection.close(); } catch(e) {}
+      peerConnection = null;
+    }
+    activeDataChannel = null;
+    updateStatus('connecting', 'Waiting for Controller...');
   }
 });
 

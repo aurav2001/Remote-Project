@@ -145,16 +145,16 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Allow controllers to explicitly request current active host nodes
-    socket.on('get-active-hosts', () => {
-      socket.emit('active-hosts-list', getActiveHostsList());
-    });
-
     // If both host and controller are in the room, notify them.
     if (room.host && room.controller) {
       io.to(roomId).emit('ready', { host: room.host, controller: room.controller, systemInfo: room.systemInfo });
       console.log(`Room ${roomId} is ready for WebRTC connection`);
     }
+  });
+
+  // Allow controllers to explicitly request current active host nodes anytime
+  socket.on('get-active-hosts', () => {
+    socket.emit('active-hosts-list', getActiveHostsList());
   });
 
   // Relay WebRTC Offer
