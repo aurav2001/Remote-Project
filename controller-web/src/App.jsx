@@ -610,11 +610,9 @@ function App() {
       console.log('WebRTC State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
-      } else if (pc.connectionState === 'disconnected') {
-        setStatus('connecting');
-        console.warn('WebRTC state disconnected. Waiting for auto-reconnect...');
-      } else if (pc.connectionState === 'failed') {
-        console.warn('WebRTC connection failed. Attempting ICE restart...');
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        console.warn('WebRTC state disconnected or failed. Keeping session active on hybrid frame fallback...');
+        setIsWebRtcActive(false);
         if (pc.restartIce) {
           pc.restartIce();
         }
@@ -624,11 +622,11 @@ function App() {
     // Monitor ICE state
     pc.oniceconnectionstatechange = () => {
       console.log('ICE State Change:', pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
-        console.error('WebRTC ICE connection failed. Attempting ICE restart...');
-        if (pc.restartIce) {
-          pc.restartIce();
-        }
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        setIsWebRtcActive(true);
+      } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        console.warn('WebRTC ICE failed. Seamless fallback to hybrid frame stream active.');
+        setIsWebRtcActive(false);
       }
     };
 
@@ -643,20 +641,14 @@ function App() {
 
       if (event.track) {
         event.track.enabled = true;
-        event.track.onunmute = () => {
-          console.log('[Controller]: Remote video track unmuted!');
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(e => {});
-          }
-        };
       }
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        if (videoRef.current.srcObject !== stream) {
+          videoRef.current.srcObject = stream;
+        }
         videoRef.current.play().catch(e => console.warn('Video play warning:', e));
       }
-      setIsWebRtcActive(true);
       setStatus('connected');
     };
 
@@ -2074,20 +2066,9 @@ function App() {
               autoPlay
               playsInline
               muted
-              onLoadedMetadata={(e) => {
-                handleLoadedMetadata();
-                setIsWebRtcActive(true);
-                if (e.target && e.target.paused) e.target.play().catch(err => {});
-              }}
               onPlaying={() => setIsWebRtcActive(true)}
-              onCanPlay={(e) => {
-                setIsWebRtcActive(true);
-                if (e.target && e.target.paused) e.target.play().catch(err => {});
-              }}
-              onLoadedData={(e) => {
-                setIsWebRtcActive(true);
-                if (e.target && e.target.paused) e.target.play().catch(err => {});
-              }}
+              onPause={() => setIsWebRtcActive(false)}
+              onError={() => setIsWebRtcActive(false)}
               onMouseMove={handleMouseMove}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
@@ -2098,15 +2079,15 @@ function App() {
                 objectFit: 'fill',
                 width: '100%',
                 height: '100%',
-                display: (!isWebRtcActive && socketFrame) ? 'none' : 'block',
+                display: isWebRtcActive ? 'block' : 'none',
                 background: '#000'
               }}
             />
 
-            {(!isWebRtcActive && socketFrame) && (
+            {(!isWebRtcActive || !remoteStreamRef.current) && socketFrame && (
               <img
                 src={socketFrame}
-                alt="Remote Screen Stream Fallback"
+                alt="Remote Screen Stream"
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
