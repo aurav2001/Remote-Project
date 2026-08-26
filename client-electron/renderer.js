@@ -383,8 +383,6 @@ function stopHybridFrameStreaming() {
 
 // Core function to start screen sharing
 async function startSharing(sourceId) {
-  if (!sourceId) return;
-
   if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
@@ -395,18 +393,30 @@ async function startSharing(sourceId) {
   }
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          maxWidth: 3840,
-          maxHeight: 2160,
-          maxFrameRate: 60
+    try {
+      localStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'monitor',
+          frameRate: { ideal: 60, max: 60 }
+        },
+        audio: false
+      });
+      console.log('[Host]: Screen captured via modern getDisplayMedia!');
+    } catch(err) {
+      console.warn('[Host]: getDisplayMedia fallback to getUserMedia with sourceId:', sourceId);
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId || 'screen:0:0',
+            maxWidth: 3840,
+            maxHeight: 2160,
+            maxFrameRate: 60
+          }
         }
-      }
-    });
+      });
+    }
 
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {

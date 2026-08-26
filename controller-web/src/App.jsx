@@ -478,9 +478,9 @@ function App() {
       }
     });
 
-    // Receive Hybrid Canvas JPEG Frame Stream Fallback (only process if WebRTC video is inactive)
+    // Receive Hybrid Canvas JPEG Frame Stream Fallback
     socket.on('screen-frame', ({ frame }) => {
-      if (frame && !isWebRtcActive) {
+      if (frame) {
         setSocketFrame(frame);
         setStatus('connected');
       }
