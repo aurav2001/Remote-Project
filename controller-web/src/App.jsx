@@ -1054,25 +1054,25 @@ function App() {
 
   // Combine live active hosts from signaling server with saved recent devices
   const allTrackedDevices = Array.from(new Set([
-    ...activeHosts.map(h => h.roomId),
-    ...recentDevices
+    ...activeHosts.map(h => String(h.roomId || '').trim()).filter(Boolean),
+    ...recentDevices.map(d => String(d || '').trim()).filter(Boolean)
   ])).map(id => {
-    const liveHost = activeHosts.find(h => h.roomId === id);
-    const isSelf = Boolean(myLocalHostCode && id === myLocalHostCode);
+    const liveHost = activeHosts.find(h => String(h.roomId || '').trim() === id);
+    const isSelf = Boolean(myLocalHostCode && id === String(myLocalHostCode).trim());
     if (liveHost) {
       return {
         roomId: id,
-        hostname: liveHost.systemInfo?.hostname || `Host-${id}`,
+        hostname: liveHost.systemInfo?.hostname || liveHost.liveMetrics?.hostname || `Device-${id}`,
         isOnline: true,
         isSelf,
-        systemInfo: liveHost.systemInfo,
-        liveMetrics: liveHost.liveMetrics,
+        systemInfo: liveHost.systemInfo || null,
+        liveMetrics: liveHost.liveMetrics || null,
         lastSeen: 'Just Now'
       };
     }
     return {
       roomId: id,
-      hostname: `Host-${id}`,
+      hostname: `Device-${id}`,
       isOnline: false,
       isSelf,
       systemInfo: null,
@@ -1083,8 +1083,10 @@ function App() {
 
   const filteredDevices = allTrackedDevices.filter(device => {
     if (hideSelfDevice && device.isSelf) return false;
-    const matchesSearch = device.hostname.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          device.roomId.includes(searchQuery);
+    const hostname = String(device.hostname || '').toLowerCase();
+    const q = String(searchQuery || '').toLowerCase().trim();
+    const roomId = String(device.roomId || '');
+    const matchesSearch = !q || hostname.includes(q) || roomId.includes(q);
     if (statusFilter === 'online') return matchesSearch && device.isOnline;
     if (statusFilter === 'offline') return matchesSearch && !device.isOnline;
     return matchesSearch;
