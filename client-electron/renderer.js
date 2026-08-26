@@ -421,6 +421,9 @@ async function startSharing(sourceId) {
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = true;
+        if ('contentHint' in track) {
+          track.contentHint = 'motion';
+        }
         console.log('[Host]: Desktop screen video track active:', track.id, 'readyState:', track.readyState);
       });
       startHybridFrameStreaming();
@@ -588,7 +591,10 @@ async function createPeerConnection() {
   };
 
   try {
-    const dc = peerConnection.createDataChannel('controlEvents');
+    const dc = peerConnection.createDataChannel('controlEvents', {
+      ordered: false,
+      maxRetransmits: 0
+    });
     setupDataChannel(dc);
   } catch (e) {
     console.warn('Host createDataChannel error:', e);

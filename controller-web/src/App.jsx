@@ -179,6 +179,7 @@ function App() {
   const containerRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
+  const localCursorRef = useRef(null);
 
   // Fetch and sync active live hosts continuously for Dashboard
   useEffect(() => {
@@ -248,6 +249,21 @@ function App() {
         videoRef.current.play().catch(err => console.warn('Video autoplay warning:', err));
       }
     }
+  }, [status]);
+
+  // Low-latency video buffer sync: prevents video drift behind real-time
+  useEffect(() => {
+    if (status !== 'connected' || !videoRef.current) return;
+    const v = videoRef.current;
+    const syncInterval = setInterval(() => {
+      if (v && v.buffered && v.buffered.length > 0) {
+        const liveEdge = v.buffered.end(v.buffered.length - 1);
+        if (liveEdge - v.currentTime > 0.10) {
+          v.currentTime = liveEdge;
+        }
+      }
+    }, 400);
+    return () => clearInterval(syncInterval);
   }, [status]);
 
   // Check URL query parameters (?code=123456 or ?id=123456) for instant auto-connect
@@ -987,16 +1003,50 @@ function App() {
     });
   };
 
+  // High-performance hardware-accelerated local virtual cursor
+  const updateLocalCursor = (e, visible = true, isClick = false) => {
+    if (!localCursorRef.current) return;
+    if (!visible) {
+      localCursorRef.current.style.opacity = '0';
+      return;
+    }
+    const targetEl = e.currentTarget || videoRef.current;
+    if (!targetEl) return;
+    const rect = targetEl.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    localCursorRef.current.style.opacity = '1';
+    localCursorRef.current.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0)`;
+    if (isClick) {
+      localCursorRef.current.classList.add('cursor-active');
+    } else {
+      localCursorRef.current.classList.remove('cursor-active');
+    }
+  };
+
   const lastMoveTimeRef = useRef(0);
   const handleMouseMove = (e) => {
-    const now = Date.now();
-    if (now - lastMoveTimeRef.current > 16) {
+    updateLocalCursor(e, true, false);
+    const now = performance.now();
+    if (now - lastMoveTimeRef.current >= 12) {
       lastMoveTimeRef.current = now;
       sendMouseEvent('mousemove', e);
     }
   };
-  const handleMouseDown = (e) => sendMouseEvent('mousedown', e);
-  const handleMouseUp = (e) => sendMouseEvent('mouseup', e);
+  const handleMouseDown = (e) => {
+    updateLocalCursor(e, true, true);
+    sendMouseEvent('mousedown', e);
+  };
+  const handleMouseUp = (e) => {
+    updateLocalCursor(e, true, false);
+    sendMouseEvent('mouseup', e);
+  };
+  const handleMouseLeave = () => {
+    if (localCursorRef.current) {
+      localCursorRef.current.style.opacity = '0';
+    }
+  };
   const handleDoubleClick = (e) => sendMouseEvent('doubleclick', e);
   
   const handleContextMenu = (e) => {
@@ -2009,6 +2059,7 @@ function App() {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
+            onMouseLeave={handleMouseLeave}
           >
             {/* Drag & Drop Visual Glow Overlay */}
             {isDraggingOver && (
@@ -2020,6 +2071,26 @@ function App() {
                 </div>
               </div>
             )}
+
+            {/* Zero-Latency Local Virtual Cursor Dot & Pointer */}
+            <div
+              ref={localCursorRef}
+              className="remote-virtual-cursor"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                pointerEvents: 'none',
+                opacity: 0,
+                zIndex: 20,
+                willChange: 'transform'
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.85))' }}>
+                <path d="M4 3L11.5 21L14.5 13.5L22 10.5L4 3Z" fill="#3b82f6" stroke="#ffffff" strokeWidth="1.5" strokeLinejoin="round" />
+              </svg>
+              <div className="cursor-pulse-ring" />
+            </div>
 
             {/* Connecting Stream Loading Overlay */}
             {(!isWebRtcActive && !socketFrame) && (
@@ -2070,6 +2141,7 @@ function App() {
               onMouseMove={handleMouseMove}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
               onWheel={handleWheel}
@@ -2089,6 +2161,7 @@ function App() {
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
                 onDoubleClick={handleDoubleClick}
                 onContextMenu={handleContextMenu}
                 style={{
