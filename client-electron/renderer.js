@@ -586,6 +586,11 @@ window.electronAPI.onSocket('ice-candidate', async ({ candidate }) => {
     } catch (e) {
       console.warn('Skipping candidate error:', e);
     }
+  } else {
+    pendingIceCandidates.push(candidate);
+  }
+});
+
 // When controller disconnects, reset peer connection & return to waiting state
 window.electronAPI.onSocket('peer-disconnected', ({ role }) => {
   if (role === 'controller') {
@@ -640,7 +645,14 @@ if (screenSelect) {
   });
 }
 
+// Ensure persistent Room ID is ready
 getOrInitPermanentCode();
+
+// Immediately connect to signaling server on launch
+if (window.electronAPI && window.electronAPI.connectSocket) {
+  console.log('[Host]: Initializing signaling server connection to:', SIGNALING_SERVER);
+  window.electronAPI.connectSocket(SIGNALING_SERVER);
+}
 
 if (document.readyState === 'loading') {
   window.addEventListener('DOMContentLoaded', loadSources);

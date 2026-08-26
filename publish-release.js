@@ -77,13 +77,18 @@ async function createRelease() {
 
   const filesToUpload = [
     {
-      filePath: path.join(__dirname, 'client-electron/RemoteG-Setup.zip'),
-      assetName: 'RemoteG-Setup.zip',
+      filePath: path.join(__dirname, 'client-electron/UnioTechIT-Setup.zip'),
+      assetName: 'UnioTechIT-Setup.zip',
       contentType: 'application/zip'
     },
     {
-      filePath: path.join(__dirname, 'client-electron/dist-build/RemoteG Setup 1.0.0.exe'),
-      assetName: 'RemoteG-Setup.exe',
+      filePath: path.join(__dirname, 'client-electron/dist-build/UnioTechIT Setup 1.0.0.exe'),
+      assetName: 'UnioTechIT Setup 1.0.0.exe',
+      contentType: 'application/octet-stream'
+    },
+    {
+      filePath: path.join(__dirname, 'UnioTechIT Setup 1.0.0.exe'),
+      assetName: 'UnioTechIT-Setup.exe',
       contentType: 'application/octet-stream'
     }
   ];

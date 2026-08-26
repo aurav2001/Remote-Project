@@ -19,7 +19,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Socket.io Signaling wrapper
   connectSocket: (url) => {
-    socket = io(url);
+    if (socket) {
+      if (socket.connected) {
+        window.dispatchEvent(new Event('socket-connected'));
+      }
+      return;
+    }
+    socket = io(url, {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
+    });
     
     // Attach any listeners that were registered before socket was created
     pendingListeners.forEach(({ event, callback }) => {
@@ -28,11 +40,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     console.log(`[Preload] Attached ${pendingListeners.length} pending socket listeners.`);
     pendingListeners.length = 0; // Clear the queue
 
-    // Register basic connection event relays
+    // Register connection event relays
     socket.on('connect', () => {
+      console.log('[Preload] Socket connected to signaling server');
       window.dispatchEvent(new Event('socket-connected'));
     });
     socket.on('disconnect', () => {
+      console.log('[Preload] Socket disconnected from signaling server');
       window.dispatchEvent(new Event('socket-disconnected'));
     });
   },
