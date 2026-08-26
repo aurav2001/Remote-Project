@@ -58,6 +58,14 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'online', 'offline'
   const [isServerConnected, setIsServerConnected] = useState(false);
+  const [myLocalHostCode, setMyLocalHostCode] = useState(() => {
+    try {
+      return localStorage.getItem('remoteg_permanent_access_code') || localStorage.getItem('unio_my_host_code') || '';
+    } catch(e) {
+      return '';
+    }
+  });
+  const [hideSelfDevice, setHideSelfDevice] = useState(true);
 
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
@@ -594,6 +602,7 @@ function App() {
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(e => console.warn('Video play warning:', e));
       }
+      setIsWebRtcActive(true);
       setStatus('connected');
     };
 
@@ -999,11 +1008,13 @@ function App() {
     ...recentDevices
   ])).map(id => {
     const liveHost = activeHosts.find(h => h.roomId === id);
+    const isSelf = Boolean(myLocalHostCode && id === myLocalHostCode);
     if (liveHost) {
       return {
         roomId: id,
         hostname: liveHost.systemInfo?.hostname || `Host-${id}`,
         isOnline: true,
+        isSelf,
         systemInfo: liveHost.systemInfo,
         liveMetrics: liveHost.liveMetrics,
         lastSeen: 'Just Now'
@@ -1013,6 +1024,7 @@ function App() {
       roomId: id,
       hostname: `Host-${id}`,
       isOnline: false,
+      isSelf,
       systemInfo: null,
       liveMetrics: null,
       lastSeen: 'Offline'
@@ -1020,6 +1032,7 @@ function App() {
   });
 
   const filteredDevices = allTrackedDevices.filter(device => {
+    if (hideSelfDevice && device.isSelf) return false;
     const matchesSearch = device.hostname.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           device.roomId.includes(searchQuery);
     if (statusFilter === 'online') return matchesSearch && device.isOnline;
@@ -1131,7 +1144,34 @@ function App() {
                   />
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {myLocalHostCode ? (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#94a3b8', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={hideSelfDevice} 
+                        onChange={(e) => setHideSelfDevice(e.target.checked)} 
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <span>Hide My PC ({myLocalHostCode})</span>
+                    </label>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const code = prompt('Enter your 6-digit Host PC Access Code to exclude this machine from remote control list:');
+                        if (code && code.trim().length === 6) {
+                          const cleanCode = code.trim();
+                          setMyLocalHostCode(cleanCode);
+                          try { localStorage.setItem('unio_my_host_code', cleanCode); } catch(e) {}
+                        }
+                      }}
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#94a3b8', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}
+                      title="Set your local Host Code so you don't connect to your own machine"
+                    >
+                      🛡️ Set My PC ID
+                    </button>
+                  )}
+
                   <select 
                     value={statusFilter} 
                     onChange={(e) => setStatusFilter(e.target.value)}
@@ -1246,15 +1286,23 @@ function App() {
                     <div className="node-card-footer">
                       <button
                         onClick={() => handleConnect(null, device.roomId)}
-                        disabled={!device.isOnline || status === 'connecting'}
+                        disabled={device.isSelf || !device.isOnline || status === 'connecting'}
                         className="btn-card-action"
                         style={{
-                          background: device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
-                          color: device.isOnline ? '#fff' : '#64748b',
-                          boxShadow: device.isOnline ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none'
+                          background: device.isSelf
+                            ? 'rgba(56, 189, 248, 0.1)'
+                            : device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
+                          color: device.isSelf
+                            ? '#38bdf8'
+                            : device.isOnline ? '#fff' : '#64748b',
+                          boxShadow: (!device.isSelf && device.isOnline) ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none',
+                          cursor: device.isSelf ? 'not-allowed' : 'pointer',
+                          opacity: device.isSelf ? 0.75 : 1
                         }}
                       >
-                        ⚡ 1-Click Connect
+                        {device.isSelf
+                          ? '🔒 This PC (Local Host)'
+                          : '⚡ 1-Click Connect'}
                       </button>
 
                       {device.systemInfo && (
@@ -1933,7 +1981,13 @@ function App() {
               </div>
             )}
             <video
-              ref={setVideoRef}
+              ref={(el) => {
+                videoRef.current = el;
+                if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) {
+                  el.srcObject = remoteStreamRef.current;
+                  el.play().catch(e => {});
+                }
+              }}
               autoPlay
               playsInline
               muted
