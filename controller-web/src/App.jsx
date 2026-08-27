@@ -2112,53 +2112,65 @@ function App() {
                 </button>
 
                 {/* Multi-Monitor Dual/Triple Display Switcher */}
-                {availableScreens.length > 1 && (
-                  <div className="screens-dropdown-wrapper">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowScreenDropdown(prev => !prev);
-                      }}
-                      className={`control-btn btn-screen-switch ${showScreenDropdown ? 'active' : ''}`}
-                      title="Switch between connected monitors (Dual / Triple Screen)"
-                    >
-                      🖥️ {availableScreens.find(s => s.id === currentScreenId)?.label?.split(' ')[0] || 'Monitor'} {availableScreens.find(s => s.id === currentScreenId)?.index || '1'} 
-                      <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 4 }}>▼</span>
-                    </button>
+                <div className="screens-dropdown-wrapper">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowScreenDropdown(prev => !prev);
+                    }}
+                    className={`control-btn btn-screen-switch ${showScreenDropdown ? 'active' : ''}`}
+                    title="View and Switch Connected Displays (Multi-Monitor)"
+                  >
+                    🖥️ {availableScreens.length > 1 ? `Displays (${availableScreens.length})` : 'Display (1)'}
+                    <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 4 }}>▼</span>
+                  </button>
 
-                    {showScreenDropdown && (
-                      <div className="screens-dropdown-menu">
-                        <div className="screens-dropdown-header">
-                          <span>CONNECTED MONITORS ({availableScreens.length})</span>
-                        </div>
-                        {availableScreens.map(scr => {
-                          const isSelected = scr.id === currentScreenId;
-                          return (
-                            <button
-                              key={scr.id}
-                              onClick={() => handleSwitchScreen(scr.id)}
-                              className={`screen-dropdown-item ${isSelected ? 'active' : ''}`}
-                            >
-                              <div className="screen-item-icon">
-                                🖥️
-                              </div>
-                              <div className="screen-item-info">
-                                <span className="screen-item-title">
-                                  {scr.label || scr.name}
-                                </span>
-                                <span className="screen-item-res">
-                                  {scr.bounds ? `${scr.bounds.width}×${scr.bounds.height}` : 'Native Resolution'}
-                                  {scr.isPrimary ? ' • Main Display' : ''}
-                                </span>
-                              </div>
-                              {isSelected && <span className="screen-selected-badge">✓ Active</span>}
-                            </button>
-                          );
-                        })}
+                  {showScreenDropdown && (
+                    <div className="screens-dropdown-menu">
+                      <div className="screens-dropdown-header">
+                        <span>CONNECTED MONITORS ({availableScreens.length || 1})</span>
                       </div>
-                    )}
-                  </div>
-                )}
+                      {(availableScreens.length > 0 ? availableScreens : [{ id: 'screen:0:0', label: 'Monitor 1 (Primary)', name: 'Main Display', isPrimary: true, bounds: { width: 1920, height: 1080 } }]).map(scr => {
+                        const isSelected = scr.id === currentScreenId || availableScreens.length <= 1;
+                        return (
+                          <button
+                            key={scr.id}
+                            onClick={() => handleSwitchScreen(scr.id)}
+                            className={`screen-dropdown-item ${isSelected ? 'active' : ''}`}
+                          >
+                            <div className="screen-item-icon">
+                              🖥️
+                            </div>
+                            <div className="screen-item-info">
+                              <span className="screen-item-title">
+                                {scr.label || scr.name}
+                              </span>
+                              <span className="screen-item-res">
+                                {scr.bounds ? `${scr.bounds.width}×${scr.bounds.height}` : '1920×1080'}
+                                {scr.isPrimary ? ' • Main Display' : ''}
+                              </span>
+                            </div>
+                            {isSelected && <span className="screen-selected-badge">✓ Active</span>}
+                          </button>
+                        );
+                      })}
+
+                      {availableScreens.length <= 1 && (
+                        <div style={{
+                          padding: '8px 10px',
+                          fontSize: '0.72rem',
+                          color: '#94a3b8',
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          borderRadius: '8px',
+                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                          lineHeight: 1.4
+                        }}>
+                          💡 <strong style={{ color: '#38bdf8' }}>Dual Screen Ready:</strong> When target PC connects a 2nd monitor or HDMI, it will appear here for instant 1-click switching.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Sleek Compact Action Menu Dropdown */}
                 <div className="tools-dropdown-wrapper">
