@@ -18,6 +18,84 @@ class InputHelper {
     [DllImport("user32.dll")]
     static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("gdi32.dll")]
+    static extern bool SetDeviceGammaRamp(IntPtr hDC, ref RAMP lpRamp);
+
+    [DllImport("gdi32.dll")]
+    static extern bool GetDeviceGammaRamp(IntPtr hDC, ref RAMP lpRamp);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct RAMP {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
+        public UInt16[] Red;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
+        public UInt16[] Green;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
+        public UInt16[] Blue;
+    }
+
+    static RAMP originalRamp;
+    static bool hasOriginalRamp = false;
+
+    static void BlackoutMonitor() {
+        try {
+            IntPtr hDC = GetDC(IntPtr.Zero);
+            if (hDC != IntPtr.Zero) {
+                if (!hasOriginalRamp) {
+                    originalRamp = new RAMP();
+                    if (GetDeviceGammaRamp(hDC, ref originalRamp)) {
+                        hasOriginalRamp = true;
+                    }
+                }
+
+                RAMP blackRamp = new RAMP();
+                blackRamp.Red = new UInt16[256];
+                blackRamp.Green = new UInt16[256];
+                blackRamp.Blue = new UInt16[256];
+                for (int i = 0; i < 256; i++) {
+                    blackRamp.Red[i] = 0;
+                    blackRamp.Green[i] = 0;
+                    blackRamp.Blue[i] = 0;
+                }
+                SetDeviceGammaRamp(hDC, ref blackRamp);
+                ReleaseDC(IntPtr.Zero, hDC);
+            }
+            SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
+        } catch { }
+    }
+
+    static void RestoreMonitor() {
+        try {
+            IntPtr hDC = GetDC(IntPtr.Zero);
+            if (hDC != IntPtr.Zero) {
+                if (hasOriginalRamp) {
+                    SetDeviceGammaRamp(hDC, ref originalRamp);
+                } else {
+                    RAMP defaultRamp = new RAMP();
+                    defaultRamp.Red = new UInt16[256];
+                    defaultRamp.Green = new UInt16[256];
+                    defaultRamp.Blue = new UInt16[256];
+                    for (int i = 0; i < 256; i++) {
+                        ushort val = (ushort)(i * 256);
+                        defaultRamp.Red[i] = val;
+                        defaultRamp.Green[i] = val;
+                        defaultRamp.Blue[i] = val;
+                    }
+                    SetDeviceGammaRamp(hDC, ref defaultRamp);
+                }
+                ReleaseDC(IntPtr.Zero, hDC);
+            }
+            SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1));
+            mouse_event(0x0001, 1, 1, 0, 0);
+        } catch { }
+    }
+
     const uint WM_SYSCOMMAND = 0x0112;
     const int SC_MONITORPOWER = 0xF170;
 
@@ -32,10 +110,6 @@ class InputHelper {
     const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
-
-    const uint WDA_NONE = 0x00000000;
-    const uint WDA_MONITOR = 0x00000001;
-    const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
     static void Main(string[] args) {
         Console.WriteLine("INPUT_HELPER_READY");
@@ -104,11 +178,10 @@ class InputHelper {
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
                 }
                 else if (command == "curtainon") {
-                    SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
+                    BlackoutMonitor();
                 }
                 else if (command == "curtainoff") {
-                    SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1));
-                    mouse_event(0x0001, 1, 1, 0, 0);
+                    RestoreMonitor();
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);
