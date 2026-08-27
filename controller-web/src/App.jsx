@@ -130,6 +130,24 @@ function App() {
   const [currentScreenId, setCurrentScreenId] = useState('screen:0:0');
   const [showScreenDropdown, setShowScreenDropdown] = useState(false);
 
+  // Low latency event emitter: prefers direct P2P WebRTC DataChannel, falls back to Socket.IO signaling
+  function sendControlData(eventData) {
+    let sent = false;
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      try {
+        dataChannelRef.current.send(JSON.stringify(eventData));
+        sent = true;
+      } catch (err) {
+        console.warn('[Controller]: DataChannel send warning:', err);
+      }
+    }
+    if (!sent && socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('control-event', eventData);
+      sent = true;
+    }
+    return sent;
+  }
+
   const handleSwitchScreen = (screenId) => {
     if (!screenId || screenId === currentScreenId) {
       setShowScreenDropdown(false);
@@ -1212,15 +1230,6 @@ function App() {
       if (width && height) {
         setAspectRatio(width / height);
       }
-    }
-  };
-
-  // Low latency event emitter: prefers direct P2P WebRTC DataChannel, falls back to Socket.IO signaling
-  const sendControlData = (eventData) => {
-    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-      dataChannelRef.current.send(JSON.stringify(eventData));
-    } else if (socketRef.current) {
-      socketRef.current.emit('control-event', eventData);
     }
   };
 
