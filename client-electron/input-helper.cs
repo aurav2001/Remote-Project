@@ -27,6 +27,11 @@ class InputHelper {
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
 
+    static int currentDisplayX = 0;
+    static int currentDisplayY = 0;
+    static int currentDisplayW = 0;
+    static int currentDisplayH = 0;
+
     static void Main(string[] args) {
         Console.WriteLine("INPUT_HELPER_READY");
         string line;
@@ -36,7 +41,13 @@ class InputHelper {
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
-                if (command == "movenorm" && parts.Length >= 3) {
+                if (command == "setdisplaybounds" && parts.Length >= 5) {
+                    currentDisplayX = int.Parse(parts[1]);
+                    currentDisplayY = int.Parse(parts[2]);
+                    currentDisplayW = int.Parse(parts[3]);
+                    currentDisplayH = int.Parse(parts[4]);
+                }
+                else if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
                     float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
                     int screenW = GetSystemMetrics(0); // Primary Screen Width
@@ -44,8 +55,11 @@ class InputHelper {
                     if (screenW <= 0) screenW = 1920;
                     if (screenH <= 0) screenH = 1080;
 
-                    int targetX = (int)Math.Round(nx * screenW);
-                    int targetY = (int)Math.Round(ny * screenH);
+                    int baseW = currentDisplayW > 0 ? currentDisplayW : screenW;
+                    int baseH = currentDisplayH > 0 ? currentDisplayH : screenH;
+
+                    int targetX = currentDisplayX + (int)Math.Round(nx * baseW);
+                    int targetY = currentDisplayY + (int)Math.Round(ny * baseH);
                     SetCursorPos(targetX, targetY);
                 }
                 else if (command == "move" && parts.Length >= 3) {

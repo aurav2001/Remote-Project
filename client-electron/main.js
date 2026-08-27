@@ -389,24 +389,54 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handler to get screen sources
+// IPC Handler to get screen sources with exact monitor resolutions and display bounds
 ipcMain.handle('get-screen-sources', async () => {
   try {
+    const displays = screen.getAllDisplays();
+    const primaryDisplay = screen.getPrimaryDisplay();
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'],
       thumbnailSize: { width: 150, height: 150 }
     });
     if (!sources || sources.length === 0) {
-      return [{ id: 'screen:0:0', name: 'Primary Display (Screen 1)' }];
+      return [{ 
+        id: 'screen:0:0', 
+        name: 'Primary Display', 
+        label: 'Monitor 1 (Primary)', 
+        isPrimary: true, 
+        bounds: primaryDisplay ? primaryDisplay.bounds : { x: 0, y: 0, width: 1920, height: 1080 } 
+      }];
     }
-    const mapped = sources.map(source => ({
-      id: source.id,
-      name: source.name || 'Primary Display'
-    }));
+    const mapped = sources.map((source, index) => {
+      const matchedDisplay = displays[index] || (index === 0 ? primaryDisplay : displays[0]);
+      const isPrimary = matchedDisplay && primaryDisplay ? matchedDisplay.id === primaryDisplay.id : index === 0;
+      const bounds = matchedDisplay ? matchedDisplay.bounds : { x: 0, y: 0, width: 1920, height: 1080 };
+      const res = `${bounds.width}x${bounds.height}`;
+      const label = `Monitor ${index + 1} (${res}${isPrimary ? ' - Main' : ''})`;
+      return {
+        id: source.id,
+        name: source.name || label,
+        label,
+        index: index + 1,
+        isPrimary,
+        bounds
+      };
+    });
     return mapped;
   } catch (error) {
     console.error('[Main Process]: Error fetching screen sources:', error);
-    return [{ id: 'screen:0:0', name: 'Primary Display (Screen 1)' }];
+    return [{ id: 'screen:0:0', name: 'Primary Display', label: 'Monitor 1 (Primary)', isPrimary: true, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }];
+  }
+});
+
+// IPC Handler to update active monitor display bounds in C# input helper
+ipcMain.on('set-active-display', (event, bounds) => {
+  try {
+    if (bounds && typeof bounds.x === 'number' && typeof bounds.y === 'number' && typeof bounds.width === 'number' && typeof bounds.height === 'number') {
+      sendInputHelperCommand(`setdisplaybounds ${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
+    }
+  } catch (err) {
+    console.warn('[Main Process]: Error setting active display bounds:', err);
   }
 });
 

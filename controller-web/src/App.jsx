@@ -125,6 +125,30 @@ function App() {
   const [laserPos, setLaserPos] = useState({ x: -100, y: -100, active: false });
   const annotationCanvasRef = useRef(null);
 
+  // Multi-Monitor Dual/Triple Display Switcher States
+  const [availableScreens, setAvailableScreens] = useState([]);
+  const [currentScreenId, setCurrentScreenId] = useState('screen:0:0');
+  const [showScreenDropdown, setShowScreenDropdown] = useState(false);
+
+  const handleSwitchScreen = (screenId) => {
+    if (!screenId || screenId === currentScreenId) {
+      setShowScreenDropdown(false);
+      return;
+    }
+    setCurrentScreenId(screenId);
+    setShowScreenDropdown(false);
+    sendControlData({
+      type: 'switch-screen',
+      screenId
+    });
+    const matched = availableScreens.find(s => s.id === screenId);
+    setClipboardToast({
+      text: `🖥️ Switching to ${matched?.label || 'Monitor'}...`,
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 3000);
+  };
+
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
   const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
@@ -706,6 +730,9 @@ function App() {
       socketRef.current = null;
     }
     setStatus('disconnected');
+    setAvailableScreens([]);
+    setCurrentScreenId('screen:0:0');
+    setShowScreenDropdown(false);
   };
 
   const [recentDevices, setRecentDevices] = useState(() => {
@@ -983,6 +1010,18 @@ function App() {
               text: `📁 File "${data.fileName}" saved to remote Downloads folder!`,
               isSelf: true
             });
+          } else if (data.type === 'screens-list' && Array.isArray(data.screens)) {
+            console.log('[Controller]: Received available monitors list:', data.screens);
+            setAvailableScreens(data.screens);
+            if (data.currentScreenId) setCurrentScreenId(data.currentScreenId);
+          } else if (data.type === 'screen-switched') {
+            console.log('[Controller]: Remote screen switched to:', data);
+            setCurrentScreenId(data.screenId);
+            setClipboardToast({
+              text: `🖥️ Active display: ${data.label || 'Monitor'}`,
+              isSelf: true
+            });
+            setTimeout(() => setClipboardToast(null), 3000);
           } else if (data.type === 'terminal-result') {
             setTerminalLogs(prev => {
               const exists = prev.some(item => item.id === data.id);
@@ -2071,6 +2110,55 @@ function App() {
                 >
                   ✏️ Annotate
                 </button>
+
+                {/* Multi-Monitor Dual/Triple Display Switcher */}
+                {availableScreens.length > 1 && (
+                  <div className="screens-dropdown-wrapper">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowScreenDropdown(prev => !prev);
+                      }}
+                      className={`control-btn btn-screen-switch ${showScreenDropdown ? 'active' : ''}`}
+                      title="Switch between connected monitors (Dual / Triple Screen)"
+                    >
+                      🖥️ {availableScreens.find(s => s.id === currentScreenId)?.label?.split(' ')[0] || 'Monitor'} {availableScreens.find(s => s.id === currentScreenId)?.index || '1'} 
+                      <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 4 }}>▼</span>
+                    </button>
+
+                    {showScreenDropdown && (
+                      <div className="screens-dropdown-menu">
+                        <div className="screens-dropdown-header">
+                          <span>CONNECTED MONITORS ({availableScreens.length})</span>
+                        </div>
+                        {availableScreens.map(scr => {
+                          const isSelected = scr.id === currentScreenId;
+                          return (
+                            <button
+                              key={scr.id}
+                              onClick={() => handleSwitchScreen(scr.id)}
+                              className={`screen-dropdown-item ${isSelected ? 'active' : ''}`}
+                            >
+                              <div className="screen-item-icon">
+                                🖥️
+                              </div>
+                              <div className="screen-item-info">
+                                <span className="screen-item-title">
+                                  {scr.label || scr.name}
+                                </span>
+                                <span className="screen-item-res">
+                                  {scr.bounds ? `${scr.bounds.width}×${scr.bounds.height}` : 'Native Resolution'}
+                                  {scr.isPrimary ? ' • Main Display' : ''}
+                                </span>
+                              </div>
+                              {isSelected && <span className="screen-selected-badge">✓ Active</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Sleek Compact Action Menu Dropdown */}
                 <div className="tools-dropdown-wrapper">

@@ -288,6 +288,14 @@ function initSocket() {
 
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
+    if (data && data.type === 'get-screens-list') {
+      sendScreensListToController();
+      return;
+    }
+    if (data && data.type === 'switch-screen' && data.screenId) {
+      handleSwitchScreen(data.screenId);
+      return;
+    }
     if (data && data.type === 'annotation-event') {
       if (window.electronAPI && window.electronAPI.showAnnotation) {
         window.electronAPI.showAnnotation(data.payload);
@@ -521,6 +529,87 @@ async function startSharing(sourceId) {
   }
 }
 
+let cachedScreenSources = [];
+let currentScreenSourceId = 'screen:0:0';
+
+async function handleSwitchScreen(screenId) {
+  if (!screenId) return;
+  console.log('[Host]: Switching active screen to:', screenId);
+  currentScreenSourceId = screenId;
+
+  // Find monitor info and update input-helper display bounds
+  const matchedScreen = cachedScreenSources.find(s => s.id === screenId);
+  if (matchedScreen && matchedScreen.bounds && window.electronAPI && window.electronAPI.setActiveDisplay) {
+    window.electronAPI.setActiveDisplay(matchedScreen.bounds);
+  }
+
+  try {
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: screenId,
+          maxWidth: 3840,
+          maxHeight: 2160,
+          maxFrameRate: 60
+        }
+      }
+    });
+
+    if (newStream && newStream.getVideoTracks().length > 0) {
+      const newTrack = newStream.getVideoTracks()[0];
+      newTrack.enabled = true;
+      if ('contentHint' in newTrack) {
+        newTrack.contentHint = 'detail';
+      }
+
+      // Hot swap video track on active WebRTC PeerConnection seamlessly
+      if (peerConnection) {
+        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+          await sender.replaceTrack(newTrack);
+          console.log('[Host]: WebRTC video track hot-swapped seamlessly to screen:', screenId);
+        }
+      }
+
+      // Stop old tracks
+      if (localStream) {
+        localStream.getVideoTracks().forEach(t => t.stop());
+      }
+      localStream = newStream;
+
+      // Notify controller
+      const notifyPayload = {
+        type: 'screen-switched',
+        screenId,
+        label: matchedScreen ? matchedScreen.label : 'Monitor'
+      };
+      if (activeDataChannel && activeDataChannel.readyState === 'open') {
+        activeDataChannel.send(JSON.stringify(notifyPayload));
+      } else if (socket && socket.connected) {
+        socket.emit('control-event', notifyPayload);
+      }
+    }
+  } catch (err) {
+    console.error('[Host]: Failed to switch screen:', err);
+  }
+}
+
+function sendScreensListToController() {
+  if (!cachedScreenSources || cachedScreenSources.length === 0) return;
+  const payload = {
+    type: 'screens-list',
+    screens: cachedScreenSources,
+    currentScreenId: currentScreenSourceId
+  };
+  if (activeDataChannel && activeDataChannel.readyState === 'open') {
+    activeDataChannel.send(JSON.stringify(payload));
+  } else if (socket && socket.connected) {
+    socket.emit('control-event', payload);
+  }
+}
+
 // Load available screen sources
 async function loadSources() {
   try {
@@ -530,6 +619,7 @@ async function loadSources() {
     let sources = [];
     if (window.electronAPI && window.electronAPI.getScreenSources) {
       sources = await window.electronAPI.getScreenSources();
+      cachedScreenSources = sources;
     }
     
     if (screenSelect) {
@@ -543,7 +633,7 @@ async function loadSources() {
       sources.forEach(source => {
         const option = document.createElement('option');
         option.value = source.id;
-        option.text = source.name;
+        option.text = source.label || source.name;
         screenSelect.appendChild(option);
       });
     }
@@ -552,7 +642,11 @@ async function loadSources() {
 
     if (!isSharingStarted && sources && sources.length > 0) {
       const primarySourceId = sources[0].id;
+      currentScreenSourceId = primarySourceId;
       console.log('[Host]: Auto-starting screen capture for primary source:', primarySourceId);
+      if (sources[0].bounds && window.electronAPI && window.electronAPI.setActiveDisplay) {
+        window.electronAPI.setActiveDisplay(sources[0].bounds);
+      }
       await startSharing(primarySourceId);
     }
   } catch (error) {
@@ -572,6 +666,7 @@ async function loadSources() {
 
 function onStreamConnected() {
   updateStatus('connected', 'Connected & Streaming');
+  sendScreensListToController();
   if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
     console.log('[Host]: Triggering auto-minimize on stream connection...');
     window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
@@ -605,6 +700,14 @@ function setupDataChannel(channel) {
       }
       if (data.type === 'file-transfer-chunk') {
         handleIncomingFileChunk(data);
+        return;
+      }
+      if (data.type === 'get-screens-list') {
+        sendScreensListToController();
+        return;
+      }
+      if (data.type === 'switch-screen' && data.screenId) {
+        handleSwitchScreen(data.screenId);
         return;
       }
       if (data.type === 'annotation-event') {
