@@ -15,6 +15,9 @@ class InputHelper {
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
+    [DllImport("user32.dll")]
+    static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
     const uint MOUSEEVENTF_RIGHTDOWN = 0x08;
@@ -26,6 +29,10 @@ class InputHelper {
     const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
+
+    const uint WDA_NONE = 0x00000000;
+    const uint WDA_MONITOR = 0x00000001;
+    const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
     static void Main(string[] args) {
         Console.WriteLine("INPUT_HELPER_READY");
@@ -77,7 +84,7 @@ class InputHelper {
                     if (button == "left") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     else if (button == "right") mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     else if (button == "middle") mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
-                }
+                } 
                 else if (command == "scroll" && parts.Length >= 2) {
                     int deltaY = int.Parse(parts[1]);
                     int amount = -deltaY;
@@ -92,6 +99,14 @@ class InputHelper {
                     byte vk = byte.Parse(parts[1]);
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
+                }
+                else if (command == "excludecapture" && parts.Length >= 2) {
+                    IntPtr hwnd = (IntPtr)long.Parse(parts[1]);
+                    SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+                }
+                else if (command == "allowcapture" && parts.Length >= 2) {
+                    IntPtr hwnd = (IntPtr)long.Parse(parts[1]);
+                    SetWindowDisplayAffinity(hwnd, WDA_NONE);
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);

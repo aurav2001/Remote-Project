@@ -256,6 +256,86 @@ ipcMain.on('show-annotation', (event, data) => {
   }
 });
 
+// --- Privacy Screen / Black Curtain Window Management ---
+let privacyCurtainWindow = null;
+
+function setPrivacyCurtain(enabled) {
+  if (enabled) {
+    if (privacyCurtainWindow && !privacyCurtainWindow.isDestroyed()) {
+      privacyCurtainWindow.show();
+      return;
+    }
+    try {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const bounds = primaryDisplay.bounds;
+
+      privacyCurtainWindow = new BrowserWindow({
+        x: bounds.x || 0,
+        y: bounds.y || 0,
+        width: bounds.width,
+        height: bounds.height,
+        backgroundColor: '#030712',
+        frame: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        focusable: false,
+        resizable: false,
+        movable: false,
+        show: true,
+        enableLargerThanScreen: true,
+        webPreferences: {
+          backgroundThrottling: false,
+          contextIsolation: true,
+          nodeIntegration: false
+        }
+      });
+
+      privacyCurtainWindow.setBounds(bounds);
+      privacyCurtainWindow.setAlwaysOnTop(true, 'screen-saver');
+      if (typeof privacyCurtainWindow.setVisibleOnAllWorkspaces === 'function') {
+        privacyCurtainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      }
+      privacyCurtainWindow.loadFile(path.join(__dirname, 'curtain.html'));
+
+      // Exclude Privacy Curtain window from Windows DXGI / GDI screen capture
+      try {
+        const handleBuffer = privacyCurtainWindow.getNativeWindowHandle();
+        let hwndVal = 0;
+        if (process.arch === 'x64') {
+          hwndVal = handleBuffer.readBigInt64LE(0);
+        } else {
+          hwndVal = handleBuffer.readInt32LE(0);
+        }
+        if (inputHelperProcess && inputHelperProcess.stdin && !inputHelperProcess.killed) {
+          console.log(`[Main Process]: Excluding Privacy Curtain HWND ${hwndVal} from screen capture...`);
+          inputHelperProcess.stdin.write(`excludecapture ${hwndVal}\n`);
+        }
+      } catch (err) {
+        console.warn('Could not set window display affinity on curtain:', err);
+      }
+
+      privacyCurtainWindow.on('closed', () => {
+        privacyCurtainWindow = null;
+      });
+    } catch (err) {
+      console.warn('[Main Process]: Error creating Privacy Curtain window:', err);
+    }
+  } else {
+    if (privacyCurtainWindow && !privacyCurtainWindow.isDestroyed()) {
+      console.log('[Main Process]: Disabling Privacy Curtain Mode.');
+      try {
+        privacyCurtainWindow.destroy();
+      } catch (e) {}
+      privacyCurtainWindow = null;
+    }
+  }
+}
+
+ipcMain.on('toggle-privacy-screen', (event, enabled) => {
+  setPrivacyCurtain(Boolean(enabled));
+});
+
 // Active File Transfer WriteStreams Map
 const activeFileTransfers = new Map();
 

@@ -125,6 +125,18 @@ function App() {
   const [laserPos, setLaserPos] = useState({ x: -100, y: -100, active: false });
   const annotationCanvasRef = useRef(null);
 
+  // Privacy Screen / Black Curtain State
+  const [isPrivacyMode, setIsPrivacyMode] = useState(false);
+
+  const handleTogglePrivacyMode = () => {
+    const nextState = !isPrivacyMode;
+    setIsPrivacyMode(nextState);
+    sendControlData({
+      type: 'toggle-privacy-screen',
+      enabled: nextState
+    });
+  };
+
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
   const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
@@ -706,6 +718,7 @@ function App() {
       socketRef.current = null;
     }
     setStatus('disconnected');
+    setIsPrivacyMode(false);
   };
 
   const [recentDevices, setRecentDevices] = useState(() => {
@@ -2070,6 +2083,14 @@ function App() {
                   title="Toggle Screen Annotation & Laser Pointer Tool"
                 >
                   ✏️ Annotate
+                </button>
+
+                <button
+                  onClick={handleTogglePrivacyMode}
+                  className={`control-btn btn-privacy ${isPrivacyMode ? 'active' : ''}`}
+                  title={isPrivacyMode ? "Turn OFF Privacy Screen (Show Physical Monitor)" : "Turn ON Privacy Screen (Blackout Physical Monitor for Confidential Work)"}
+                >
+                  {isPrivacyMode ? '🕶️ Privacy ON' : '🕶️ Privacy Screen'}
                 </button>
 
                 {/* Sleek Compact Action Menu Dropdown */}

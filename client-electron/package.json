@@ -26,6 +26,7 @@
       "preload-overlay.js",
       "index.html",
       "overlay.html",
+      "curtain.html",
       "renderer.js",
       "socket.io.min.js",
       "input-helper.exe",
