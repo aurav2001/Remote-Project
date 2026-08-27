@@ -42,8 +42,13 @@ class InputHelper {
 
     static RAMP originalRamp;
     static bool hasOriginalRamp = false;
+    static volatile bool isCurtainActive = false;
+    static System.Threading.Thread curtainThread = null;
 
-    static void BlackoutMonitor() {
+    static void StartCurtainLoop() {
+        if (isCurtainActive) return;
+        isCurtainActive = true;
+
         try {
             IntPtr hDC = GetDC(IntPtr.Zero);
             if (hDC != IntPtr.Zero) {
@@ -53,21 +58,44 @@ class InputHelper {
                         hasOriginalRamp = true;
                     }
                 }
-
-                RAMP blackRamp = new RAMP();
-                blackRamp.Red = new UInt16[256];
-                blackRamp.Green = new UInt16[256];
-                blackRamp.Blue = new UInt16[256];
-                for (int i = 0; i < 256; i++) {
-                    blackRamp.Red[i] = 0;
-                    blackRamp.Green[i] = 0;
-                    blackRamp.Blue[i] = 0;
-                }
-                SetDeviceGammaRamp(hDC, ref blackRamp);
                 ReleaseDC(IntPtr.Zero, hDC);
             }
-            SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
         } catch { }
+
+        curtainThread = new System.Threading.Thread(() => {
+            RAMP blackRamp = new RAMP();
+            blackRamp.Red = new UInt16[256];
+            blackRamp.Green = new UInt16[256];
+            blackRamp.Blue = new UInt16[256];
+            for (int i = 0; i < 256; i++) {
+                blackRamp.Red[i] = 0;
+                blackRamp.Green[i] = 0;
+                blackRamp.Blue[i] = 0;
+            }
+
+            while (isCurtainActive) {
+                try {
+                    IntPtr hDC = GetDC(IntPtr.Zero);
+                    if (hDC != IntPtr.Zero) {
+                        SetDeviceGammaRamp(hDC, ref blackRamp);
+                        ReleaseDC(IntPtr.Zero, hDC);
+                    }
+                } catch { }
+                System.Threading.Thread.Sleep(30);
+            }
+        });
+        curtainThread.IsBackground = true;
+        curtainThread.Priority = System.Threading.ThreadPriority.Highest;
+        curtainThread.Start();
+    }
+
+    static void StopCurtainLoop() {
+        isCurtainActive = false;
+        if (curtainThread != null) {
+            try { curtainThread.Join(150); } catch { }
+            curtainThread = null;
+        }
+        RestoreMonitor();
     }
 
     static void RestoreMonitor() {
@@ -123,8 +151,8 @@ class InputHelper {
                 if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
                     float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
-                    int screenW = GetSystemMetrics(0); // Primary Screen Width
-                    int screenH = GetSystemMetrics(1); // Primary Screen Height
+                    int screenW = GetSystemMetrics(0);
+                    int screenH = GetSystemMetrics(1);
                     if (screenW <= 0) screenW = 1920;
                     if (screenH <= 0) screenH = 1080;
 
@@ -178,10 +206,10 @@ class InputHelper {
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
                 }
                 else if (command == "curtainon") {
-                    BlackoutMonitor();
+                    StartCurtainLoop();
                 }
                 else if (command == "curtainoff") {
-                    RestoreMonitor();
+                    StopCurtainLoop();
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);
