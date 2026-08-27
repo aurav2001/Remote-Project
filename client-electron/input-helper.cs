@@ -16,7 +16,10 @@ class InputHelper {
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
     [DllImport("user32.dll")]
-    static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+    static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    const uint WM_SYSCOMMAND = 0x0112;
+    const int SC_MONITORPOWER = 0xF170;
 
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
@@ -100,13 +103,12 @@ class InputHelper {
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
                 }
-                else if (command == "excludecapture" && parts.Length >= 2) {
-                    IntPtr hwnd = (IntPtr)long.Parse(parts[1]);
-                    SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+                else if (command == "curtainon") {
+                    SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
                 }
-                else if (command == "allowcapture" && parts.Length >= 2) {
-                    IntPtr hwnd = (IntPtr)long.Parse(parts[1]);
-                    SetWindowDisplayAffinity(hwnd, WDA_NONE);
+                else if (command == "curtainoff") {
+                    SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1));
+                    mouse_event(0x0001, 1, 1, 0, 0);
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);
