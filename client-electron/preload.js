@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setCompanyGroup: (group) => ipcRenderer.invoke('set-company-group', group),
   onCompanyGroupUpdated: (callback) => {
     ipcRenderer.on('company-group-updated', (event, group) => callback(group));
-  }
+  },
+  showAnnotation: (data) => ipcRenderer.send('show-annotation', data)
 });

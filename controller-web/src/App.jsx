@@ -338,14 +338,17 @@ function App() {
   };
 
   // --- Screen Annotation & Laser Pointer Canvas Handlers ---
+  const lastLaserEmitTimeRef = useRef(0);
+
   const getCanvasCoords = (e) => {
     const canvas = annotationCanvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return { x: 0, y: 0, nx: 0, ny: 0 };
     const rect = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    };
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const nx = rect.width > 0 ? Math.max(0, Math.min(1, x / rect.width)) : 0;
+    const ny = rect.height > 0 ? Math.max(0, Math.min(1, y / rect.height)) : 0;
+    return { x, y, nx, ny, width: rect.width, height: rect.height };
   };
 
   const handleAnnotationMouseDown = (e) => {
@@ -353,6 +356,16 @@ function App() {
     const coords = getCanvasCoords(e);
     if (annotationTool === 'laser') {
       setLaserPos({ x: coords.x, y: coords.y, active: true });
+      sendControlData({
+        type: 'annotation-event',
+        payload: {
+          type: 'laser',
+          x: coords.nx,
+          y: coords.ny,
+          color: annotationColor,
+          active: true
+        }
+      });
       return;
     }
 
@@ -363,7 +376,8 @@ function App() {
         type: annotationTool,
         color: annotationColor,
         size: annotationSize,
-        points: [coords]
+        points: [{ x: coords.x, y: coords.y }],
+        npoints: [{ x: coords.nx, y: coords.ny }]
       });
     } else if (annotationTool === 'arrow' || annotationTool === 'rect') {
       setCurrentDrawItem({
@@ -371,8 +385,10 @@ function App() {
         type: annotationTool,
         color: annotationColor,
         size: annotationSize,
-        start: coords,
-        end: coords
+        start: { x: coords.x, y: coords.y },
+        end: { x: coords.x, y: coords.y },
+        nstart: { x: coords.nx, y: coords.ny },
+        nend: { x: coords.nx, y: coords.ny }
       });
     }
   };
@@ -383,6 +399,20 @@ function App() {
 
     if (annotationTool === 'laser') {
       setLaserPos({ x: coords.x, y: coords.y, active: true });
+      const now = performance.now();
+      if (now - lastLaserEmitTimeRef.current >= 16) {
+        lastLaserEmitTimeRef.current = now;
+        sendControlData({
+          type: 'annotation-event',
+          payload: {
+            type: 'laser',
+            x: coords.nx,
+            y: coords.ny,
+            color: annotationColor,
+            active: true
+          }
+        });
+      }
       return;
     }
 
@@ -391,12 +421,14 @@ function App() {
     if (currentDrawItem.type === 'pen' || currentDrawItem.type === 'highlighter') {
       setCurrentDrawItem(prev => prev ? {
         ...prev,
-        points: [...prev.points, coords]
+        points: [...prev.points, { x: coords.x, y: coords.y }],
+        npoints: [...(prev.npoints || []), { x: coords.nx, y: coords.ny }]
       } : null);
     } else if (currentDrawItem.type === 'arrow' || currentDrawItem.type === 'rect') {
       setCurrentDrawItem(prev => prev ? {
         ...prev,
-        end: coords
+        end: { x: coords.x, y: coords.y },
+        nend: { x: coords.nx, y: coords.ny }
       } : null);
     }
   };
@@ -406,6 +438,24 @@ function App() {
     if (annotationTool === 'laser') return;
     if (isDrawing && currentDrawItem) {
       setAnnotations(prev => [...prev, currentDrawItem]);
+
+      // Broadcast completed shape to Host PC
+      const normItem = {
+        type: currentDrawItem.type,
+        color: currentDrawItem.color,
+        size: currentDrawItem.size,
+        points: currentDrawItem.npoints,
+        start: currentDrawItem.nstart,
+        end: currentDrawItem.nend
+      };
+      sendControlData({
+        type: 'annotation-event',
+        payload: {
+          type: 'draw',
+          item: normItem
+        }
+      });
+
       setCurrentDrawItem(null);
       setIsDrawing(false);
     }
@@ -414,9 +464,31 @@ function App() {
   const handleAnnotationMouseLeave = () => {
     if (annotationTool === 'laser') {
       setLaserPos(prev => ({ ...prev, active: false }));
+      sendControlData({
+        type: 'annotation-event',
+        payload: {
+          type: 'laser',
+          active: false
+        }
+      });
     }
     if (isDrawing && currentDrawItem) {
       setAnnotations(prev => [...prev, currentDrawItem]);
+      const normItem = {
+        type: currentDrawItem.type,
+        color: currentDrawItem.color,
+        size: currentDrawItem.size,
+        points: currentDrawItem.npoints,
+        start: currentDrawItem.nstart,
+        end: currentDrawItem.nend
+      };
+      sendControlData({
+        type: 'annotation-event',
+        payload: {
+          type: 'draw',
+          item: normItem
+        }
+      });
       setCurrentDrawItem(null);
       setIsDrawing(false);
     }
@@ -2527,7 +2599,13 @@ function App() {
                   ↩️ Undo
                 </button>
                 <button
-                  onClick={() => setAnnotations([])}
+                  onClick={() => {
+                    setAnnotations([]);
+                    sendControlData({
+                      type: 'annotation-event',
+                      payload: { type: 'clear' }
+                    });
+                  }}
                   className="btn-annotate-action danger"
                   disabled={annotations.length === 0}
                   title="Clear all drawings"

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Annotation Overlay</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      overflow: hidden;
+      user-select: none;
+      pointer-events: none;
+    }
+    #canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let annotations = [];
+    let laser = { x: -100, y: -100, color: '#ef4444', active: false };
+    let animFrameId = null;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth * window.devicePixelRatio;
+      canvas.height = window.innerHeight * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function render() {
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      // Draw all persistent annotations
+      annotations.forEach(item => {
+        ctx.save();
+        ctx.strokeStyle = item.color || '#ef4444';
+        ctx.fillStyle = item.color || '#ef4444';
+        ctx.lineWidth = item.size || 4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (item.type === 'pen' && item.points && item.points.length > 0) {
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x * w, item.points[0].y * h);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x * w, item.points[i].y * h);
+          }
+          ctx.stroke();
+        } else if (item.type === 'highlighter' && item.points && item.points.length > 0) {
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = (item.size || 4) * 3.5;
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x * w, item.points[0].y * h);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x * w, item.points[i].y * h);
+          }
+          ctx.stroke();
+        } else if (item.type === 'rect' && item.start && item.end) {
+          const x1 = item.start.x * w;
+          const y1 = item.start.y * h;
+          const x2 = item.end.x * w;
+          const y2 = item.end.y * h;
+          const rx = Math.min(x1, x2);
+          const ry = Math.min(y1, y2);
+          const rw = Math.abs(x2 - x1);
+          const rh = Math.abs(y2 - y1);
+          ctx.beginPath();
+          ctx.strokeRect(rx, ry, rw, rh);
+        } else if (item.type === 'arrow' && item.start && item.end) {
+          const fromX = item.start.x * w;
+          const fromY = item.start.y * h;
+          const toX = item.end.x * w;
+          const toY = item.end.y * h;
+          const headlen = Math.max(16, (item.size || 4) * 3.5);
+          const angle = Math.atan2(toY - fromY, toX - fromX);
+
+          ctx.beginPath();
+          ctx.moveTo(fromX, fromY);
+          ctx.lineTo(toX, toY);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(toX, toY);
+          ctx.lineTo(toX - headlen * Math.cos(angle - Math.PI / 6), toY - headlen * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(toX - headlen * Math.cos(angle + Math.PI / 6), toY - headlen * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      });
+
+      // Draw Laser Pointer
+      if (laser.active) {
+        const lx = laser.x * w;
+        const ly = laser.y * h;
+
+        ctx.save();
+        const grad = ctx.createRadialGradient(lx, ly, 3, lx, ly, 22);
+        grad.addColorStop(0, laser.color || '#ef4444');
+        grad.addColorStop(0.4, (laser.color || '#ef4444') + 'aa');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 22, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if (laser.active || annotations.length > 0) {
+        animFrameId = requestAnimationFrame(render);
+      } else {
+        animFrameId = null;
+      }
+    }
+
+    function triggerRender() {
+      if (!animFrameId) {
+        animFrameId = requestAnimationFrame(render);
+      }
+    }
+
+    if (window.overlayAPI && window.overlayAPI.onRenderAnnotation) {
+      window.overlayAPI.onRenderAnnotation((payload) => {
+        if (!payload) return;
+
+        if (payload.type === 'laser') {
+          laser.active = !!payload.active;
+          if (payload.active) {
+            laser.x = payload.x;
+            laser.y = payload.y;
+            if (payload.color) laser.color = payload.color;
+          }
+          triggerRender();
+        } else if (payload.type === 'draw') {
+          if (payload.item) {
+            annotations.push(payload.item);
+            triggerRender();
+          }
+        } else if (payload.type === 'clear') {
+          annotations = [];
+          laser.active = false;
+          triggerRender();
+        }
+      });
+    }
+  </script>
+</body>
+</html>

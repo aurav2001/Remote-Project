@@ -288,6 +288,12 @@ function initSocket() {
 
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
+    if (data && data.type === 'annotation-event') {
+      if (window.electronAPI && window.electronAPI.showAnnotation) {
+        window.electronAPI.showAnnotation(data.payload);
+      }
+      return;
+    }
     if (!activeDataChannel || activeDataChannel.readyState !== 'open') {
       if (window.electronAPI && window.electronAPI.sendControlEvent) {
         window.electronAPI.sendControlEvent(data);
@@ -599,6 +605,12 @@ function setupDataChannel(channel) {
       }
       if (data.type === 'file-transfer-chunk') {
         handleIncomingFileChunk(data);
+        return;
+      }
+      if (data.type === 'annotation-event') {
+        if (window.electronAPI && window.electronAPI.showAnnotation) {
+          window.electronAPI.showAnnotation(data.payload);
+        }
         return;
       }
       if (data.type === 'terminal-command') {

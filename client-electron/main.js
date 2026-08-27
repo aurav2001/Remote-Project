@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -190,6 +190,69 @@ ipcMain.handle('minimize-host-window', () => {
       mainWindow.minimize();
     }
   } catch (e) {}
+});
+
+// --- Transparent Screen Annotation & Laser Pointer Overlay Window ---
+let overlayWindow = null;
+
+function getOrCreateOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    return overlayWindow;
+  }
+  try {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height, x, y } = primaryDisplay.bounds;
+
+    overlayWindow = new BrowserWindow({
+      x,
+      y,
+      width,
+      height,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      hasShadow: false,
+      focusable: false,
+      resizable: false,
+      movable: false,
+      show: true,
+      enableLargerThanScreen: true,
+      webPreferences: {
+        backgroundThrottling: false,
+        preload: path.join(__dirname, 'preload-overlay.js'),
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    });
+
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+    if (typeof overlayWindow.setVisibleOnAllWorkspaces === 'function') {
+      overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    overlayWindow.loadFile(path.join(__dirname, 'overlay.html'));
+
+    overlayWindow.on('closed', () => {
+      overlayWindow = null;
+    });
+
+    return overlayWindow;
+  } catch (err) {
+    console.warn('[Main Process]: Could not create annotation overlay window:', err);
+    return null;
+  }
+}
+
+ipcMain.on('show-annotation', (event, data) => {
+  try {
+    const win = getOrCreateOverlayWindow();
+    if (win && win.webContents && !win.webContents.isDestroyed()) {
+      win.webContents.send('render-annotation', data);
+    }
+  } catch (e) {
+    console.warn('[Main Process]: Annotation overlay IPC relay warning:', e);
+  }
 });
 
 // Active File Transfer WriteStreams Map
