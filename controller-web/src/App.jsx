@@ -114,6 +114,17 @@ function App() {
   const [fileTransfer, setFileTransfer] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Screen Annotation & Laser Pointer Suite States
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [annotationTool, setAnnotationTool] = useState('laser'); // 'laser', 'pen', 'arrow', 'rect', 'highlighter'
+  const [annotationColor, setAnnotationColor] = useState('#ef4444');
+  const [annotationSize, setAnnotationSize] = useState(4);
+  const [annotations, setAnnotations] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [currentDrawItem, setCurrentDrawItem] = useState(null);
+  const [laserPos, setLaserPos] = useState({ x: -100, y: -100, active: false });
+  const annotationCanvasRef = useRef(null);
+
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
   const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
@@ -323,6 +334,221 @@ function App() {
         el.srcObject = remoteStreamRef.current;
         el.play().catch(err => console.warn('Video play warning:', err));
       }
+    }
+  };
+
+  // --- Screen Annotation & Laser Pointer Canvas Handlers ---
+  const getCanvasCoords = (e) => {
+    const canvas = annotationCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  };
+
+  const handleAnnotationMouseDown = (e) => {
+    if (!isAnnotating) return;
+    const coords = getCanvasCoords(e);
+    if (annotationTool === 'laser') {
+      setLaserPos({ x: coords.x, y: coords.y, active: true });
+      return;
+    }
+
+    setIsDrawing(true);
+    if (annotationTool === 'pen' || annotationTool === 'highlighter') {
+      setCurrentDrawItem({
+        id: Date.now(),
+        type: annotationTool,
+        color: annotationColor,
+        size: annotationSize,
+        points: [coords]
+      });
+    } else if (annotationTool === 'arrow' || annotationTool === 'rect') {
+      setCurrentDrawItem({
+        id: Date.now(),
+        type: annotationTool,
+        color: annotationColor,
+        size: annotationSize,
+        start: coords,
+        end: coords
+      });
+    }
+  };
+
+  const handleAnnotationMouseMove = (e) => {
+    if (!isAnnotating) return;
+    const coords = getCanvasCoords(e);
+
+    if (annotationTool === 'laser') {
+      setLaserPos({ x: coords.x, y: coords.y, active: true });
+      return;
+    }
+
+    if (!isDrawing || !currentDrawItem) return;
+
+    if (currentDrawItem.type === 'pen' || currentDrawItem.type === 'highlighter') {
+      setCurrentDrawItem(prev => prev ? {
+        ...prev,
+        points: [...prev.points, coords]
+      } : null);
+    } else if (currentDrawItem.type === 'arrow' || currentDrawItem.type === 'rect') {
+      setCurrentDrawItem(prev => prev ? {
+        ...prev,
+        end: coords
+      } : null);
+    }
+  };
+
+  const handleAnnotationMouseUp = () => {
+    if (!isAnnotating) return;
+    if (annotationTool === 'laser') return;
+    if (isDrawing && currentDrawItem) {
+      setAnnotations(prev => [...prev, currentDrawItem]);
+      setCurrentDrawItem(null);
+      setIsDrawing(false);
+    }
+  };
+
+  const handleAnnotationMouseLeave = () => {
+    if (annotationTool === 'laser') {
+      setLaserPos(prev => ({ ...prev, active: false }));
+    }
+    if (isDrawing && currentDrawItem) {
+      setAnnotations(prev => [...prev, currentDrawItem]);
+      setCurrentDrawItem(null);
+      setIsDrawing(false);
+    }
+  };
+
+  // Re-render canvas on every change to annotations, active draw, or laser pos
+  useEffect(() => {
+    const canvas = annotationCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (canvas.width !== rect.width || canvas.height !== rect.height) {
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const allItems = [...annotations, ...(currentDrawItem ? [currentDrawItem] : [])];
+
+    allItems.forEach(item => {
+      ctx.save();
+      ctx.strokeStyle = item.color;
+      ctx.fillStyle = item.color;
+      ctx.lineWidth = item.size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (item.type === 'pen') {
+        if (item.points && item.points.length > 0) {
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          ctx.stroke();
+        }
+      } else if (item.type === 'highlighter') {
+        if (item.points && item.points.length > 0) {
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = item.size * 3.5;
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          ctx.stroke();
+        }
+      } else if (item.type === 'rect') {
+        if (item.start && item.end) {
+          ctx.beginPath();
+          const x = Math.min(item.start.x, item.end.x);
+          const y = Math.min(item.start.y, item.end.y);
+          const w = Math.abs(item.end.x - item.start.x);
+          const h = Math.abs(item.end.y - item.start.y);
+          ctx.strokeRect(x, y, w, h);
+        }
+      } else if (item.type === 'arrow') {
+        if (item.start && item.end) {
+          const fromX = item.start.x;
+          const fromY = item.start.y;
+          const toX = item.end.x;
+          const toY = item.end.y;
+          const headlen = Math.max(12, item.size * 3.5);
+          const angle = Math.atan2(toY - fromY, toX - fromX);
+
+          ctx.beginPath();
+          ctx.moveTo(fromX, fromY);
+          ctx.lineTo(toX, toY);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(toX, toY);
+          ctx.lineTo(toX - headlen * Math.cos(angle - Math.PI / 6), toY - headlen * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(toX - headlen * Math.cos(angle + Math.PI / 6), toY - headlen * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    });
+
+    if (laserPos.active && annotationTool === 'laser') {
+      ctx.save();
+      const grad = ctx.createRadialGradient(laserPos.x, laserPos.y, 2, laserPos.x, laserPos.y, 18);
+      grad.addColorStop(0, annotationColor);
+      grad.addColorStop(0.4, `${annotationColor}99`);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(laserPos.x, laserPos.y, 18, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(laserPos.x, laserPos.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }, [annotations, currentDrawItem, laserPos, isAnnotating, annotationTool, annotationColor]);
+
+  // Capture Annotated Screenshot
+  const handleCaptureScreenshot = () => {
+    try {
+      const video = videoRef.current;
+      const canvas = annotationCanvasRef.current;
+      if (!canvas) return;
+
+      const mergeCanvas = document.createElement('canvas');
+      const w = canvas.width || 1920;
+      const h = canvas.height || 1080;
+      mergeCanvas.width = w;
+      mergeCanvas.height = h;
+      const ctx = mergeCanvas.getContext('2d');
+
+      if (video && video.readyState >= 2) {
+        try {
+          ctx.drawImage(video, 0, 0, w, h);
+        } catch(e) {}
+      }
+
+      ctx.drawImage(canvas, 0, 0, w, h);
+
+      const dataUrl = mergeCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `RemoteG-Annotation-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.warn('Could not export annotated screenshot:', err);
     }
   };
 
@@ -1781,6 +2007,14 @@ function App() {
                   💻 Terminal
                 </button>
 
+                <button
+                  onClick={() => setIsAnnotating(prev => !prev)}
+                  className={`control-btn btn-annotate ${isAnnotating ? 'active' : ''}`}
+                  title="Toggle Screen Annotation & Laser Pointer Tool"
+                >
+                  ✏️ Annotate
+                </button>
+
                 {/* Sleek Compact Action Menu Dropdown */}
                 <div className="tools-dropdown-wrapper">
                   <button
@@ -2208,6 +2442,116 @@ function App() {
             }} 
           />
 
+          {/* Floating Glassmorphic Annotation Toolbar */}
+          {isAnnotating && (
+            <div className="annotation-toolbar">
+              <div className="annotation-toolbar-group">
+                <button
+                  onClick={() => setAnnotationTool('laser')}
+                  className={`annotate-tool-btn ${annotationTool === 'laser' ? 'active' : ''}`}
+                  title="Laser Pointer (Smooth glowing pointer with no permanent mark)"
+                >
+                  🔴 Laser
+                </button>
+                <button
+                  onClick={() => setAnnotationTool('pen')}
+                  className={`annotate-tool-btn ${annotationTool === 'pen' ? 'active' : ''}`}
+                  title="Pen (Freehand Drawing)"
+                >
+                  ✏️ Pen
+                </button>
+                <button
+                  onClick={() => setAnnotationTool('arrow')}
+                  className={`annotate-tool-btn ${annotationTool === 'arrow' ? 'active' : ''}`}
+                  title="Arrow Pointer (Point to specific buttons or areas)"
+                >
+                  ↗️ Arrow
+                </button>
+                <button
+                  onClick={() => setAnnotationTool('rect')}
+                  className={`annotate-tool-btn ${annotationTool === 'rect' ? 'active' : ''}`}
+                  title="Rectangle Box (Highlight sections)"
+                >
+                  🔲 Box
+                </button>
+                <button
+                  onClick={() => setAnnotationTool('highlighter')}
+                  className={`annotate-tool-btn ${annotationTool === 'highlighter' ? 'active' : ''}`}
+                  title="Translucent Highlighter"
+                >
+                  🖍️ Highlight
+                </button>
+              </div>
+
+              <div className="annotation-divider" />
+
+              {/* Color Palette */}
+              <div className="annotation-toolbar-group color-swatch-list">
+                {['#ef4444', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#ffffff'].map(c => (
+                  <button
+                    key={c}
+                    className={`color-swatch ${annotationColor === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    onClick={() => setAnnotationColor(c)}
+                    title={`Color: ${c}`}
+                  />
+                ))}
+              </div>
+
+              <div className="annotation-divider" />
+
+              {/* Stroke Sizes */}
+              <div className="annotation-toolbar-group">
+                {[2, 4, 8].map(s => (
+                  <button
+                    key={s}
+                    className={`size-select-btn ${annotationSize === s ? 'active' : ''}`}
+                    onClick={() => setAnnotationSize(s)}
+                    title={`Stroke: ${s}px`}
+                  >
+                    {s === 2 ? 'Thin' : s === 4 ? 'Med' : 'Thick'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="annotation-divider" />
+
+              {/* Actions: Undo, Clear, Screenshot, Close */}
+              <div className="annotation-toolbar-group">
+                <button
+                  onClick={() => setAnnotations(prev => prev.slice(0, -1))}
+                  className="btn-annotate-action"
+                  disabled={annotations.length === 0}
+                  title="Undo last drawing"
+                >
+                  ↩️ Undo
+                </button>
+                <button
+                  onClick={() => setAnnotations([])}
+                  className="btn-annotate-action danger"
+                  disabled={annotations.length === 0}
+                  title="Clear all drawings"
+                >
+                  🧹 Clear
+                </button>
+                <button
+                  onClick={handleCaptureScreenshot}
+                  className="btn-annotate-action"
+                  title="Download Screenshot with Drawings"
+                >
+                  📸 Save
+                </button>
+                <button
+                  onClick={() => setIsAnnotating(false)}
+                  className="btn-annotate-close"
+                  title="Exit Annotation Mode"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           <div 
             ref={containerRef}
             className="video-container"
@@ -2219,6 +2563,20 @@ function App() {
             onDrop={handleDrop}
             onMouseLeave={handleMouseLeave}
           >
+            {/* Interactive Transparent Annotation & Laser Pointer Canvas */}
+            <canvas
+              ref={annotationCanvasRef}
+              className={`annotation-canvas ${annotationTool === 'laser' && isAnnotating ? 'laser-mode' : ''}`}
+              style={{
+                display: (isAnnotating || annotations.length > 0) ? 'block' : 'none',
+                pointerEvents: isAnnotating ? 'auto' : 'none'
+              }}
+              onMouseDown={handleAnnotationMouseDown}
+              onMouseMove={handleAnnotationMouseMove}
+              onMouseUp={handleAnnotationMouseUp}
+              onMouseLeave={handleAnnotationMouseLeave}
+            />
+
             {/* Drag & Drop Visual Glow Overlay */}
             {isDraggingOver && (
               <div className="file-drop-overlay">
