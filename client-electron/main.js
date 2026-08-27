@@ -201,13 +201,13 @@ function getOrCreateOverlayWindow() {
   }
   try {
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height, x, y } = primaryDisplay.bounds;
+    const bounds = primaryDisplay.bounds;
 
     overlayWindow = new BrowserWindow({
-      x,
-      y,
-      width,
-      height,
+      x: bounds.x || 0,
+      y: bounds.y || 0,
+      width: bounds.width,
+      height: bounds.height,
       transparent: true,
       frame: false,
       alwaysOnTop: true,
@@ -226,6 +226,7 @@ function getOrCreateOverlayWindow() {
       }
     });
 
+    overlayWindow.setBounds(bounds);
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
     if (typeof overlayWindow.setVisibleOnAllWorkspaces === 'function') {

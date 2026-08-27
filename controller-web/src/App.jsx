@@ -341,13 +341,15 @@ function App() {
   const lastLaserEmitTimeRef = useRef(0);
 
   const getCanvasCoords = (e) => {
-    const canvas = annotationCanvasRef.current;
-    if (!canvas) return { x: 0, y: 0, nx: 0, ny: 0 };
-    const rect = canvas.getBoundingClientRect();
+    const targetEl = videoRef.current || annotationCanvasRef.current;
+    if (!targetEl) return { x: 0, y: 0, nx: 0, ny: 0 };
+    const rect = targetEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) return { x: 0, y: 0, nx: 0, ny: 0 };
+
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const nx = rect.width > 0 ? Math.max(0, Math.min(1, x / rect.width)) : 0;
-    const ny = rect.height > 0 ? Math.max(0, Math.min(1, y / rect.height)) : 0;
+    const nx = Math.max(0, Math.min(1, x / rect.width));
+    const ny = Math.max(0, Math.min(1, y / rect.height));
     return { x, y, nx, ny, width: rect.width, height: rect.height };
   };
 
