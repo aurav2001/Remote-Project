@@ -509,9 +509,10 @@ function App() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const allItems = [...annotations, ...(currentDrawItem ? [currentDrawItem] : [])];
+    // Only render the item actively being dragged by technician before mouseup
+    const activeItems = currentDrawItem ? [currentDrawItem] : [];
 
-    allItems.forEach(item => {
+    activeItems.forEach(item => {
       ctx.save();
       ctx.strokeStyle = item.color;
       ctx.fillStyle = item.color;
@@ -572,24 +573,6 @@ function App() {
       }
       ctx.restore();
     });
-
-    if (laserPos.active && annotationTool === 'laser') {
-      ctx.save();
-      const grad = ctx.createRadialGradient(laserPos.x, laserPos.y, 2, laserPos.x, laserPos.y, 18);
-      grad.addColorStop(0, annotationColor);
-      grad.addColorStop(0.4, `${annotationColor}99`);
-      grad.addColorStop(1, 'transparent');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(laserPos.x, laserPos.y, 18, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(laserPos.x, laserPos.y, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
   }, [annotations, currentDrawItem, laserPos, isAnnotating, annotationTool, annotationColor]);
 
   // Capture Annotated Screenshot

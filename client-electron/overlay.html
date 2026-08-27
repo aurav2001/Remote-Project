@@ -38,19 +38,18 @@
     let animFrameId = null;
 
     function resizeCanvas() {
-      canvas.width = window.innerWidth * window.devicePixelRatio;
-      canvas.height = window.innerHeight * window.devicePixelRatio;
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     }
 
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
     function render() {
-      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      const w = canvas.width;
+      const h = canvas.height;
 
       // Draw all persistent annotations
       annotations.forEach(item => {
