@@ -149,6 +149,51 @@ function App() {
     setTimeout(() => setClipboardToast(null), 3000);
   };
 
+  // Remote Reboot & Auto-Reconnect States
+  const [showRebootModal, setShowRebootModal] = useState(false);
+  const [isRebooting, setIsRebooting] = useState(false);
+  const [rebootAttemptCount, setRebootAttemptCount] = useState(0);
+  const isRebootingRef = useRef(false);
+  isRebootingRef.current = isRebooting;
+
+  // Auto-Reconnect Polling Engine while target machine restarts
+  useEffect(() => {
+    let rebootPoll = null;
+    if (isRebooting) {
+      rebootPoll = setInterval(() => {
+        setRebootAttemptCount(prev => prev + 1);
+        const room = activeRoomIdRef.current || targetRoomId.trim();
+        if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit('join-room', { roomId: room, role: 'controller' });
+        } else {
+          initSocket();
+        }
+      }, 3500);
+    }
+    return () => {
+      if (rebootPoll) clearInterval(rebootPoll);
+    };
+  }, [isRebooting]);
+
+  const handleInitiateReboot = () => {
+    sendControlData({
+      type: 'system-reboot'
+    });
+    setIsRebooting(true);
+    setRebootAttemptCount(1);
+    setClipboardToast({
+      text: '🔄 Remote Reboot command sent to target machine!',
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 4000);
+  };
+
+  const handleCancelRebootWaiting = () => {
+    setIsRebooting(false);
+    setShowRebootModal(false);
+    cleanup();
+  };
+
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
   const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
@@ -733,6 +778,10 @@ function App() {
     setAvailableScreens([]);
     setCurrentScreenId('screen:0:0');
     setShowScreenDropdown(false);
+    if (!isRebootingRef.current) {
+      setShowRebootModal(false);
+      setIsRebooting(false);
+    }
   };
 
   const [recentDevices, setRecentDevices] = useState(() => {
@@ -898,12 +947,33 @@ function App() {
     // Handle peer disconnect
     socket.on('peer-disconnected', ({ role }) => {
       if (role === 'host') {
+        if (isRebootingRef.current) {
+          console.log('[Controller]: Host went offline due to reboot. Keeping auto-reconnect engine active...');
+          return;
+        }
         const isPeerActive = peerConnectionRef.current && peerConnectionRef.current.connectionState === 'connected';
         if (!isPeerActive) {
           alert('Target host disconnected');
           cleanup();
         } else {
           console.warn('[Controller]: Host signaling socket reconnected, maintaining active P2P stream.');
+        }
+      }
+    });
+
+    socket.on('peer-connected', ({ role }) => {
+      if (role === 'host') {
+        console.log('[Controller]: Host peer joined the room!');
+        if (isRebootingRef.current) {
+          console.log('[Controller]: Host is BACK ONLINE after reboot! Triggering instant auto-reconnect...');
+          setIsRebooting(false);
+          setShowRebootModal(false);
+          setClipboardToast({
+            text: '🎉 Target PC rebooted successfully! Reconnected to session.',
+            isSelf: true
+          });
+          setTimeout(() => setClipboardToast(null), 4000);
+          handleConnect(activeRoomIdRef.current || targetRoomId.trim());
         }
       }
     });
@@ -2255,6 +2325,24 @@ function App() {
                           <small>1-Click bookmark link</small>
                         </div>
                       </button>
+
+                      <div className="dropdown-divider" style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }}></div>
+
+                      <button 
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setShowRebootModal(true);
+                        }} 
+                        className="dropdown-item reboot-action-item"
+                        style={{ color: '#f87171' }}
+                        title="Safely restart the remote machine and auto-reconnect on boot"
+                      >
+                        <span className="dropdown-icon">🔄</span>
+                        <div>
+                          <strong style={{ color: '#fca5a5' }}>Remote Reboot PC</strong>
+                          <small style={{ color: '#f87171' }}>Restart & Auto-Reconnect</small>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -2919,6 +3007,67 @@ function App() {
                 : `Transferring ${fileTransfer.progress}%...`}
             </span>
             <strong>{fileTransfer.progress}%</strong>
+          </div>
+        </div>
+      )}
+
+      {/* Remote Reboot & Auto-Reconnect Modal & Overlay */}
+      {showRebootModal && (
+        <div className="reboot-modal-overlay">
+          <div className="reboot-modal-card">
+            {!isRebooting ? (
+              <>
+                <div className="reboot-modal-icon">🔄</div>
+                <h3 className="reboot-modal-title">Remote System Reboot</h3>
+                <p className="reboot-modal-desc">
+                  Are you sure you want to reboot the remote machine (<strong>Node #{roomId}</strong>)?
+                </p>
+                <div className="reboot-modal-info-box">
+                  <div>⚡ <strong>Windows will restart immediately</strong></div>
+                  <div>🔄 <strong>UnioTech Host Agent will auto-launch</strong> on startup</div>
+                  <div>🔗 <strong>Controller will auto-reconnect</strong> with zero extra clicks</div>
+                </div>
+                <div className="reboot-modal-actions">
+                  <button 
+                    onClick={() => setShowRebootModal(false)} 
+                    className="reboot-btn-cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleInitiateReboot} 
+                    className="reboot-btn-confirm"
+                  >
+                    🔄 Restart & Auto-Reconnect
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="reboot-spinner-wrapper">
+                  <div className="reboot-pulse-ring"></div>
+                  <div className="reboot-spinner-icon">🔄</div>
+                </div>
+                <h3 className="reboot-modal-title" style={{ color: '#38bdf8' }}>Target PC is Rebooting...</h3>
+                <p className="reboot-modal-desc">
+                  Waiting for Windows to restart and UnioTech Host Agent to come back online.
+                </p>
+                <div className="reboot-status-pill">
+                  <span className="reboot-dot-pulse"></span>
+                  <span>Polling Room #{roomId} • Attempt #{rebootAttemptCount}</span>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 12 }}>
+                  Your session will automatically resume the instant the machine boots.
+                </p>
+                <button 
+                  onClick={handleCancelRebootWaiting} 
+                  className="reboot-btn-cancel"
+                  style={{ marginTop: 16, width: '100%' }}
+                >
+                  Stop Waiting (Exit)
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

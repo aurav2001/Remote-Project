@@ -371,6 +371,21 @@ if (!gotTheLock) {
     createWindow();
     createTray();
 
+    // Configure Windows Auto-Start on System Boot for seamless auto-reconnect after restart
+    try {
+      if (app.isPackaged) {
+        app.setLoginItemSettings({
+          openAtLogin: true,
+          openAsHidden: true,
+          path: process.execPath,
+          args: ['--hidden', '--auto-start']
+        });
+        console.log('[Main Process]: Registered openAtLogin Windows Startup entry.');
+      }
+    } catch (e) {
+      console.warn('[Main Process]: Error setting openAtLogin:', e);
+    }
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
@@ -437,6 +452,24 @@ ipcMain.on('set-active-display', (event, bounds) => {
     }
   } catch (err) {
     console.warn('[Main Process]: Error setting active display bounds:', err);
+  }
+});
+
+// IPC Handler for Remote System Reboot
+ipcMain.handle('execute-system-reboot', async (event, { force, delaySec }) => {
+  try {
+    const delay = Number(delaySec) || 3;
+    const { exec } = require('child_process');
+    console.log(`[Main Process]: Initiating Windows Reboot in ${delay} seconds...`);
+    exec(`shutdown /r /t ${delay} /f /c "Remote Maintenance Reboot Initiated by Controller"`, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[Main Process]: Error executing shutdown command:', err);
+      }
+    });
+    return { success: true, delaySec: delay };
+  } catch (err) {
+    console.error('[Main Process]: Reboot initiation failed:', err);
+    return { success: false, error: err.message };
   }
 });
 

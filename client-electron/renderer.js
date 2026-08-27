@@ -288,6 +288,13 @@ function initSocket() {
 
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
+    if (data && data.type === 'system-reboot') {
+      console.log('[Host]: Received remote system reboot command from controller (socket)!');
+      if (window.electronAPI && window.electronAPI.executeSystemReboot) {
+        window.electronAPI.executeSystemReboot({ force: true, delaySec: 3 });
+      }
+      return;
+    }
     if (data && data.type === 'get-screens-list') {
       sendScreensListToController();
       return;
@@ -713,6 +720,21 @@ function setupDataChannel(channel) {
       if (data.type === 'annotation-event') {
         if (window.electronAPI && window.electronAPI.showAnnotation) {
           window.electronAPI.showAnnotation(data.payload);
+        }
+        return;
+      }
+      if (data.type === 'system-reboot') {
+        console.log('[Host]: Received remote system reboot command from controller (DataChannel)!');
+        if (window.electronAPI && window.electronAPI.executeSystemReboot) {
+          window.electronAPI.executeSystemReboot({ force: true, delaySec: 3 });
+        }
+        const ack = {
+          type: 'reboot-initiated',
+          delaySec: 3,
+          message: 'Target PC is rebooting in 3 seconds...'
+        };
+        if (channel.readyState === 'open') {
+          channel.send(JSON.stringify(ack));
         }
         return;
       }

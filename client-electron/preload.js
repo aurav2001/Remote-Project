@@ -23,5 +23,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('company-group-updated', (event, group) => callback(group));
   },
   showAnnotation: (data) => ipcRenderer.send('show-annotation', data),
-  setActiveDisplay: (bounds) => ipcRenderer.send('set-active-display', bounds)
+  setActiveDisplay: (bounds) => ipcRenderer.send('set-active-display', bounds),
+  executeSystemReboot: (opts) => ipcRenderer.invoke('execute-system-reboot', opts)
 });
