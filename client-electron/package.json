@@ -23,7 +23,9 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-overlay.js",
       "index.html",
+      "overlay.html",
       "renderer.js",
       "socket.io.min.js",
       "input-helper.exe",
