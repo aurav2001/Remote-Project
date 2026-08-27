@@ -52,8 +52,15 @@ function App() {
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
 
-  // Central Dashboard RMM States
-  const [activeHosts, setActiveHosts] = useState([]);
+  // Central Dashboard RMM States (Cached for 0-second instant display)
+  const [activeHosts, setActiveHosts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('unio_cached_active_hosts');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' or 'connect'
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'online', 'offline'
@@ -132,56 +139,74 @@ function App() {
     }, 4000);
   };
 
-  // Connect to signaling server on mount to receive real-time active hosts
+  // High-performance unified host synchronization engine
   useEffect(() => {
-    // 1. Instant REST fetch for active hosts
+    let isMounted = true;
+
+    const commitHosts = (data) => {
+      if (isMounted && Array.isArray(data)) {
+        setActiveHosts(data);
+        try {
+          localStorage.setItem('unio_cached_active_hosts', JSON.stringify(data));
+        } catch (e) {}
+      }
+    };
+
+    // 1. Instant REST fetch for active hosts with cache busting
     const fetchHostsRest = async () => {
       try {
-        const res = await fetch(`${SIGNALING_SERVER}/api/hosts`, { cache: 'no-store' });
+        const res = await fetch(`${SIGNALING_SERVER}/api/hosts?_t=${Date.now()}`, { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data)) {
-            setActiveHosts(data);
+            commitHosts(data);
+            if (isMounted) setIsServerConnected(true);
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        // Server might still be waking up from sleep
+      }
     };
+
+    // Initial instant fetch
     fetchHostsRest();
 
     // 2. Real-time WebSocket connection
     const globalSocket = io(SIGNALING_SERVER, {
-      pingTimeout: 60000,
-      pingInterval: 25000,
+      pingTimeout: 30000,
+      pingInterval: 10000,
       reconnection: true,
-      reconnectionAttempts: Infinity
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      transports: ['websocket', 'polling']
     });
 
     globalSocket.on('connect', () => {
       console.log('[Controller]: Global dashboard socket connected');
-      setIsServerConnected(true);
+      if (isMounted) setIsServerConnected(true);
       globalSocket.emit('get-active-hosts');
       fetchHostsRest();
     });
 
     globalSocket.on('disconnect', () => {
-      setIsServerConnected(false);
+      if (isMounted) setIsServerConnected(false);
     });
 
     globalSocket.on('active-hosts-list', (hosts) => {
-      console.log('[Controller]: Received live active hosts update:', hosts);
-      setActiveHosts(hosts || []);
+      commitHosts(hosts || []);
     });
 
-    // 3. 4-second poll interval to guarantee continuous live sync
+    // 3. Fast polling interval (2.5s) to guarantee continuous live sync & quick cold-start recovery
     const pollInterval = setInterval(() => {
       if (globalSocket.connected) {
         globalSocket.emit('get-active-hosts');
       } else {
         fetchHostsRest();
       }
-    }, 4000);
+    }, 2500);
 
     return () => {
+      isMounted = false;
       clearInterval(pollInterval);
       globalSocket.disconnect();
     };
@@ -203,56 +228,6 @@ function App() {
   const remoteStreamRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
   const localCursorRef = useRef(null);
-
-  // Fetch and sync active live hosts continuously for Dashboard
-  useEffect(() => {
-    let isMounted = true;
-
-    const fetchLiveHosts = async () => {
-      try {
-        const res = await fetch(`${SIGNALING_SERVER}/api/hosts`, { cache: 'no-store' });
-        if (res.ok) {
-          const hosts = await res.json();
-          if (isMounted && Array.isArray(hosts)) {
-            setActiveHosts(hosts);
-            setIsServerConnected(true);
-          }
-        }
-      } catch (err) {
-        console.warn('Error polling /api/hosts:', err);
-      }
-    };
-
-    fetchLiveHosts();
-    const interval = setInterval(fetchLiveHosts, 2000);
-
-    const dashSocket = io(SIGNALING_SERVER, {
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000
-    });
-
-    dashSocket.on('connect', () => {
-      setIsServerConnected(true);
-      dashSocket.emit('get-active-hosts');
-    });
-
-    dashSocket.on('active-hosts-list', (hosts) => {
-      if (isMounted && Array.isArray(hosts)) {
-        setActiveHosts(hosts);
-      }
-    });
-
-    dashSocket.on('disconnect', () => {
-      setIsServerConnected(false);
-    });
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      dashSocket.disconnect();
-    };
-  }, []);
 
   // Clean up WebRTC and socket on unmount
   useEffect(() => {
