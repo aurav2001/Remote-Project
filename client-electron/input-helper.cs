@@ -15,118 +15,6 @@ class InputHelper {
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
-    [DllImport("user32.dll")]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("gdi32.dll")]
-    static extern bool SetDeviceGammaRamp(IntPtr hDC, ref RAMP lpRamp);
-
-    [DllImport("gdi32.dll")]
-    static extern bool GetDeviceGammaRamp(IntPtr hDC, ref RAMP lpRamp);
-
-    [DllImport("user32.dll")]
-    static extern IntPtr GetDC(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
-    public struct RAMP {
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
-        public UInt16[] Red;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
-        public UInt16[] Green;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)]
-        public UInt16[] Blue;
-    }
-
-    static RAMP originalRamp;
-    static bool hasOriginalRamp = false;
-    static volatile bool isCurtainActive = false;
-    static System.Threading.Thread curtainThread = null;
-
-    static void StartCurtainLoop() {
-        if (isCurtainActive) return;
-        isCurtainActive = true;
-
-        try {
-            IntPtr hDC = GetDC(IntPtr.Zero);
-            if (hDC != IntPtr.Zero) {
-                if (!hasOriginalRamp) {
-                    originalRamp = new RAMP();
-                    if (GetDeviceGammaRamp(hDC, ref originalRamp)) {
-                        hasOriginalRamp = true;
-                    }
-                }
-                ReleaseDC(IntPtr.Zero, hDC);
-            }
-        } catch { }
-
-        curtainThread = new System.Threading.Thread(() => {
-            RAMP blackRamp = new RAMP();
-            blackRamp.Red = new UInt16[256];
-            blackRamp.Green = new UInt16[256];
-            blackRamp.Blue = new UInt16[256];
-            for (int i = 0; i < 256; i++) {
-                blackRamp.Red[i] = 0;
-                blackRamp.Green[i] = 0;
-                blackRamp.Blue[i] = 0;
-            }
-
-            while (isCurtainActive) {
-                try {
-                    IntPtr hDC = GetDC(IntPtr.Zero);
-                    if (hDC != IntPtr.Zero) {
-                        SetDeviceGammaRamp(hDC, ref blackRamp);
-                        ReleaseDC(IntPtr.Zero, hDC);
-                    }
-                } catch { }
-                System.Threading.Thread.Sleep(30);
-            }
-        });
-        curtainThread.IsBackground = true;
-        curtainThread.Priority = System.Threading.ThreadPriority.Highest;
-        curtainThread.Start();
-    }
-
-    static void StopCurtainLoop() {
-        isCurtainActive = false;
-        if (curtainThread != null) {
-            try { curtainThread.Join(150); } catch { }
-            curtainThread = null;
-        }
-        RestoreMonitor();
-    }
-
-    static void RestoreMonitor() {
-        try {
-            IntPtr hDC = GetDC(IntPtr.Zero);
-            if (hDC != IntPtr.Zero) {
-                if (hasOriginalRamp) {
-                    SetDeviceGammaRamp(hDC, ref originalRamp);
-                } else {
-                    RAMP defaultRamp = new RAMP();
-                    defaultRamp.Red = new UInt16[256];
-                    defaultRamp.Green = new UInt16[256];
-                    defaultRamp.Blue = new UInt16[256];
-                    for (int i = 0; i < 256; i++) {
-                        ushort val = (ushort)(i * 256);
-                        defaultRamp.Red[i] = val;
-                        defaultRamp.Green[i] = val;
-                        defaultRamp.Blue[i] = val;
-                    }
-                    SetDeviceGammaRamp(hDC, ref defaultRamp);
-                }
-                ReleaseDC(IntPtr.Zero, hDC);
-            }
-            SendMessage((IntPtr)0xFFFF, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1));
-            mouse_event(0x0001, 1, 1, 0, 0);
-        } catch { }
-    }
-
-    const uint WM_SYSCOMMAND = 0x0112;
-    const int SC_MONITORPOWER = 0xF170;
-
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
     const uint MOUSEEVENTF_RIGHTDOWN = 0x08;
@@ -151,8 +39,8 @@ class InputHelper {
                 if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
                     float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
-                    int screenW = GetSystemMetrics(0);
-                    int screenH = GetSystemMetrics(1);
+                    int screenW = GetSystemMetrics(0); // Primary Screen Width
+                    int screenH = GetSystemMetrics(1); // Primary Screen Height
                     if (screenW <= 0) screenW = 1920;
                     if (screenH <= 0) screenH = 1080;
 
@@ -204,12 +92,6 @@ class InputHelper {
                     byte vk = byte.Parse(parts[1]);
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                     keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
-                }
-                else if (command == "curtainon") {
-                    StartCurtainLoop();
-                }
-                else if (command == "curtainoff") {
-                    StopCurtainLoop();
                 }
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);

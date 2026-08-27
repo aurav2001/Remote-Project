@@ -256,27 +256,6 @@ ipcMain.on('show-annotation', (event, data) => {
   }
 });
 
-// --- Privacy Screen / Black Curtain Management ---
-function setPrivacyCurtain(enabled) {
-  try {
-    if (inputHelperProcess && inputHelperProcess.stdin && !inputHelperProcess.killed) {
-      if (enabled) {
-        console.log('[Main Process]: Activating Physical Monitor Privacy Standby...');
-        inputHelperProcess.stdin.write('curtainon\n');
-      } else {
-        console.log('[Main Process]: Restoring Physical Monitor Display...');
-        inputHelperProcess.stdin.write('curtainoff\n');
-      }
-    }
-  } catch (err) {
-    console.warn('[Main Process]: Error toggling privacy curtain:', err);
-  }
-}
-
-ipcMain.on('toggle-privacy-screen', (event, enabled) => {
-  setPrivacyCurtain(Boolean(enabled));
-});
-
 // Active File Transfer WriteStreams Map
 const activeFileTransfers = new Map();
 

@@ -1999,23 +1999,6 @@ select.filter-select option:checked,
   box-shadow: 0 0 16px rgba(244, 63, 94, 0.5) !important;
 }
 
-.btn-privacy {
-  background: rgba(168, 85, 247, 0.15) !important;
-  color: #d8b4fe !important;
-  border: 1px solid rgba(168, 85, 247, 0.35) !important;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-}
-
-.btn-privacy:hover, .btn-privacy.active {
-  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%) !important;
-  color: #ffffff !important;
-  border-color: #a855f7 !important;
-  box-shadow: 0 0 16px rgba(168, 85, 247, 0.5) !important;
-}
-
 /* Floating Glassmorphic Annotation Toolbar */
 .annotation-toolbar {
   position: absolute;

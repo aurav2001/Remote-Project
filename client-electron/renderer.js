@@ -288,12 +288,6 @@ function initSocket() {
 
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
-    if (data && data.type === 'toggle-privacy-screen') {
-      if (window.electronAPI && window.electronAPI.togglePrivacyScreen) {
-        window.electronAPI.togglePrivacyScreen(data.enabled);
-      }
-      return;
-    }
     if (data && data.type === 'annotation-event') {
       if (window.electronAPI && window.electronAPI.showAnnotation) {
         window.electronAPI.showAnnotation(data.payload);
@@ -324,9 +318,6 @@ function initSocket() {
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
       console.log('[Host]: Controller disconnected. Resetting peer connection.');
-      if (window.electronAPI && window.electronAPI.togglePrivacyScreen) {
-        window.electronAPI.togglePrivacyScreen(false);
-      }
       if (peerConnection) {
         try { peerConnection.close(); } catch(e) {}
         peerConnection = null;
@@ -619,12 +610,6 @@ function setupDataChannel(channel) {
       if (data.type === 'annotation-event') {
         if (window.electronAPI && window.electronAPI.showAnnotation) {
           window.electronAPI.showAnnotation(data.payload);
-        }
-        return;
-      }
-      if (data.type === 'toggle-privacy-screen') {
-        if (window.electronAPI && window.electronAPI.togglePrivacyScreen) {
-          window.electronAPI.togglePrivacyScreen(data.enabled);
         }
         return;
       }

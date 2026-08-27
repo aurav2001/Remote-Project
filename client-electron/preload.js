@@ -22,6 +22,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCompanyGroupUpdated: (callback) => {
     ipcRenderer.on('company-group-updated', (event, group) => callback(group));
   },
-  showAnnotation: (data) => ipcRenderer.send('show-annotation', data),
-  togglePrivacyScreen: (enabled) => ipcRenderer.send('toggle-privacy-screen', enabled)
+  showAnnotation: (data) => ipcRenderer.send('show-annotation', data)
 });
