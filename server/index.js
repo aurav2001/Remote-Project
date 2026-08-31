@@ -37,14 +37,13 @@ app.get(['/UnioTechIT-Setup.exe', '/RemoteG-Setup.exe'], (req, res) => {
   return res.redirect('https://github.com/aurav2001/Remote-Project/raw/main/UnioTechIT%20Setup%201.0.0.exe');
 });
 
-// Serve compiled Web Controller frontend static assets directly on Render
+// Serve compiled Web Controller frontend static assets
 function getStaticDistPath() {
   const possiblePaths = [
-    path.join(__dirname, 'public'),
     path.join(__dirname, '../controller-web/dist'),
-    path.join(__dirname, 'dist'),
     path.join(process.cwd(), 'controller-web/dist'),
-    path.join(process.cwd(), 'server/public'),
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, 'public'),
     path.join(process.cwd(), 'public')
   ];
   for (const p of possiblePaths) {
@@ -56,9 +55,9 @@ function getStaticDistPath() {
 }
 
 const distPath = getStaticDistPath();
+app.use(express.static(path.join(__dirname, '../controller-web/dist')));
 app.use(express.static(distPath));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(__dirname, '../controller-web/dist')));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
