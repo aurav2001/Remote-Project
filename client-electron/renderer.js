@@ -8,7 +8,7 @@ const btnCopy = document.getElementById('btn-copy');
 const btnResetCode = document.getElementById('btn-reset-code');
 const btnEditGroup = document.getElementById('btn-edit-group');
 
-const SIGNALING_SERVER = 'https://remoteg-all-in-one-production.up.railway.app';
+const SIGNALING_SERVER = 'https://remoteg-all-in-one-production-6122.up.railway.app';
 let socket = null;
 let localStream = null;
 let peerConnection = null;

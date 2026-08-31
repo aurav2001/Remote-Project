@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 
 const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://')) 
   ? window.location.origin 
-  : 'https://remoteg-all-in-one-production.up.railway.app';
+  : 'https://remoteg-all-in-one-production-6122.up.railway.app';
 
 const rtcConfig = {
   iceServers: [
