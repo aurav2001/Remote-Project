@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const SIGNALING_SERVER = (typeof window !== 'undefined' && (window.location.hostname.includes('railway.app') || window.location.hostname.includes('onrender.com') || window.location.hostname.includes('localhost'))) 
+const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://')) 
   ? window.location.origin 
   : 'https://remoteg-all-in-one-production.up.railway.app';
 
