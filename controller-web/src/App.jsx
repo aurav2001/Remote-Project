@@ -142,6 +142,7 @@ function App() {
   const [pathInputValue, setPathInputValue] = useState('');
   const [activeDownloadTransfer, setActiveDownloadTransfer] = useState(null);
   const downloadChunksMapRef = useRef({});
+  const activeFallbackTimerRef = useRef(null);
   const explorerFileInputRef = useRef(null);
 
   // Low latency event emitter: prefers direct P2P WebRTC DataChannel, falls back to Socket.IO signaling
@@ -236,9 +237,28 @@ function App() {
       reqId: 'req_' + Date.now()
     };
     sendControlData(req);
+
+    // Fallback for older host clients: if host doesn't respond in 1200ms, use silent PowerShell terminal query
+    if (activeFallbackTimerRef.current) clearTimeout(activeFallbackTimerRef.current);
+    activeFallbackTimerRef.current = setTimeout(() => {
+      const escapedPath = targetPath ? targetPath.replace(/"/g, '`"') : '';
+      const psCmd = `$p = "${escapedPath}"; if (-not $p) { $p = [Environment]::GetFolderPath('Desktop') }; if (-not (Test-Path -LiteralPath $p)) { $p = "C:\\" }; $entries = Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, @{Name='IsDirectory';Expression={$_.PSIsContainer}}; $parent = Split-Path -Path $p -Parent; $drives = [System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }; $desk = [Environment]::GetFolderPath('Desktop'); $down = [IO.Path]::Combine($env:USERPROFILE, 'Downloads'); $docs = [Environment]::GetFolderPath('MyDocuments'); $out = @{ currentPath = $p; parentPath = $parent; drives = $drives; desktop = $desk; downloads = $down; documents = $docs; items = $entries }; $json = $out | ConvertTo-Json -Compress -Depth 3; Write-Output "---FE_LIST_JSON_START---$json---FE_LIST_JSON_END---"`;
+
+      sendControlData({
+        type: 'terminal-command',
+        id: 'fe_list_' + Date.now(),
+        command: psCmd,
+        shellType: 'powershell',
+        isSilent: true
+      });
+    }, 1200);
   };
 
   const handleReceiveFileList = (data) => {
+    if (activeFallbackTimerRef.current) {
+      clearTimeout(activeFallbackTimerRef.current);
+      activeFallbackTimerRef.current = null;
+    }
     setIsLoadingRemoteFiles(false);
     if (data.success) {
       setRemoteCurrentPath(data.currentPath || '');
@@ -272,10 +292,10 @@ function App() {
     setActiveDownloadTransfer({
       transferId,
       fileName: fileName || filePath.split(/[\/\\]/).pop(),
-      progress: 0,
+      progress: 5,
       receivedFormatted: '0 KB',
       totalFormatted: '...',
-      speed: '0 KB/s',
+      speed: '...',
       isComplete: false,
       error: null
     });
@@ -287,6 +307,118 @@ function App() {
       fileName: fileName || filePath.split(/[\/\\]/).pop()
     };
     sendControlData(req);
+
+    // Fallback timer for download on older host clients
+    setTimeout(() => {
+      const stateObj = downloadChunksMapRef.current[transferId];
+      if (stateObj && stateObj.receivedBytes === 0) {
+        const cleanPath = filePath.replace(/"/g, '`"');
+        const cleanName = (fileName || filePath.split(/[\/\\]/).pop()).replace(/"/g, '`"');
+        const psCmd = `$p = "${cleanPath}"; if (Test-Path -LiteralPath $p) { $bytes = [System.IO.File]::ReadAllBytes($p); $b64 = [Convert]::ToBase64String($bytes); $meta = @{ transferId = "${transferId}"; fileName = "${cleanName}"; totalSize = $bytes.Length } | ConvertTo-Json -Compress; Write-Output "---FE_DL_START---$meta`n$b64---FE_DL_END---" } else { Write-Output "File not found" }`;
+        sendControlData({
+          type: 'terminal-command',
+          id: 'fe_dl_' + Date.now(),
+          command: psCmd,
+          shellType: 'powershell',
+          isSilent: true
+        });
+      }
+    }, 1500);
+  };
+
+  const handleProcessTerminalOutput = (data) => {
+    if (!data) return;
+    const out = data.output || '';
+
+    // 1. Check for File Explorer Directory Listing fallback
+    if (out.includes('---FE_LIST_JSON_START---')) {
+      try {
+        const jsonStr = out.split('---FE_LIST_JSON_START---')[1].split('---FE_LIST_JSON_END---')[0].trim();
+        const parsed = JSON.parse(jsonStr);
+        const formatBytes = (bytes) => {
+          if (!bytes || bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)) + ' ' + sizes[i];
+        };
+
+        const rawItems = Array.isArray(parsed.items) ? parsed.items : (parsed.items ? [parsed.items] : []);
+        const items = rawItems.filter(it => it && it.Name).map(it => {
+          const isDir = Boolean(it.IsDirectory);
+          const sizeBytes = it.Length || 0;
+          return {
+            name: it.Name,
+            path: it.FullName || (parsed.currentPath + '\\' + it.Name),
+            isDirectory: isDir,
+            sizeBytes: sizeBytes,
+            sizeFormatted: isDir ? '--' : formatBytes(sizeBytes),
+            mtime: it.LastWriteTime,
+            ext: isDir ? '' : (it.Name.includes('.') ? '.' + it.Name.split('.').pop().toLowerCase() : '')
+          };
+        });
+
+        items.sort((a, b) => {
+          if (a.isDirectory && !b.isDirectory) return -1;
+          if (!a.isDirectory && b.isDirectory) return 1;
+          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        handleReceiveFileList({
+          success: true,
+          currentPath: parsed.currentPath,
+          parentPath: parsed.parentPath,
+          items,
+          drivesInfo: {
+            drives: parsed.drives || ['C:\\'],
+            quickPaths: [
+              { label: 'Desktop', path: parsed.desktop || 'C:\\Users\\' + (hostSystemInfo?.loggedUser || 'Public') + '\\Desktop', icon: '🖥️' },
+              { label: 'Downloads', path: parsed.downloads || 'C:\\Users\\' + (hostSystemInfo?.loggedUser || 'Public') + '\\Downloads', icon: '📥' },
+              { label: 'Documents', path: parsed.documents || 'C:\\Users\\' + (hostSystemInfo?.loggedUser || 'Public') + '\\Documents', icon: '📄' }
+            ]
+          }
+        });
+        return;
+      } catch (e) {
+        console.error('Error parsing FE list fallback:', e);
+      }
+    }
+
+    // 2. Check for File Explorer Download fallback
+    if (out.includes('---FE_DL_START---')) {
+      try {
+        const body = out.split('---FE_DL_START---')[1].split('---FE_DL_END---')[0].trim();
+        const firstLineIdx = body.indexOf('\n');
+        const metaStr = body.substring(0, firstLineIdx).trim();
+        const base64Chunk = body.substring(firstLineIdx + 1).replace(/\r?\n/g, '');
+        const meta = JSON.parse(metaStr);
+
+        handleReceiveDownloadChunk({
+          transferId: meta.transferId,
+          fileName: meta.fileName,
+          totalSize: meta.totalSize,
+          base64Chunk,
+          bytesRead: meta.totalSize,
+          isFirstChunk: true,
+          isLastChunk: true
+        });
+        return;
+      } catch (e) {
+        console.error('Error parsing FE download fallback:', e);
+      }
+    }
+
+    // 3. Regular Terminal Logs (skip silent commands)
+    if (!data.isSilent && !out.includes('---FE_')) {
+      setTerminalLogs(prev => {
+        const exists = prev.some(item => item.id === data.id);
+        if (exists) {
+          return prev.map(item => item.id === data.id ? { ...data, pending: false } : item);
+        }
+        return [...prev, { ...data, pending: false }];
+      });
+      setIsExecutingCmd(false);
+    }
   };
 
   const handleReceiveDownloadChunk = (chunkData) => {
@@ -1044,14 +1176,7 @@ function App() {
     // Receive remote terminal execution results via signaling fallback
     socket.on('terminal-result', (data) => {
       if (data) {
-        setTerminalLogs(prev => {
-          const exists = prev.some(item => item.id === data.id);
-          if (exists) {
-            return prev.map(item => item.id === data.id ? { ...data, pending: false } : item);
-          }
-          return [...prev, { ...data, pending: false }];
-        });
-        setIsExecutingCmd(false);
+        handleProcessTerminalOutput(data);
       }
     });
 
@@ -1285,14 +1410,7 @@ function App() {
             });
             setTimeout(() => setClipboardToast(null), 3000);
           } else if (data.type === 'terminal-result') {
-            setTerminalLogs(prev => {
-              const exists = prev.some(item => item.id === data.id);
-              if (exists) {
-                return prev.map(item => item.id === data.id ? { ...data, pending: false } : item);
-              }
-              return [...prev, { ...data, pending: false }];
-            });
-            setIsExecutingCmd(false);
+            handleProcessTerminalOutput(data);
           }
         } catch (err) {}
       };
