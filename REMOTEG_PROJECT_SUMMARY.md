@@ -1,43 +1,103 @@
-# 🚀 RemoteG Project — Complete Documentation & Reference Guide
+# 🚀 UnioTechIT (RemoteG) — Complete Project Documentation & Master Reference
 
-## 📌 Project Overview
-**RemoteG** is a ultra-fast, unattended remote desktop control suite consisting of a Windows Electron Host Agent, a WebRTC Signaling Server, and a React Web Controller Portal.
-
-- **GitHub Repository**: [https://github.com/aurav2001/Remote-Project](https://github.com/aurav2001/Remote-Project)
-- **Live Railway Web Portal & Signaling**: [https://remoteg-all-in-one-production.up.railway.app](https://remoteg-all-in-one-production.up.railway.app)
-
+> **Last Updated:** August 31, 2026  
+> **Repository:** [https://github.com/aurav2001/Remote-Project](https://github.com/aurav2001/Remote-Project)  
+> **Live Production URL:** [https://remoteg-all-in-one-production-6122.up.railway.app](https://remoteg-all-in-one-production-6122.up.railway.app)
 
 ---
 
-## 🏗️ Architecture & Component Layout
+## 📌 1. Production Deployment & Cloud Architecture
 
-### 1. `client-electron` (Host Agent Application)
-- **Tech Stack**: Electron, Node.js, Win32 API C# Binary (`input-helper.cs` -> `input-helper.exe`).
-- **Function**: Captures desktop screen video stream via `navigator.mediaDevices.getUserMedia` and sends WebRTC video tracks + hybrid Socket.io JPEG fallback frames.
-- **Hardware Input Execution**: Executes remote mouse clicks, double clicks, right clicks, scroll wheel, and keyboard virtual key codes using `input-helper.exe`.
-- **C# Mouse Timing**: Configured with a `15ms` hardware press duration delay (`MOUSEEVENTF_LEFTDOWN` -> `15ms sleep` -> `MOUSEEVENTF_LEFTUP`) to guarantee physical click execution across all Windows apps, Start Menu, and context menus.
-
-### 2. `controller-web` (Web Controller Portal)
-- **Tech Stack**: React, Vite, WebRTC DataChannel, Socket.io-client.
-- **Function**: Provides full remote desktop interactive viewer with real-time mouse/keyboard control, live health metrics (CPU, RAM, Disk, Network), silent PowerShell/CMD terminal drawer, hardware specs, and bidirectional clipboard sync.
-- **Layout Architecture**:
-  - **Viewer Canvas**: `100vw` x `100vh` edge-to-edge video fill (`object-fit: fill`) with 0px absolute left positioning to eliminate all black sidebars and pillarboxing gaps.
-  - **Left Floating Panel Dock**: Dark glassmorphism vertical panel (`width: 190px`) featuring `🟢 Node ID`, `📊 Health`, `💻 Terminal`, `⚡ Actions Menu`, and `Terminate Session`.
-  - **1-Click Collapse Toggle**: `◀` / `▶` toggle button that collapses the left panel into a tiny `36px` icon on the far left edge for 100% unblocked edge-to-edge desktop viewing.
-
-### 3. `server-signaling` (Signaling & Socket Relay Server)
-- **Tech Stack**: Node.js, Express, Socket.io.
-- **Function**: Coordinates WebRTC SDP Offer/Answer exchange, ICE candidates, room authorization, and hybrid socket frame relay.
+- **Primary Cloud Platform:** **Railway** (Automated Nixpacks Deployment on `git push origin main`)
+- **Node.js Version:** `Node.js 22.x` (enforced via `.nvmrc` and `nixpacks.toml`)
+- **Root Setup:**
+  - `package.json` in root directory: builds `controller-web` (`npm run build`) and starts `server/index.js`.
+  - `railway.json`: configured with `nixpacks` builder.
+  - `nixpacks.toml`: specifies `nodejs_22` provider.
+- **Previous Render Status:** Render free quota exhausted (503 Service Unavailable). Railway is now the **primary, permanent 24/7 server**.
 
 ---
 
-## 🛠️ Key Solved Issues & Implementations
+## 🏗️ 2. Core Components & Tech Stack
 
-1. **Hardware Click Reliability**: Added 15ms delay in `input-helper.cs` between down and up mouse events.
-2. **Duplicate Click Elimination**: Deduplicated `onMouseDown` + `onMouseUp` vs `onClick` in `App.jsx` so menus and windows remain open cleanly without getting immediately dismissed.
-3. **Black Screen WebRTC Deadlock Fix**: Kept `<video>` element rendered in DOM (`display: block`) to avoid Chrome media engine decoding suspension.
-4. **Zero-Gap Layout**: Applied `object-fit: fill` and absolute 0px left positioning in `index.css` to prevent video pillarboxing and desktop shifting.
-5. **Horizontal Button Spilling Fix**: Enforced `flex-direction: column !important` on `.control-bar-left` to keep all action buttons neatly stacked in the left dock panel.
+### A. Web Controller (`controller-web/`)
+- **Framework:** React 19 + Vite 8 + Socket.IO-Client + WebRTC Native API.
+- **Design:** Modern Glassmorphism, tailored dark theme, dynamic SVG micro-animations, responsive layout.
+- **Key Features:**
+  1. **Central RMM Portal:** Grid/Card view of all registered online devices with live CPU/RAM/Battery metrics, public/private IPs, OS version, and 1-Click Connect.
+  2. **Ultra-Low Latency Video Canvas:** Edge-to-edge full desktop streaming (`object-fit: fill`), mouse click/scroll/drag/drop, and keyboard event dispatch.
+  3. **Left Floating Dock:** Collapsible toolbar with `📊 Health`, `💻 Terminal`, `📁 Files`, `✏️ Annotate`, `🖥️ Displays`, `⚡ Actions`, and `Terminate Session`.
+  4. **Dual-Mode Remote File Explorer:**
+     - Quick drive letters (`C:\`, `D:\`) & shortcuts (`Desktop`, `Downloads`, `Documents`, `Pictures`, `Home`).
+     - Real-time directory navigation, path bar, breadcrumbs, search filter.
+     - **1-Click Download (Target ➔ Admin PC):** Streams files in 64KB chunks and saves directly to the Admin browser's Downloads folder.
+     - **Folder Upload:** Drag-and-drop or `⬆️ Upload Here` button to upload files into the active remote directory.
+     - **Dual-Mode Engine:** Uses native Electron IPC if available, and automatically falls back to silent PowerShell execution within 1.2s on older host versions.
+  5. **Silent Remote Terminal:** PowerShell & CMD execution with instant diagnostic presets (`ipconfig`, `tasklist`, `systeminfo`, `ping`, `flushdns`).
+  6. **Live Telemetry & Health Drawer:** Real-time graphs for CPU%, RAM%, Disk Space, Network Upload/Download speeds, Battery status.
+  7. **Multi-Monitor Display Switcher:** 1-Click switching across dual/triple monitors with monitor resolution badges.
+  8. **Screen Annotation Suite:** Laser pointer, freehand pen, arrows, rectangle boxes, and highlighter in customizable colors.
+  9. **Remote Reboot & Auto-Reconnect:** Sends reboot trigger to target PC, polls signaling room, and automatically re-establishes live connection on boot.
+  10. **Bidirectional Clipboard Sync:** Real-time automatic and manual clipboard sharing.
+
+### B. Windows Host Desktop Agent (`client-electron/`)
+- **Tech Stack:** Electron 28, Node.js, C# Native Input Helper (`input-helper.cs` ➔ `input-helper.exe`).
+- **Functionality:**
+  - Captures Windows desktop stream via `desktopCapturer` and feeds WebRTC video tracks + hybrid JPEG canvas frames.
+  - Native hardware click simulation with 15ms debounce in `input-helper.exe` for start menu, taskbar, and game window support.
+  - Windows Auto-Start configured via `app.setLoginItemSettings` and elevated Windows Task Scheduler (`schtasks /sc ONLOGON /rl HIGHEST`).
+  - Native IPC handlers: `get-drives-and-quick-paths`, `read-directory`, `read-file-chunk`, `save-file-chunk`, `execute-remote-command`, `get-system-info`.
+  - Silent PowerShell/CMD runner using child process spawn.
+
+### C. Signaling & Relay Server (`server/`)
+- **Tech Stack:** Node.js, Express, Socket.IO.
+- **Role:** WebRTC signaling (SDP Offer/Answer, ICE candidates), room presence management, heartbeat keeping, fallback relay for terminal, clipboard, file chunks, and telemetry.
+- **Static Assets:** Serves compiled `controller-web/dist` directly and provides download routes for `UnioTechIT-Setup.exe` and `UnioTechIT-Setup.zip`.
 
 ---
-*Documented on August 22, 2026 for RemoteG Project reference.*
+
+## 📦 3. Installer & Distribution Files
+
+| File | Purpose | Location |
+| :--- | :--- | :--- |
+| **`UnioTechIT Setup 1.0.0.exe`** | Standalone NSIS Windows Installer | `client-electron/dist-build/` & `server/public/` |
+| **`UnioTechIT-Setup.zip`** | Portable zipped host package | `client-electron/` & `server/public/` |
+| **Web Download Route (EXE)** | Direct 1-click download link | `/UnioTechIT-Setup.exe` |
+| **Web Download Route (ZIP)** | Direct zip download route | `/download` |
+
+---
+
+## 🛠️ 4. Useful Maintenance & Build Commands
+
+### Rebuild Web Controller:
+```powershell
+cd "c:\Users\Gulshan Pandey\Desktop\Remote\controller-web"
+npm run build
+Copy-Item -Path "dist\*" -Destination "..\server\public\" -Recurse -Force
+```
+
+### Rebuild Windows Host Setup Installer:
+```powershell
+cd "c:\Users\Gulshan Pandey\Desktop\Remote\client-electron"
+npm run package
+Compress-Archive -Path "dist-build\UnioTechIT Setup 1.0.0.exe" -DestinationPath "UnioTechIT-Setup.zip" -Force
+Copy-Item "dist-build\UnioTechIT Setup 1.0.0.exe" "..\server\public\UnioTechIT-Setup.exe" -Force
+Copy-Item "UnioTechIT-Setup.zip" "..\server\public\UnioTechIT-Setup.zip" -Force
+```
+
+### Deploy to Railway (Auto-Deploy via Git):
+```powershell
+cd "c:\Users\Gulshan Pandey\Desktop\Remote"
+git add -A
+git commit -m "Your update message"
+git push origin main
+```
+
+---
+
+## 🌐 5. Quick Links Summary
+
+- **Live Web Dashboard:** [https://remoteg-all-in-one-production-6122.up.railway.app](https://remoteg-all-in-one-production-6122.up.railway.app)
+- **Direct Installer Download (Target PC):** [https://remoteg-all-in-one-production-6122.up.railway.app/UnioTechIT-Setup.exe](https://remoteg-all-in-one-production-6122.up.railway.app/UnioTechIT-Setup.exe)
+- **GitHub Master Repo:** [https://github.com/aurav2001/Remote-Project](https://github.com/aurav2001/Remote-Project)
+
