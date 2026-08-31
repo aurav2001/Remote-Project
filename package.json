@@ -1,0 +1,10 @@
+{
+  "name": "remoteg-all-in-one",
+  "version": "1.0.0",
+  "description": "RemoteG Desktop Host, Web Controller, and Signaling Server",
+  "main": "server/index.js",
+  "scripts": {
+    "build": "cd controller-web && npm install && npm run build && cd ../server && npm install",
+    "start": "node server/index.js"
+  }
+}
