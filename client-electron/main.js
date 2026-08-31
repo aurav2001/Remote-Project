@@ -259,15 +259,19 @@ ipcMain.on('show-annotation', (event, data) => {
 // Active File Transfer WriteStreams Map
 const activeFileTransfers = new Map();
 
-ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Chunk, isFirstChunk, isLastChunk, fileSize }) => {
+ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Chunk, isFirstChunk, isLastChunk, fileSize, targetDirectory }) => {
   try {
     const os = require('os');
     const safeFileName = path.basename(fileName || 'received_file');
     let downloadsDir = '';
-    try {
-      downloadsDir = app.getPath('downloads');
-    } catch (e) {
-      downloadsDir = path.join(os.homedir(), 'Downloads');
+    if (targetDirectory && fs.existsSync(targetDirectory)) {
+      downloadsDir = targetDirectory;
+    } else {
+      try {
+        downloadsDir = app.getPath('downloads');
+      } catch (e) {
+        downloadsDir = path.join(os.homedir(), 'Downloads');
+      }
     }
 
     if (!downloadsDir || !fs.existsSync(downloadsDir)) {
@@ -338,6 +342,169 @@ ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Ch
       } catch (e) {}
       activeFileTransfers.delete(transferId);
     }
+    return { success: false, error: err.message };
+  }
+});
+
+// Format byte sizes into readable string
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)) + ' ' + sizes[i];
+}
+
+// Get Windows drives & common user folders
+ipcMain.handle('get-drives-and-quick-paths', async () => {
+  try {
+    const drives = [];
+    if (process.platform === 'win32') {
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      for (const l of letters) {
+        const root = `${l}:\\`;
+        try {
+          if (fs.existsSync(root)) {
+            drives.push(root);
+          }
+        } catch(e) {}
+      }
+    } else {
+      drives.push('/');
+    }
+
+    const home = app.getPath('home');
+    const desktop = app.getPath('desktop');
+    const documents = app.getPath('documents');
+    const downloads = app.getPath('downloads');
+    const pictures = app.getPath('pictures');
+
+    return {
+      success: true,
+      drives,
+      quickPaths: [
+        { label: 'Desktop', path: desktop, icon: '🖥️' },
+        { label: 'Downloads', path: downloads, icon: '📥' },
+        { label: 'Documents', path: documents, icon: '📄' },
+        { label: 'Pictures', path: pictures, icon: '🖼️' },
+        { label: 'Home', path: home, icon: '🏠' }
+      ]
+    };
+  } catch (err) {
+    return { success: false, error: err.message, drives: ['C:\\'], quickPaths: [] };
+  }
+});
+
+// Read target directory items
+ipcMain.handle('read-directory', async (event, targetPath) => {
+  try {
+    let resolvedPath = targetPath ? path.resolve(targetPath) : app.getPath('desktop');
+    if (!fs.existsSync(resolvedPath)) {
+      resolvedPath = app.getPath('desktop');
+    }
+
+    const dirEntries = await fs.promises.readdir(resolvedPath, { withFileTypes: true });
+    const items = [];
+
+    for (const entry of dirEntries) {
+      // Skip system/hidden files like $RECYCLE.BIN, System Volume Information, desktop.ini
+      if (entry.name.startsWith('$') || entry.name.toLowerCase() === 'system volume information' || entry.name.toLowerCase() === 'pagefile.sys') {
+        continue;
+      }
+      const fullItemPath = path.join(resolvedPath, entry.name);
+      let isDirectory = false;
+      let sizeBytes = 0;
+      let mtime = null;
+
+      try {
+        isDirectory = entry.isDirectory();
+        const stat = await fs.promises.stat(fullItemPath);
+        sizeBytes = stat.size || 0;
+        mtime = stat.mtime ? stat.mtime.toISOString() : null;
+      } catch (statErr) {
+        // Permission denied on specific system files
+        isDirectory = entry.isDirectory();
+      }
+
+      const ext = isDirectory ? '' : path.extname(entry.name).toLowerCase();
+
+      items.push({
+        name: entry.name,
+        path: fullItemPath,
+        isDirectory,
+        sizeBytes,
+        sizeFormatted: isDirectory ? '--' : formatBytes(sizeBytes),
+        mtime,
+        ext
+      });
+    }
+
+    // Sort: directories first (alphabetical), then files (alphabetical)
+    items.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    const parsed = path.parse(resolvedPath);
+    const parentPath = resolvedPath === parsed.root ? null : path.dirname(resolvedPath);
+
+    return {
+      success: true,
+      currentPath: resolvedPath,
+      parentPath,
+      items,
+      totalItems: items.length
+    };
+  } catch (err) {
+    console.error('[Main Process]: Error reading directory:', err);
+    return {
+      success: false,
+      error: err.message,
+      currentPath: targetPath,
+      parentPath: null,
+      items: []
+    };
+  }
+});
+
+// Read a chunk of a target file for downloading to remote Admin Controller
+ipcMain.handle('read-file-chunk', async (event, { filePath, offset, chunkSize = 64 * 1024 }) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { success: false, error: 'File does not exist on target PC.' };
+    }
+    const stat = await fs.promises.stat(filePath);
+    const totalSize = stat.size;
+    const currentOffset = offset || 0;
+    const bytesToRead = Math.min(chunkSize, totalSize - currentOffset);
+
+    if (bytesToRead <= 0) {
+      return {
+        success: true,
+        base64Chunk: '',
+        bytesRead: 0,
+        totalSize,
+        isLastChunk: true
+      };
+    }
+
+    const fileHandle = await fs.promises.open(filePath, 'r');
+    const buffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await fileHandle.read(buffer, 0, bytesToRead, currentOffset);
+    await fileHandle.close();
+
+    const isLastChunk = (currentOffset + bytesRead) >= totalSize;
+
+    return {
+      success: true,
+      base64Chunk: buffer.toString('base64'),
+      bytesRead,
+      totalSize,
+      isLastChunk
+    };
+  } catch (err) {
+    console.error('[Main Process]: Error reading file chunk:', err);
     return { success: false, error: err.message };
   }
 });

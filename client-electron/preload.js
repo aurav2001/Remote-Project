@@ -24,5 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   showAnnotation: (data) => ipcRenderer.send('show-annotation', data),
   setActiveDisplay: (bounds) => ipcRenderer.send('set-active-display', bounds),
-  executeSystemReboot: (opts) => ipcRenderer.invoke('execute-system-reboot', opts)
+  executeSystemReboot: (opts) => ipcRenderer.invoke('execute-system-reboot', opts),
+  getDrivesAndQuickPaths: () => ipcRenderer.invoke('get-drives-and-quick-paths'),
+  readDirectory: (targetPath) => ipcRenderer.invoke('read-directory', targetPath),
+  readFileChunk: (data) => ipcRenderer.invoke('read-file-chunk', data)
 });

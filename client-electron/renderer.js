@@ -329,6 +329,17 @@ function initSocket() {
     handleIncomingFileChunk(data);
   });
 
+  // Incoming file explorer requests over socket fallback
+  socket.on('file-explorer-event', (data) => {
+    if (!data) return;
+    const payload = data.payload || data;
+    if (payload.type === 'file-explorer-list-req') {
+      handleFileExplorerListRequest(payload);
+    } else if (payload.type === 'file-explorer-download-req') {
+      handleFileExplorerDownloadRequest(payload);
+    }
+  });
+
   // When controller disconnects, reset peer connection & return to waiting state
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
@@ -425,6 +436,119 @@ async function handleIncomingFileChunk(data) {
   } catch (err) {
     console.error('[Host]: Failed processing incoming file chunk:', err);
   }
+}
+
+// Send File Explorer responses to controller (prefers WebRTC DataChannel, falls back to Socket)
+function sendFileExplorerData(payload) {
+  let sent = false;
+  if (activeDataChannel && activeDataChannel.readyState === 'open') {
+    try {
+      activeDataChannel.send(JSON.stringify(payload));
+      sent = true;
+    } catch (e) {}
+  }
+  if (!sent && socket && socket.connected && roomId) {
+    socket.emit('file-explorer-event', { roomId, payload });
+    sent = true;
+  }
+  return sent;
+}
+
+// Handle File Explorer directory listing request
+async function handleFileExplorerListRequest(data) {
+  if (!data || !window.electronAPI) return;
+  try {
+    const targetPath = data.path || null;
+    const dirRes = await window.electronAPI.readDirectory(targetPath);
+    let drivesInfo = null;
+    if (data.includeDrives || !targetPath) {
+      drivesInfo = await window.electronAPI.getDrivesAndQuickPaths();
+    }
+    const responsePayload = {
+      type: 'file-explorer-list-res',
+      reqId: data.reqId,
+      ...dirRes,
+      drivesInfo: drivesInfo || undefined
+    };
+    sendFileExplorerData(responsePayload);
+  } catch (err) {
+    console.error('[Host]: File Explorer list error:', err);
+    sendFileExplorerData({
+      type: 'file-explorer-list-res',
+      reqId: data.reqId,
+      success: false,
+      error: err.message,
+      items: []
+    });
+  }
+}
+
+// Handle File Explorer file download streaming request (Target PC -> Admin Controller)
+async function handleFileExplorerDownloadRequest(data) {
+  if (!data || !data.filePath || !window.electronAPI) return;
+  const transferId = data.transferId || `dl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const filePath = data.filePath;
+  const fileName = data.fileName || filePath.split(/[\/\\]/).pop();
+
+  console.log(`[Host]: Starting file download streaming for: ${filePath} (Transfer ID: ${transferId})`);
+
+  let offset = 0;
+  const CHUNK_SIZE = 64 * 1024; // 64 KB chunks
+
+  async function sendNextChunk() {
+    try {
+      const chunkRes = await window.electronAPI.readFileChunk({
+        filePath,
+        offset,
+        chunkSize: CHUNK_SIZE
+      });
+
+      if (!chunkRes || !chunkRes.success) {
+        sendFileExplorerData({
+          type: 'file-download-chunk',
+          transferId,
+          fileName,
+          error: chunkRes?.error || 'Failed reading file chunk',
+          isLastChunk: true
+        });
+        return;
+      }
+
+      const isFirstChunk = offset === 0;
+      const isLastChunk = chunkRes.isLastChunk;
+
+      sendFileExplorerData({
+        type: 'file-download-chunk',
+        transferId,
+        fileName,
+        totalSize: chunkRes.totalSize,
+        offset,
+        base64Chunk: chunkRes.base64Chunk,
+        bytesRead: chunkRes.bytesRead,
+        isFirstChunk,
+        isLastChunk
+      });
+
+      if (!isLastChunk) {
+        offset += chunkRes.bytesRead;
+        // Non-blocking micro-delay for smooth pacing
+        setTimeout(sendNextChunk, 8);
+      } else {
+        console.log(`[Host]: Completed streaming file: ${fileName} (${chunkRes.totalSize} bytes)`);
+      }
+    } catch (err) {
+      console.error('[Host]: Error streaming file chunk:', err);
+      sendFileExplorerData({
+        type: 'file-download-chunk',
+        transferId,
+        fileName,
+        error: err.message,
+        isLastChunk: true
+      });
+    }
+  }
+
+  sendNextChunk();
 }
 
 // --- HYBRID JPEG FRAME STREAMER (Zero-drop fallback for WebRTC NAT blocks) ---
@@ -707,6 +831,14 @@ function setupDataChannel(channel) {
       }
       if (data.type === 'file-transfer-chunk') {
         handleIncomingFileChunk(data);
+        return;
+      }
+      if (data.type === 'file-explorer-list-req') {
+        handleFileExplorerListRequest(data);
+        return;
+      }
+      if (data.type === 'file-explorer-download-req') {
+        handleFileExplorerDownloadRequest(data);
         return;
       }
       if (data.type === 'get-screens-list') {

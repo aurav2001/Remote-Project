@@ -366,6 +366,14 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay File Explorer Events (requests & chunk download streaming bidirectional)
+  socket.on('file-explorer-event', (data) => {
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('file-explorer-event', data);
+    }
+  });
+
   // Handle Disconnect with brief grace period for Wi-Fi reconnects
   socket.on('disconnect', (reason) => {
     console.log(`User disconnected: ${socket.id}, reason: ${reason}`);

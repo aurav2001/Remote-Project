@@ -130,6 +130,20 @@ function App() {
   const [currentScreenId, setCurrentScreenId] = useState('screen:0:0');
   const [showScreenDropdown, setShowScreenDropdown] = useState(false);
 
+  // Remote File Explorer & 1-Click File Downloader States
+  const [showFileExplorerDrawer, setShowFileExplorerDrawer] = useState(false);
+  const [remoteCurrentPath, setRemoteCurrentPath] = useState('');
+  const [remoteParentPath, setRemoteParentPath] = useState(null);
+  const [remoteFiles, setRemoteFiles] = useState([]);
+  const [remoteDrives, setRemoteDrives] = useState(['C:\\']);
+  const [remoteQuickPaths, setRemoteQuickPaths] = useState([]);
+  const [isLoadingRemoteFiles, setIsLoadingRemoteFiles] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [pathInputValue, setPathInputValue] = useState('');
+  const [activeDownloadTransfer, setActiveDownloadTransfer] = useState(null);
+  const downloadChunksMapRef = useRef({});
+  const explorerFileInputRef = useRef(null);
+
   // Low latency event emitter: prefers direct P2P WebRTC DataChannel, falls back to Socket.IO signaling
   function sendControlData(eventData) {
     let sent = false;
@@ -210,6 +224,151 @@ function App() {
     setIsRebooting(false);
     setShowRebootModal(false);
     cleanup();
+  };
+
+  // --- Remote File Explorer & Target-to-Admin Downloader Engine ---
+  const requestRemoteDirectory = (targetPath = '', includeDrives = false) => {
+    setIsLoadingRemoteFiles(true);
+    const req = {
+      type: 'file-explorer-list-req',
+      path: targetPath,
+      includeDrives: includeDrives || remoteDrives.length === 0,
+      reqId: 'req_' + Date.now()
+    };
+    sendControlData(req);
+  };
+
+  const handleReceiveFileList = (data) => {
+    setIsLoadingRemoteFiles(false);
+    if (data.success) {
+      setRemoteCurrentPath(data.currentPath || '');
+      setPathInputValue(data.currentPath || '');
+      setRemoteParentPath(data.parentPath || null);
+      setRemoteFiles(data.items || []);
+      if (data.drivesInfo && data.drivesInfo.drives) {
+        setRemoteDrives(data.drivesInfo.drives);
+        setRemoteQuickPaths(data.drivesInfo.quickPaths || []);
+      }
+    } else {
+      setClipboardToast({
+        text: `⚠️ File Explorer: ${data.error || 'Failed to read directory'}`,
+        isSelf: true
+      });
+      setTimeout(() => setClipboardToast(null), 4000);
+    }
+  };
+
+  const requestDownloadRemoteFile = (filePath, fileName) => {
+    if (!filePath) return;
+    const transferId = 'dl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    downloadChunksMapRef.current[transferId] = {
+      chunks: [],
+      totalBytes: 0,
+      receivedBytes: 0,
+      fileName: fileName || filePath.split(/[\/\\]/).pop(),
+      startTime: Date.now()
+    };
+
+    setActiveDownloadTransfer({
+      transferId,
+      fileName: fileName || filePath.split(/[\/\\]/).pop(),
+      progress: 0,
+      receivedFormatted: '0 KB',
+      totalFormatted: '...',
+      speed: '0 KB/s',
+      isComplete: false,
+      error: null
+    });
+
+    const req = {
+      type: 'file-explorer-download-req',
+      transferId,
+      filePath,
+      fileName: fileName || filePath.split(/[\/\\]/).pop()
+    };
+    sendControlData(req);
+  };
+
+  const handleReceiveDownloadChunk = (chunkData) => {
+    if (!chunkData || !chunkData.transferId) return;
+    const { transferId, totalSize, base64Chunk, isLastChunk, error } = chunkData;
+
+    if (error) {
+      setActiveDownloadTransfer(prev => prev && prev.transferId === transferId ? {
+        ...prev,
+        error,
+        isComplete: false
+      } : prev);
+      delete downloadChunksMapRef.current[transferId];
+      return;
+    }
+
+    const stateObj = downloadChunksMapRef.current[transferId];
+    if (!stateObj) return;
+
+    if (totalSize) stateObj.totalBytes = totalSize;
+
+    if (base64Chunk) {
+      try {
+        const binaryString = atob(base64Chunk);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        stateObj.chunks.push(bytes);
+        stateObj.receivedBytes += bytes.length;
+      } catch (e) {
+        console.error('Error decoding download chunk:', e);
+      }
+    }
+
+    const total = stateObj.totalBytes || 1;
+    const pct = Math.min(100, Math.round((stateObj.receivedBytes / total) * 100));
+    const elapsedSec = (Date.now() - stateObj.startTime) / 1000 || 0.1;
+    const speedBytes = stateObj.receivedBytes / elapsedSec;
+    const speedStr = speedBytes > 1024 * 1024 
+      ? `${(speedBytes / (1024 * 1024)).toFixed(1)} MB/s` 
+      : `${Math.round(speedBytes / 1024)} KB/s`;
+
+    setActiveDownloadTransfer({
+      transferId,
+      fileName: stateObj.fileName,
+      progress: pct,
+      receivedFormatted: stateObj.receivedBytes > 1024 * 1024 ? `${(stateObj.receivedBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(stateObj.receivedBytes / 1024)} KB`,
+      totalFormatted: total > 1024 * 1024 ? `${(total / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(total / 1024)} KB`,
+      speed: speedStr,
+      isComplete: isLastChunk,
+      error: null
+    });
+
+    if (isLastChunk) {
+      try {
+        const blob = new Blob(stateObj.chunks);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = stateObj.fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 1000);
+
+        setClipboardToast({
+          text: `🎉 Downloaded "${stateObj.fileName}" to your Admin PC!`,
+          isSelf: true
+        });
+        setTimeout(() => setClipboardToast(null), 5000);
+      } catch (e) {
+        console.error('Failed triggering browser download:', e);
+      }
+      delete downloadChunksMapRef.current[transferId];
+      setTimeout(() => {
+        setActiveDownloadTransfer(prev => prev && prev.transferId === transferId ? null : prev);
+      }, 4000);
+    }
   };
 
   // Single-instance download protection to avoid duplicate downloads
@@ -921,6 +1080,17 @@ function App() {
       }
     });
 
+    // Receive File Explorer responses & download streaming via signaling fallback
+    socket.on('file-explorer-event', (data) => {
+      if (!data) return;
+      const payload = data.payload || data;
+      if (payload.type === 'file-explorer-list-res') {
+        handleReceiveFileList(payload);
+      } else if (payload.type === 'file-download-chunk') {
+        handleReceiveDownloadChunk(payload);
+      }
+    });
+
     // Both host and controller are in the room
     socket.on('ready', ({ systemInfo } = {}) => {
       console.log('Host is ready, waiting for WebRTC offer...');
@@ -1098,6 +1268,10 @@ function App() {
               text: `📁 File "${data.fileName}" saved to remote Downloads folder!`,
               isSelf: true
             });
+          } else if (data.type === 'file-explorer-list-res') {
+            handleReceiveFileList(data);
+          } else if (data.type === 'file-download-chunk') {
+            handleReceiveDownloadChunk(data);
           } else if (data.type === 'screens-list' && Array.isArray(data.screens)) {
             console.log('[Controller]: Received available monitors list:', data.screens);
             setAvailableScreens(data.screens);
@@ -1252,7 +1426,7 @@ function App() {
     return sent;
   };
 
-  const sendFile = (file) => {
+  const sendFile = (file, customTargetDir = null) => {
     if (!file) return;
     const transferId = 'transfer_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const CHUNK_SIZE = 60 * 1024; // 60 KB chunks
@@ -1269,7 +1443,7 @@ function App() {
       speed: '0 KB/s',
       isUploading: true,
       isComplete: false,
-      statusText: 'Transferring...',
+      statusText: customTargetDir ? `Uploading to ${customTargetDir.split(/[\/\\]/).pop() || 'Folder'}...` : 'Transferring...',
       error: null
     });
 
@@ -1304,7 +1478,8 @@ function App() {
           base64Chunk,
           chunkIndex,
           isFirstChunk,
-          isLastChunk
+          isLastChunk,
+          targetDirectory: customTargetDir || undefined
         };
 
         sendTransferPayload(payload);
@@ -2183,6 +2358,22 @@ function App() {
                 </button>
 
                 <button
+                  onClick={() => {
+                    setShowFileExplorerDrawer(prev => {
+                      const next = !prev;
+                      if (next && (!remoteFiles || remoteFiles.length === 0)) {
+                        requestRemoteDirectory('', true);
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`control-btn btn-files ${showFileExplorerDrawer ? 'active' : ''}`}
+                  title="Browse & Download Files from Target PC (Remote File Explorer)"
+                >
+                  📁 Files {activeDownloadTransfer ? '⬇️' : ''}
+                </button>
+
+                <button
                   onClick={() => setIsAnnotating(prev => !prev)}
                   className={`control-btn btn-annotate ${isAnnotating ? 'active' : ''}`}
                   title="Toggle Screen Annotation & Laser Pointer Tool"
@@ -2453,6 +2644,274 @@ function App() {
                 >
                   {isExecutingCmd ? 'Executing...' : 'Run ▶'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Remote File Explorer & 1-Click Downloader Drawer */}
+          {showFileExplorerDrawer && (
+            <div className="file-explorer-drawer">
+              {/* Drawer Header */}
+              <div className="drawer-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '1.25rem' }}>📁</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      Remote File Explorer
+                    </h3>
+                    <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
+                      Target: <strong style={{ color: '#f8fafc' }}>{hostSystemInfo?.hostname || 'Host PC'}</strong> • Browse files & 1-Click Download to your PC
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button 
+                    onClick={() => requestRemoteDirectory(remoteCurrentPath, true)} 
+                    className="btn-clear-logs" 
+                    title="Refresh Current Folder"
+                    disabled={isLoadingRemoteFiles}
+                  >
+                    🔄 Refresh
+                  </button>
+                  <button 
+                    onClick={() => explorerFileInputRef.current?.click()} 
+                    className="btn-upload-folder" 
+                    title="Upload File into Current Folder"
+                  >
+                    ⬆️ Upload Here
+                  </button>
+                  <input
+                    type="file"
+                    ref={explorerFileInputRef}
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        sendFile(e.target.files[0], remoteCurrentPath);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  <button onClick={() => setShowFileExplorerDrawer(false)} className="drawer-close-btn">✕</button>
+                </div>
+              </div>
+
+              {/* Quick Access Drives & Common Folders */}
+              <div className="explorer-quick-bar">
+                <span className="explorer-quick-label">💽 Drives:</span>
+                <div className="explorer-drives-list">
+                  {remoteDrives.map(d => (
+                    <button
+                      key={d}
+                      onClick={() => requestRemoteDirectory(d)}
+                      className={`drive-chip-btn ${remoteCurrentPath.startsWith(d) ? 'active' : ''}`}
+                      title={`Open Drive ${d}`}
+                    >
+                      💽 {d}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="explorer-quick-divider" />
+
+                <span className="explorer-quick-label">⚡ Shortcuts:</span>
+                <div className="explorer-shortcuts-list">
+                  {remoteQuickPaths.map(q => (
+                    <button
+                      key={q.label}
+                      onClick={() => requestRemoteDirectory(q.path)}
+                      className={`shortcut-chip-btn ${remoteCurrentPath === q.path ? 'active' : ''}`}
+                      title={`Go to ${q.label}`}
+                    >
+                      {q.icon} {q.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Path & Search Navigation Bar */}
+              <div className="explorer-nav-bar">
+                <button
+                  onClick={() => remoteParentPath && requestRemoteDirectory(remoteParentPath)}
+                  disabled={!remoteParentPath || isLoadingRemoteFiles}
+                  className="btn-nav-up"
+                  title="Go to Parent Directory (Up 1 Level)"
+                >
+                  ⬆️ Up
+                </button>
+
+                <div className="explorer-path-input-group">
+                  <span className="path-icon">📂</span>
+                  <input
+                    type="text"
+                    value={pathInputValue}
+                    onChange={(e) => setPathInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && pathInputValue.trim()) {
+                        requestRemoteDirectory(pathInputValue.trim());
+                      }
+                    }}
+                    placeholder="Enter absolute directory path (e.g. C:\Users\Admin\Desktop)..."
+                    className="explorer-path-input"
+                  />
+                  <button
+                    onClick={() => pathInputValue.trim() && requestRemoteDirectory(pathInputValue.trim())}
+                    className="btn-path-go"
+                    title="Navigate to Path"
+                  >
+                    Go ➔
+                  </button>
+                </div>
+
+                <div className="explorer-search-group">
+                  <span className="search-icon">🔍</span>
+                  <input
+                    type="text"
+                    value={fileSearchQuery}
+                    onChange={(e) => setFileSearchQuery(e.target.value)}
+                    placeholder="Search in this folder..."
+                    className="explorer-search-input"
+                  />
+                  {fileSearchQuery && (
+                    <button onClick={() => setFileSearchQuery('')} className="btn-search-clear">✕</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Active Download Progress Banner */}
+              {activeDownloadTransfer && (
+                <div className="explorer-download-banner">
+                  <div className="download-banner-info">
+                    <span className="download-banner-title">
+                      ⬇️ Downloading: <strong>{activeDownloadTransfer.fileName}</strong>
+                    </span>
+                    <span className="download-banner-stats">
+                      {activeDownloadTransfer.receivedFormatted} / {activeDownloadTransfer.totalFormatted} ({activeDownloadTransfer.speed}) • {activeDownloadTransfer.progress}%
+                    </span>
+                  </div>
+                  <div className="download-banner-progress-track">
+                    <div
+                      className="download-banner-progress-fill"
+                      style={{ width: `${activeDownloadTransfer.progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* File List Content Table */}
+              <div 
+                className="explorer-files-container"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    sendFile(e.dataTransfer.files[0], remoteCurrentPath);
+                  }
+                }}
+              >
+                {isLoadingRemoteFiles ? (
+                  <div className="explorer-loading-state">
+                    <div className="spinner"></div>
+                    <p>Fetching remote directory contents...</p>
+                  </div>
+                ) : (
+                  <table className="explorer-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '45%' }}>Name</th>
+                        <th style={{ width: '15%' }}>Size</th>
+                        <th style={{ width: '25%' }}>Modified Date</th>
+                        <th style={{ width: '15%', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {remoteFiles
+                        .filter(f => !fileSearchQuery || f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+                        .map(item => {
+                          const ext = (item.ext || '').toLowerCase();
+                          let icon = '📄';
+                          if (item.isDirectory) icon = '📁';
+                          else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'].includes(ext)) icon = '🖼️';
+                          else if (['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv'].includes(ext)) icon = '🎬';
+                          else if (['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)) icon = '🎵';
+                          else if (['.pdf'].includes(ext)) icon = '📕';
+                          else if (['.zip', '.rar', '.7z', '.tar', '.gz', '.iso'].includes(ext)) icon = '📦';
+                          else if (['.exe', '.msi', '.bat', '.cmd', '.ps1'].includes(ext)) icon = '⚙️';
+                          else if (['.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.json', '.py', '.c', '.cpp', '.cs', '.java', '.php'].includes(ext)) icon = '💻';
+                          else if (['.doc', '.docx'].includes(ext)) icon = '📘';
+                          else if (['.xls', '.xlsx', '.csv'].includes(ext)) icon = '📊';
+                          else if (['.ppt', '.pptx'].includes(ext)) icon = '📙';
+                          else if (['.txt', '.log', '.md', '.ini', '.cfg'].includes(ext)) icon = '📄';
+
+                          const isDownloadingThis = activeDownloadTransfer && activeDownloadTransfer.fileName === item.name && !activeDownloadTransfer.isComplete;
+
+                          return (
+                            <tr 
+                              key={item.path} 
+                              className={`explorer-row ${item.isDirectory ? 'is-dir' : 'is-file'}`}
+                              onDoubleClick={() => {
+                                if (item.isDirectory) requestRemoteDirectory(item.path);
+                                else requestDownloadRemoteFile(item.path, item.name);
+                              }}
+                            >
+                              <td className="explorer-cell-name">
+                                <span className="item-icon">{icon}</span>
+                                <span 
+                                  className="item-label" 
+                                  onClick={() => item.isDirectory && requestRemoteDirectory(item.path)}
+                                  title={item.name}
+                                >
+                                  {item.name}
+                                </span>
+                              </td>
+                              <td className="explorer-cell-size">{item.sizeFormatted}</td>
+                              <td className="explorer-cell-date">
+                                {item.mtime ? new Date(item.mtime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '--'}
+                              </td>
+                              <td className="explorer-cell-actions">
+                                {item.isDirectory ? (
+                                  <button
+                                    onClick={() => requestRemoteDirectory(item.path)}
+                                    className="btn-item-open"
+                                    title="Open Folder"
+                                  >
+                                    Open ➔
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => requestDownloadRemoteFile(item.path, item.name)}
+                                    disabled={Boolean(isDownloadingThis)}
+                                    className="btn-item-download"
+                                    title="Download this file to your Admin PC"
+                                  >
+                                    {isDownloadingThis ? (
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                        <span className="spinner-sm"></span> {activeDownloadTransfer.progress}%
+                                      </span>
+                                    ) : (
+                                      '⬇️ Download'
+                                    )}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                      {remoteFiles.length === 0 && !isLoadingRemoteFiles && (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                            <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📂</div>
+                            <p style={{ margin: 0, fontSize: '0.9rem' }}>This directory is empty or inaccessible.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           )}
