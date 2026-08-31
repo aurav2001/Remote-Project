@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) 
+const SIGNALING_SERVER = (typeof window !== 'undefined' && (window.location.hostname.includes('railway.app') || window.location.hostname.includes('onrender.com') || window.location.hostname.includes('localhost'))) 
   ? window.location.origin 
-  : 'https://remote-project.onrender.com';
+  : 'https://remoteg-all-in-one-production.up.railway.app';
 
 const rtcConfig = {
   iceServers: [
