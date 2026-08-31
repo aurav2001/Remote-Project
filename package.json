@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "RemoteG Desktop Host, Web Controller, and Signaling Server",
   "main": "server/index.js",
+  "engines": {
+    "node": ">=20.12.0"
+  },
   "scripts": {
     "build": "cd controller-web && npm install && npm run build && cd ../server && npm install",
     "start": "node server/index.js"

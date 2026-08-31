@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.build]
+cmds = [
+  "cd controller-web && npm install && npm run build",
+  "cd server && npm install"
+]
+
+[start]
+cmd = "node server/index.js"
