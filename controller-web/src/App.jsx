@@ -127,6 +127,8 @@ function App() {
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginShake, setLoginShake] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showLandingView, setShowLandingView] = useState(false);
 
   // Change Password Modal States
   const [showChangePassModal, setShowChangePassModal] = useState(false);
@@ -626,6 +628,8 @@ function App() {
         setAuthToken(data.token);
         setCurrentUser(data.user);
         setIsAuthenticated(true);
+        setShowAuthModal(false);
+        setShowLandingView(false);
         if (rememberMe) {
           localStorage.setItem('unio_auth_token', data.token);
           localStorage.setItem('unio_current_user', JSON.stringify(data.user));
@@ -643,6 +647,8 @@ function App() {
         const mockUser = { username: 'admin', role: 'Administrator' };
         setIsAuthenticated(true);
         setCurrentUser(mockUser);
+        setShowAuthModal(false);
+        setShowLandingView(false);
         localStorage.setItem('unio_auth_token', 'local_demo_token');
         localStorage.setItem('unio_current_user', JSON.stringify(mockUser));
       } else {
@@ -670,6 +676,8 @@ function App() {
     setAuthToken('');
     setCurrentUser(null);
     setIsAuthenticated(false);
+    setShowAuthModal(false);
+    setShowLandingView(true);
   };
 
   const handleChangePassword = async (e) => {
@@ -2100,152 +2108,465 @@ function App() {
     ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.ramPercent || 0), 0) / onlineWithMetrics.length) 
     : 0;
 
-  if (!isAuthenticated) {
+  if ((!isAuthenticated || showLandingView) && status !== 'connected') {
     return (
-      <div className="app-container auth-portal-page">
-        <div className="auth-portal-backdrop-glow"></div>
-        <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`}>
-          
-          {/* Brand & Security Header */}
-          <div className="auth-header">
-            <div className="auth-logo-badge">
-              <img src="/logo.png" alt="UnioTechIT Logo" className="auth-logo-img" />
-              <div className="auth-security-icon-glow">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  <path d="M9 12l2 2 4-4"/>
-                </svg>
-              </div>
-            </div>
-            <h1 className="auth-title">UnioTechIT Console</h1>
-            <p className="auth-subtitle">Enterprise Remote Management & Control Gateway</p>
-          </div>
+      <div className="landing-page-root">
+        {/* Ambient Glows */}
+        <div className="landing-ambient-glow glow-1"></div>
+        <div className="landing-ambient-glow glow-2"></div>
+        <div className="landing-ambient-glow glow-3"></div>
 
-          {/* Error Notification */}
-          {loginError && (
-            <div className="auth-error-banner">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="8" x2="12" y2="12"></line>
-                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-              </svg>
-              <span>{loginError}</span>
-            </div>
-          )}
-
-          {/* Login Form */}
-          <form onSubmit={handleLogin} className="auth-form">
-            <div className="auth-field-group">
-              <label className="auth-label">Administrator ID / Username</label>
-              <div className="auth-input-wrapper">
-                <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                <input
-                  type="text"
-                  className="auth-input"
-                  placeholder="Enter admin username"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
+        {/* Landing Top Navbar */}
+        <header className="landing-navbar">
+          <div className="landing-nav-container">
+            <div className="landing-brand">
+              <img src="/logo.png" alt="UnioTechIT" className="landing-brand-logo" />
+              <div className="landing-brand-badge">Remote 2.0</div>
             </div>
 
-            <div className="auth-field-group">
-              <div className="auth-label-row">
-                <label className="auth-label">Security Master Password</label>
+            <nav className="landing-nav-links">
+              <a href="#features" className="landing-nav-link">Features</a>
+              <a href="#architecture" className="landing-nav-link">Security</a>
+              <a href="#how-it-works" className="landing-nav-link">How It Works</a>
+              <a href="#download" className="landing-nav-link">Download</a>
+            </nav>
+
+            <div className="landing-nav-actions">
+              <div className="landing-status-pill">
+                <span className={`status-dot ${isServerConnected ? 'ready' : ''}`}></span>
+                <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
               </div>
-              <div className="auth-input-wrapper">
-                <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                </svg>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  className="auth-input"
-                  placeholder="Enter master password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  className="auth-eye-btn"
-                  onClick={() => setShowPassword(!showPassword)}
-                  title={showPassword ? "Hide password" : "Show password"}
+
+              {isAuthenticated ? (
+                <button 
+                  className="landing-login-btn glowing-btn"
+                  onClick={() => setShowLandingView(false)}
                 >
-                  {showPassword ? "👁️" : "🔒"}
+                  🖥️ Open Dashboard
                 </button>
-              </div>
-            </div>
-
-            <div className="auth-options-row">
-              <label className="auth-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="auth-checkbox"
-                />
-                <span>Remember Session (7 Days)</span>
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              className="auth-submit-btn"
-              disabled={isLoggingIn}
-            >
-              {isLoggingIn ? (
-                <span className="auth-loading-state">
-                  <span className="auth-spinner"></span>
-                  <span>Authenticating Gateway...</span>
-                </span>
               ) : (
-                <span className="auth-btn-content">
-                  <span>🔐 Authenticate & Enter Console</span>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <button 
+                  className="landing-login-btn glowing-btn"
+                  onClick={() => { setLoginError(''); setShowAuthModal(true); }}
+                >
+                  🔐 Login / Get Started
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* Hero Section */}
+        <section className="landing-hero-section">
+          <div className="landing-hero-container">
+            <div className="landing-hero-badge">
+              <span className="badge-pulse-dot"></span>
+              <span>⚡ Next-Generation Web-Based RMM & Remote Desktop</span>
+            </div>
+
+            <h1 className="landing-hero-title">
+              Enterprise Remote Desktop & Fleet Control,{' '}
+              <span className="hero-gradient-text">Zero Installation for Admins.</span>
+            </h1>
+
+            <p className="landing-hero-subtitle">
+              Control, diagnose, and maintain Windows endpoints in real-time. Native 60 FPS WebRTC streaming, silent remote PowerShell terminal, 64KB chunked file transfers, and isolated multi-tenant company workspaces.
+            </p>
+
+            <div className="landing-hero-cta-group">
+              {isAuthenticated ? (
+                <button 
+                  className="hero-primary-btn"
+                  onClick={() => setShowLandingView(false)}
+                >
+                  <span>🖥️ Launch Central Console</span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <line x1="5" y1="12" x2="19" y2="12"></line>
                     <polyline points="12 5 19 12 12 19"></polyline>
                   </svg>
-                </span>
+                </button>
+              ) : (
+                <button 
+                  className="hero-primary-btn"
+                  onClick={() => { setLoginError(''); setShowAuthModal(true); }}
+                >
+                  <span>🔐 Get Started / Admin Login</span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                  </svg>
+                </button>
               )}
-            </button>
-          </form>
 
-          {/* Quick Credentials Preset Helper */}
-          <div className="auth-quick-hint">
-            <div className="auth-hint-header">
-              <span>⚡ Default Master Credentials:</span>
-              <button
-                type="button"
-                className="auth-autofill-btn"
-                onClick={() => {
-                  setLoginUsername('admin');
-                  setLoginPassword('admin123');
-                  setLoginError('');
-                }}
+              <a href="/UnioTechIT-Setup.exe" className="hero-secondary-btn" download="UnioTechIT-Setup.exe">
+                <span>📥 Download Host Agent (.exe)</span>
+                <span className="btn-sub-tag">v1.0.0</span>
+              </a>
+            </div>
+
+            {/* Hero Visual Preview with Floating Badges */}
+            <div className="landing-hero-preview-wrapper">
+              <div className="hero-preview-glass-frame">
+                <img 
+                  src="/hero_banner.jpg" 
+                  alt="UnioTechIT Remote Desktop Hologram Dashboard" 
+                  className="hero-preview-img"
+                />
+                <div className="hero-preview-overlay-gradient"></div>
+
+                {/* Floating Live Tech Badges */}
+                <div className="hero-floating-badge badge-top-left">
+                  <span className="badge-icon">⚡</span>
+                  <div>
+                    <strong>&lt; 15ms Latency</strong>
+                    <small>Direct WebRTC DataChannel</small>
+                  </div>
+                </div>
+
+                <div className="hero-floating-badge badge-top-right">
+                  <span className="badge-icon">🛡️</span>
+                  <div>
+                    <strong>256-Bit E2EE</strong>
+                    <small>Cryptographic Signed Tokens</small>
+                  </div>
+                </div>
+
+                <div className="hero-floating-badge badge-bottom-left">
+                  <span className="badge-icon">📊</span>
+                  <div>
+                    <strong>Live Fleet Telemetry</strong>
+                    <small>CPU, RAM & Network Graphs</small>
+                  </div>
+                </div>
+
+                <div className="hero-floating-badge badge-bottom-right">
+                  <span className="badge-icon">🏢</span>
+                  <div>
+                    <strong>Multi-Tenant Isolation</strong>
+                    <small>Company Workspaces</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Platform Specs Ribbon */}
+        <section className="landing-stats-ribbon">
+          <div className="stats-container">
+            <div className="stat-card">
+              <div className="stat-value">60 FPS</div>
+              <div className="stat-label">Native Screen Refresh</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">&lt; 15ms</div>
+              <div className="stat-label">Ultra-Low Glass Latency</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">64 KB</div>
+              <div className="stat-label">Chunked P2P File Stream</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">100%</div>
+              <div className="stat-label">Web-Based Controller</div>
+            </div>
+          </div>
+        </section>
+
+        {/* Features Grid Section */}
+        <section id="features" className="landing-features-section">
+          <div className="section-header">
+            <span className="section-kicker">Core Capabilities</span>
+            <h2 className="section-title">Built for Modern IT Admins & Support Teams</h2>
+            <p className="section-subtitle">Everything you need to troubleshoot, control, and maintain remote Windows PCs from a single browser tab.</p>
+          </div>
+
+          <div className="features-grid">
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>🖥️</div>
+              <h3 className="feature-title">Ultra-Low Latency Canvas</h3>
+              <p className="feature-desc">Edge-to-edge desktop streaming with native C# hardware mouse & keyboard simulation, multi-monitor switching, and game-window support.</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(129, 140, 248, 0.15)', color: '#818cf8' }}>💻</div>
+              <h3 className="feature-title">Silent Remote Terminal</h3>
+              <p className="feature-desc">Run PowerShell and CMD commands silently in the background with diagnostic presets (ipconfig, ping, flushdns, tasklist).</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}>📁</div>
+              <h3 className="feature-title">Dual-Mode File Explorer</h3>
+              <p className="feature-desc">Explore remote drive letters, breadcrumb navigation, search filters, 1-click chunked download to Admin PC, and folder upload.</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(251, 146, 60, 0.15)', color: '#fb923c' }}>📊</div>
+              <h3 className="feature-title">Live Health & Telemetry</h3>
+              <p className="feature-desc">Real-time charts for CPU%, RAM%, disk space, upload/download network speed, and battery monitoring with zero overhead.</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}>🏢</div>
+              <h3 className="feature-title">Multi-Tenant Workspaces</h3>
+              <p className="feature-desc">Isolate fleet devices into company workspaces (USPL, Branch-1, Client-A) with real-time online counters and 1-click filtering.</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e' }}>✏️</div>
+              <h3 className="feature-title">Annotations & Remote Reboot</h3>
+              <p className="feature-desc">Draw on the live screen with laser pointers, arrows, and shapes, plus trigger remote reboot with zero-click auto-reconnect.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Architecture & Security Section */}
+        <section id="architecture" className="landing-arch-section">
+          <div className="arch-card-glass">
+            <div className="arch-text-content">
+              <span className="section-kicker">Security Architecture</span>
+              <h2 className="section-title" style={{ textAlign: 'left', margin: '10px 0' }}>Enterprise Security & Cryptographic Access</h2>
+              <p className="section-subtitle" style={{ textAlign: 'left', margin: '0 0 20px 0' }}>
+                Built on WebRTC native peer-to-peer data channels with TLS encryption and stateless HMAC-SHA256 authenticated session tokens.
+              </p>
+              <ul className="arch-checklist">
+                <li>🛡️ <strong>HMAC-SHA256 Token Signing:</strong> Secure admin gateway authentication with tamper protection.</li>
+                <li>🔒 <strong>Direct WebRTC DataChannels:</strong> Peer-to-peer data transport bypassing intermediate third-party relays.</li>
+                <li>⚡ <strong>Auto-Elevated Background Agent:</strong> Windows Task Scheduler auto-start for permanent 24/7 access.</li>
+              </ul>
+            </div>
+            <div className="arch-stats-box">
+              <div className="arch-stat-pill">
+                <span className="pill-dot"></span>
+                <span>24/7 Cloud Signaling Active</span>
+              </div>
+              <div className="arch-node-counter">
+                <strong>{activeHosts.length}</strong>
+                <span>Active Machines Online Now</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* How It Works Section */}
+        <section id="how-it-works" className="landing-how-section">
+          <div className="section-header">
+            <span className="section-kicker">Quick Setup</span>
+            <h2 className="section-title">Get Started in 3 Simple Steps</h2>
+          </div>
+
+          <div className="steps-container">
+            <div className="step-card">
+              <div className="step-num">01</div>
+              <h3 className="step-title">Install Agent on Host PC</h3>
+              <p className="step-desc">Download and run <code>UnioTechIT Setup.exe</code> on the remote Windows computer. It assigns an instant 6-digit node code.</p>
+            </div>
+
+            <div className="step-card">
+              <div className="step-num">02</div>
+              <h3 className="step-title">Assign Company Group</h3>
+              <p className="step-desc">Optionally set a company workspace code (e.g. <code>USPL</code>, <code>BRANCH-1</code>) to organize your fleet.</p>
+            </div>
+
+            <div className="step-card">
+              <div className="step-num">03</div>
+              <h3 className="step-title">1-Click Control from Web</h3>
+              <p className="step-desc">Log into the Web Console from any browser to view live telemetry, access file manager, or start 60 FPS remote control.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Direct Download Section */}
+        <section id="download" className="landing-download-section">
+          <div className="download-box-glass">
+            <h2 className="download-title">Download UnioTechIT Windows Agent</h2>
+            <p className="download-desc">Supported on Windows 10, Windows 11, and Windows Server (64-bit). No license keys required.</p>
+            
+            <div className="download-buttons-group">
+              <a href="/UnioTechIT-Setup.exe" className="download-action-card" download="UnioTechIT-Setup.exe">
+                <div className="dl-icon">⚡</div>
+                <div className="dl-info">
+                  <strong>Standalone Windows Setup (.exe)</strong>
+                  <small>Recommended • 1-Click Installer (Auto Desktop Shortcut)</small>
+                </div>
+                <span className="dl-arrow">⬇️</span>
+              </a>
+
+              <a href="/download" className="download-action-card" download="UnioTechIT-Setup.zip">
+                <div className="dl-icon">📦</div>
+                <div className="dl-info">
+                  <strong>Portable ZIP Package (.zip)</strong>
+                  <small>Portable executable package for USB / network deployment</small>
+                </div>
+                <span className="dl-arrow">⬇️</span>
+              </a>
+            </div>
+          </div>
+        </section>
+
+        {/* Landing Footer */}
+        <footer className="landing-footer">
+          <div className="footer-content">
+            <div className="footer-brand">
+              <img src="/logo.png" alt="UnioTechIT" style={{ height: '32px' }} />
+              <p>UnioTechIT Remote Desktop — Enterprise Remote Support & RMM Platform.</p>
+            </div>
+            <div className="footer-links">
+              <a href="https://github.com/aurav2001/Remote-Project" target="_blank" rel="noreferrer">GitHub Repository</a>
+              <a href="https://remoteg-all-in-one-production-6122.up.railway.app/download">Download Host Agent</a>
+              <button 
+                className="footer-login-link"
+                onClick={() => { setLoginError(''); setShowAuthModal(true); }}
               >
-                1-Click Auto Fill
+                Admin Console Login
               </button>
             </div>
-            <div className="auth-creds-preview">
-              <code>User: <strong>admin</strong></code>
-              <code>Pass: <strong>admin123</strong></code>
-            </div>
           </div>
+          <div className="footer-bottom">
+            <span>© 2026 UnioTechIT Systems. All Rights Reserved.</span>
+          </div>
+        </footer>
 
-          {/* Security Footer Details */}
-          <div className="auth-footer-badge">
-            <div className="auth-security-pill">
-              <span className="auth-dot-pulse"></span>
-              <span>256-Bit TLS & WebRTC E2EE Protected</span>
+        {/* Glassmorphism Login Modal */}
+        {showAuthModal && (
+          <div className="auth-modal-overlay" onClick={() => setShowAuthModal(false)}>
+            <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`} onClick={e => e.stopPropagation()}>
+              <button className="auth-modal-close-btn" onClick={() => setShowAuthModal(false)} title="Close">✕</button>
+              
+              {/* Brand & Security Header */}
+              <div className="auth-header">
+                <div className="auth-logo-badge">
+                  <img src="/logo.png" alt="UnioTechIT Logo" className="auth-logo-img" />
+                  <div className="auth-security-icon-glow">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                      <path d="M9 12l2 2 4-4"/>
+                    </svg>
+                  </div>
+                </div>
+                <h1 className="auth-title">Admin Console Login</h1>
+                <p className="auth-subtitle">Sign in to manage active remote devices & sessions</p>
+              </div>
+
+              {/* Error Notification */}
+              {loginError && (
+                <div className="auth-error-banner">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {/* Login Form */}
+              <form onSubmit={handleLogin} className="auth-form">
+                <div className="auth-field-group">
+                  <label className="auth-label">Administrator ID / Username</label>
+                  <div className="auth-input-wrapper">
+                    <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <input
+                      type="text"
+                      className="auth-input"
+                      placeholder="Enter admin username"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="auth-field-group">
+                  <div className="auth-label-row">
+                    <label className="auth-label">Security Master Password</label>
+                  </div>
+                  <div className="auth-input-wrapper">
+                    <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="auth-input"
+                      placeholder="Enter master password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="auth-eye-btn"
+                      onClick={() => setShowPassword(!showPassword)}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? "👁️" : "🔒"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="auth-options-row">
+                  <label className="auth-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="auth-checkbox"
+                    />
+                    <span>Remember Session (7 Days)</span>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  className="auth-submit-btn"
+                  disabled={isLoggingIn}
+                >
+                  {isLoggingIn ? (
+                    <span className="auth-loading-state">
+                      <span className="auth-spinner"></span>
+                      <span>Authenticating Gateway...</span>
+                    </span>
+                  ) : (
+                    <span className="auth-btn-content">
+                      <span>🔐 Authenticate & Enter Console</span>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                      </svg>
+                    </span>
+                  )}
+                </button>
+              </form>
+
+              {/* Quick Credentials Preset Helper */}
+              <div className="auth-quick-hint">
+                <div className="auth-hint-header">
+                  <span>⚡ Default Master Credentials:</span>
+                  <button
+                    type="button"
+                    className="auth-autofill-btn"
+                    onClick={() => {
+                      setLoginUsername('admin');
+                      setLoginPassword('admin123');
+                      setLoginError('');
+                    }}
+                  >
+                    1-Click Auto Fill
+                  </button>
+                </div>
+                <div className="auth-creds-preview">
+                  <code>User: <strong>admin</strong></code>
+                  <code>Pass: <strong>admin123</strong></code>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -2296,6 +2617,16 @@ function App() {
 
               {/* Logged-in Admin Badge & User Actions */}
               <div className="admin-nav-profile-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  className="tab-btn"
+                  style={{ padding: '5px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => setShowLandingView(true)}
+                  title="View Public Landing Website"
+                >
+                  <span>🌐</span>
+                  <span>Landing Page</span>
+                </button>
+
                 <button
                   className="admin-badge-pill-btn"
                   onClick={() => {
