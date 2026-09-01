@@ -403,6 +403,7 @@ function initSocket() {
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
       console.log('[Host]: Controller disconnected. Resetting peer connection.');
+      stopHybridFrameStreaming();
       if (peerConnection) {
         try { peerConnection.close(); } catch(e) {}
         peerConnection = null;
@@ -410,6 +411,11 @@ function initSocket() {
       activeDataChannel = null;
       updateStatus('connecting', 'Waiting for Controller...');
     }
+  });
+
+  socket.on('request-frame-stream', () => {
+    console.log('[Host]: Controller requested hybrid frame streaming fallback.');
+    startHybridFrameStreaming();
   });
 
   // Keep-alive heartbeat: Re-announce host presence every 15s to keep room registered on Render
@@ -663,7 +669,6 @@ async function startSharing(sourceId) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
       console.log('[Host]: Screen capture stream already active:', activeTrack.id);
-      startHybridFrameStreaming();
       return;
     }
   }
@@ -856,6 +861,7 @@ async function loadSources() {
 
 function onStreamConnected() {
   updateStatus('connected', 'Connected & Streaming');
+  stopHybridFrameStreaming(); // WebRTC is active, stop software JPEG encoder to free CPU
   sendScreensListToController();
   if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
     console.log('[Host]: Triggering auto-minimize on stream connection...');
