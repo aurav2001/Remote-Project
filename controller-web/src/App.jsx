@@ -755,7 +755,10 @@ function App() {
 
     const commitHosts = (data) => {
       if (isMounted && Array.isArray(data)) {
-        setActiveHosts(data);
+        setActiveHosts(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+          return data;
+        });
         try {
           localStorage.setItem('unio_cached_active_hosts', JSON.stringify(data));
         } catch (e) {}
@@ -815,7 +818,6 @@ function App() {
       console.log('[Controller]: Global dashboard socket connected');
       if (isMounted) setIsServerConnected(true);
       globalSocket.emit('get-active-hosts');
-      fetchHostsRest();
     });
 
     globalSocket.on('disconnect', () => {
@@ -826,14 +828,12 @@ function App() {
       commitHosts(hosts || []);
     });
 
-    // 3. Fast polling interval (2.5s) to guarantee continuous live sync & quick cold-start recovery
+    // 3. Fallback polling only if WebSocket disconnects (no redundant network jitter)
     const pollInterval = setInterval(() => {
-      if (globalSocket.connected) {
-        globalSocket.emit('get-active-hosts');
-      } else {
+      if (!globalSocket.connected) {
         fetchHostsRest();
       }
-    }, 2500);
+    }, 6000);
 
     return () => {
       isMounted = false;
@@ -2962,14 +2962,14 @@ function App() {
 
                           <div className="metric-bar-group">
                             <div className="metric-bar-header">
-                              <span>RAM ({device.liveMetrics.ramUsedGB} / {device.liveMetrics.ramTotalGB} GB)</span>
-                              <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent}%</span>
+                              <span>RAM ({device.liveMetrics.ramUsedGb || device.liveMetrics.ramUsedGB || 0} / {device.liveMetrics.ramTotalGb || device.liveMetrics.ramTotalGB || 0} GB)</span>
+                              <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent || 0}%</span>
                             </div>
                             <div className="metric-progress-track">
                               <div 
                                 className="metric-progress-fill" 
                                 style={{ 
-                                  width: `${device.liveMetrics.ramPercent}%`,
+                                  width: `${device.liveMetrics.ramPercent || 0}%`,
                                   background: 'linear-gradient(90deg, #818cf8, #c084fc)'
                                 }}
                               ></div>
@@ -2977,8 +2977,8 @@ function App() {
                           </div>
 
                           <div className="metric-bar-header" style={{ marginTop: '2px' }}>
-                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGB} GB</strong></span>
-                            <span>Speed: {device.liveMetrics.downloadMbps} Mbps</span>
+                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGb || device.liveMetrics.diskFreeGB || 'N/A'} GB</strong></span>
+                            <span>Speed: {device.liveMetrics.downloadSpeed || (device.liveMetrics.downloadMbps ? `${device.liveMetrics.downloadMbps} Mbps` : '0 KB/s')}</span>
                           </div>
                         </div>
                       ) : (

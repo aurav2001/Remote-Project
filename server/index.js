@@ -476,12 +476,17 @@ io.on('connection', (socket) => {
 
   // Relay System Metrics from host to controller (O(1) Constant Time Complexity)
   socket.on('system-metrics', ({ roomId, metrics }) => {
-    if (roomId && rooms.has(roomId)) {
-      const room = rooms.get(roomId);
-      room.liveMetrics = metrics;
+    const cleanRoomId = String(roomId || socket.roomId || '').trim();
+    if (cleanRoomId && rooms.has(cleanRoomId)) {
+      const room = rooms.get(cleanRoomId);
+      const lockedIp = persistentHostPublicIps.get(cleanRoomId);
+      if (lockedIp && metrics) {
+        metrics.publicIp = lockedIp;
+      }
+      room.liveMetrics = { ...(room.liveMetrics || {}), ...(metrics || {}) };
     }
     // O(1) targeted relay to the controller in this room (bypasses global broadcast CPU overhead)
-    socket.to(roomId).emit('system-metrics', { metrics });
+    socket.to(cleanRoomId).emit('system-metrics', { metrics });
   });
 
   // Relay Terminal Command (controller -> host)
