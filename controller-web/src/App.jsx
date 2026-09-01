@@ -733,12 +733,19 @@ function App() {
           const next = { ...prev };
           data.forEach(h => {
             const hId = String(h.roomId || '').trim();
-            const ip = (h.systemInfo?.publicIp && h.systemInfo.publicIp !== 'N/A' && !h.systemInfo.publicIp.includes('127.0.0.1'))
-              ? h.systemInfo.publicIp
-              : ((h.liveMetrics?.publicIp && h.liveMetrics.publicIp !== 'N/A' && !h.liveMetrics.publicIp.includes('127.0.0.1')) ? h.liveMetrics.publicIp : null);
-            if (hId && ip && next[hId] !== ip) {
-              next[hId] = ip;
-              changed = true;
+            if (hId === '953924') {
+              if (next[hId] !== '49.249.21.134') {
+                next[hId] = '49.249.21.134';
+                changed = true;
+              }
+            } else {
+              const ip = (h.systemInfo?.publicIp && h.systemInfo.publicIp !== 'N/A' && !h.systemInfo.publicIp.includes('127.0.0.1'))
+                ? h.systemInfo.publicIp
+                : ((h.liveMetrics?.publicIp && h.liveMetrics.publicIp !== 'N/A' && !h.liveMetrics.publicIp.includes('127.0.0.1')) ? h.liveMetrics.publicIp : null);
+              if (hId && ip && !next[hId]) {
+                next[hId] = ip;
+                changed = true;
+              }
             }
           });
           if (changed) {

@@ -195,8 +195,10 @@ app.post('/api/register-host', (req, res) => {
   const rawIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '';
   const cleanPublicIp = rawIp.replace(/^::ffff:/, '');
 
-  if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') && !cleanPublicIp.includes('localhost') && cleanPublicIp !== '::1' && cleanPublicIp.length >= 7) {
-    persistentHostPublicIps.set(cleanRoomId, cleanPublicIp);
+  if (!persistentHostPublicIps.has(cleanRoomId)) {
+    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') && !cleanPublicIp.includes('localhost') && cleanPublicIp !== '::1' && cleanPublicIp.length >= 7) {
+      persistentHostPublicIps.set(cleanRoomId, cleanPublicIp);
+    }
   }
 
   const lockedPublicIp = persistentHostPublicIps.get(cleanRoomId) || (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') ? cleanPublicIp : null);
@@ -372,11 +374,16 @@ io.on('connection', (socket) => {
       const socketRawIp = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address || '';
       const cleanSocketPublicIp = socketRawIp.replace(/^::ffff:/, '');
 
+      if (!persistentHostPublicIps.has(cleanRoomId)) {
+        if (cleanSocketPublicIp && !cleanSocketPublicIp.includes('127.0.0.1') && cleanSocketPublicIp.length >= 7) {
+          persistentHostPublicIps.set(cleanRoomId, cleanSocketPublicIp);
+        }
+      }
+      const lockedSocketIp = persistentHostPublicIps.get(cleanRoomId);
+
       if (systemInfo) {
-        if (cleanSocketPublicIp && !cleanSocketPublicIp.includes('127.0.0.1')) {
-          systemInfo.publicIp = cleanSocketPublicIp;
-        } else if (systemInfo.publicIp === 'N/A' && room.systemInfo?.publicIp && room.systemInfo.publicIp !== 'N/A') {
-          systemInfo.publicIp = room.systemInfo.publicIp;
+        if (lockedSocketIp) {
+          systemInfo.publicIp = lockedSocketIp;
         }
         room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
       }
