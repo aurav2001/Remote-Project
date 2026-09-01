@@ -1133,10 +1133,28 @@ ipcMain.handle('set-company-group', (event, newGroup) => {
   return hostCompanyGroup;
 });
 
+// Helper to get real local LAN IPv4 address (e.g. 192.168.x.x)
+function getLocalLanIp() {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const devName in interfaces) {
+      const iface = interfaces[devName];
+      for (let i = 0; i < iface.length; i++) {
+        const alias = iface[i];
+        if (alias.family === 'IPv4' && !alias.internal) {
+          return alias.address;
+        }
+      }
+    }
+  } catch (e) {}
+  return '127.0.0.1';
+}
+
 // Send direct HTTP POST Heartbeat to Signaling Server (Works on any PC, 0 dependencies)
 function sendHttpHeartbeat() {
   if (!hostRoomId) return;
   const https = require('https');
+  const lanIp = getLocalLanIp();
   const payload = JSON.stringify({
     roomId: hostRoomId,
     companyGroup: hostCompanyGroup,
@@ -1144,7 +1162,7 @@ function sendHttpHeartbeat() {
       hostname: os.hostname(),
       companyGroup: hostCompanyGroup,
       platform: `${os.type()} ${os.arch()}`,
-      ip: '127.0.0.1'
+      ip: lanIp
     }
   });
 

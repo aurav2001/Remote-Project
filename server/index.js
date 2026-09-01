@@ -191,8 +191,24 @@ app.post('/api/register-host', (req, res) => {
   }
   const room = rooms.get(cleanRoomId);
   room.lastSeen = Date.now();
-  if (systemInfo) room.systemInfo = systemInfo;
-  if (liveMetrics) room.liveMetrics = liveMetrics;
+  const rawIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '';
+  const cleanPublicIp = rawIp.replace(/^::ffff:/, '');
+
+  if (systemInfo) {
+    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1')) {
+      systemInfo.publicIp = cleanPublicIp;
+    }
+    if (systemInfo.ip === '127.0.0.1' && room.systemInfo?.ip && room.systemInfo.ip !== '127.0.0.1') {
+      systemInfo.ip = room.systemInfo.ip;
+    }
+    room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
+  }
+  if (liveMetrics) {
+    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1')) {
+      liveMetrics.publicIp = cleanPublicIp;
+    }
+    room.liveMetrics = { ...(room.liveMetrics || {}), ...liveMetrics };
+  }
 
   if (persistentCompanyGroups.has(cleanRoomId)) {
     room.companyGroup = persistentCompanyGroups.get(cleanRoomId);
