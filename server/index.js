@@ -175,8 +175,9 @@ app.get('/api/hosts', (req, res) => {
   res.json(list);
 });
 
-// Permanent In-Memory Storage for Assigned Company Groups
+// Permanent In-Memory Storage for Assigned Company Groups & Public WAN IPs
 const persistentCompanyGroups = new Map();
+const persistentHostPublicIps = new Map();
 
 // Host Agent Registration & Telemetry Heartbeat (Works with HTTP POST from Electron / C#)
 app.post('/api/register-host', (req, res) => {
@@ -194,9 +195,15 @@ app.post('/api/register-host', (req, res) => {
   const rawIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '';
   const cleanPublicIp = rawIp.replace(/^::ffff:/, '');
 
+  if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') && !cleanPublicIp.includes('localhost') && cleanPublicIp !== '::1' && cleanPublicIp.length >= 7) {
+    persistentHostPublicIps.set(cleanRoomId, cleanPublicIp);
+  }
+
+  const lockedPublicIp = persistentHostPublicIps.get(cleanRoomId) || (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') ? cleanPublicIp : null);
+
   if (systemInfo) {
-    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1')) {
-      systemInfo.publicIp = cleanPublicIp;
+    if (lockedPublicIp) {
+      systemInfo.publicIp = lockedPublicIp;
     }
     if (systemInfo.ip === '127.0.0.1' && room.systemInfo?.ip && room.systemInfo.ip !== '127.0.0.1') {
       systemInfo.ip = room.systemInfo.ip;
@@ -204,8 +211,8 @@ app.post('/api/register-host', (req, res) => {
     room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
   }
   if (liveMetrics) {
-    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1')) {
-      liveMetrics.publicIp = cleanPublicIp;
+    if (lockedPublicIp) {
+      liveMetrics.publicIp = lockedPublicIp;
     }
     room.liveMetrics = { ...(room.liveMetrics || {}), ...liveMetrics };
   }
@@ -292,11 +299,22 @@ function getActiveHostsList() {
     const isAlive = (room.host && room.host !== null) || (room.lastSeen && (now - room.lastSeen < 25000));
     if (isAlive) {
       const company = room.companyGroup || room.systemInfo?.companyGroup || 'USPL';
+      const lockedPublicIp = persistentHostPublicIps.get(roomId) || room.systemInfo?.publicIp || room.liveMetrics?.publicIp || null;
+
+      const cleanSysInfo = room.systemInfo ? { ...room.systemInfo } : null;
+      if (cleanSysInfo && lockedPublicIp && lockedPublicIp !== 'N/A') {
+        cleanSysInfo.publicIp = lockedPublicIp;
+      }
+      const cleanMetrics = room.liveMetrics ? { ...room.liveMetrics } : null;
+      if (cleanMetrics && lockedPublicIp && lockedPublicIp !== 'N/A') {
+        cleanMetrics.publicIp = lockedPublicIp;
+      }
+
       list.push({
         roomId,
         companyGroup: company,
-        systemInfo: room.systemInfo || null,
-        liveMetrics: room.liveMetrics || null,
+        systemInfo: cleanSysInfo,
+        liveMetrics: cleanMetrics,
         isOnline: true,
         lastSeen: room.lastSeen ? new Date(room.lastSeen).toISOString() : new Date().toISOString()
       });

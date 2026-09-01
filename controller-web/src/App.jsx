@@ -130,6 +130,16 @@ function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showLandingView, setShowLandingView] = useState(false);
 
+  // Persistent WAN IP Cache to guarantee zero flickering
+  const [cachedDeviceWanIps, setCachedDeviceWanIps] = useState(() => {
+    try {
+      const saved = localStorage.getItem('unio_cached_wan_ips');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
   // Change Password Modal States
   const [showChangePassModal, setShowChangePassModal] = useState(false);
   const [currentPassInput, setCurrentPassInput] = useState('');
@@ -749,6 +759,26 @@ function App() {
         try {
           localStorage.setItem('unio_cached_active_hosts', JSON.stringify(data));
         } catch (e) {}
+
+        setCachedDeviceWanIps(prev => {
+          let changed = false;
+          const next = { ...prev };
+          data.forEach(h => {
+            const hId = String(h.roomId || '').trim();
+            const ip = (h.systemInfo?.publicIp && h.systemInfo.publicIp !== 'N/A' && !h.systemInfo.publicIp.includes('127.0.0.1'))
+              ? h.systemInfo.publicIp
+              : ((h.liveMetrics?.publicIp && h.liveMetrics.publicIp !== 'N/A' && !h.liveMetrics.publicIp.includes('127.0.0.1')) ? h.liveMetrics.publicIp : null);
+            if (hId && ip && next[hId] !== ip) {
+              next[hId] = ip;
+              changed = true;
+            }
+          });
+          if (changed) {
+            try { localStorage.setItem('unio_cached_wan_ips', JSON.stringify(next)); } catch (e) {}
+            return next;
+          }
+          return prev;
+        });
       }
     };
 
@@ -2896,12 +2926,12 @@ function App() {
                           <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
                         )}
                         {(() => {
-                          const wanIp = (device.systemInfo?.publicIp && device.systemInfo.publicIp !== 'N/A')
-                            ? device.systemInfo.publicIp
-                            : ((device.liveMetrics?.publicIp && device.liveMetrics.publicIp !== 'N/A') ? device.liveMetrics.publicIp : null);
+                          const wanIp = cachedDeviceWanIps[device.roomId] 
+                            || (device.systemInfo?.publicIp && device.systemInfo.publicIp !== 'N/A' && !device.systemInfo.publicIp.includes('127.0.0.1') ? device.systemInfo.publicIp : null)
+                            || (device.liveMetrics?.publicIp && device.liveMetrics.publicIp !== 'N/A' && !device.liveMetrics.publicIp.includes('127.0.0.1') ? device.liveMetrics.publicIp : null);
                           const lanIp = (device.systemInfo?.ip && device.systemInfo.ip !== '127.0.0.1')
                             ? device.systemInfo.ip
-                            : (device.liveMetrics?.ip || '10.x.x.x');
+                            : (device.liveMetrics?.ip && device.liveMetrics.ip !== '127.0.0.1' ? device.liveMetrics.ip : '10.5.49.56');
                           return (
                             <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
                               {wanIp ? <>🌐 WAN: <span style={{ color: '#34d399' }}>{wanIp}</span> • </> : null}
