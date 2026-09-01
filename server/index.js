@@ -186,9 +186,19 @@ app.post('/api/register-host', (req, res) => {
     rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: 'USPL', lastSeen: Date.now() });
   }
   const room = rooms.get(cleanRoomId);
-  room.lastSeen = Date.now();
-  if (systemInfo) room.systemInfo = systemInfo;
+  const rawIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '';
+  const cleanPublicIp = rawIp.replace(/^::ffff:/, '');
+
+  if (systemInfo) {
+    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') && cleanPublicIp.length >= 7) {
+      systemInfo.publicIp = cleanPublicIp;
+    }
+    room.systemInfo = systemInfo;
+  }
   if (liveMetrics) room.liveMetrics = liveMetrics;
+  if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1')) {
+    room.publicIp = cleanPublicIp;
+  }
   if (companyGroup) {
     room.companyGroup = String(companyGroup).trim().toUpperCase();
   } else if (systemInfo && systemInfo.companyGroup) {
@@ -318,7 +328,13 @@ io.on('connection', (socket) => {
 
     if (role === 'host') {
       room.host = socket.id;
+      const socketRawIp = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address || '';
+      const cleanSocketPublicIp = socketRawIp.replace(/^::ffff:/, '');
+
       if (systemInfo) {
+        if (cleanSocketPublicIp && !cleanSocketPublicIp.includes('127.0.0.1')) {
+          systemInfo.publicIp = cleanSocketPublicIp;
+        }
         room.systemInfo = systemInfo;
       }
       console.log(`Host registered for room ${cleanRoomId} (Group: ${room.companyGroup}) with info:`, room.systemInfo);
