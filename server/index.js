@@ -176,8 +176,8 @@ app.get('/api/hosts', (req, res) => {
 });
 
 // Permanent In-Memory Storage for Assigned Company Groups & Public WAN IPs
-const persistentCompanyGroups = new Map();
-const persistentHostPublicIps = new Map();
+const persistentCompanyGroups = new Map([['953924', 'G-TECH']]);
+const persistentHostPublicIps = new Map([['953924', '49.249.21.134']]);
 
 // Host Agent Registration & Telemetry Heartbeat (Works with HTTP POST from Electron / C#)
 app.post('/api/register-host', (req, res) => {
