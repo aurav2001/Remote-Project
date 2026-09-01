@@ -2895,11 +2895,20 @@ function App() {
                         {(device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser) && (
                           <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
                         )}
-                        {(device.systemInfo?.publicIp || device.liveMetrics?.publicIp) && (
-                          <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
-                            🌐 WAN: <span style={{ color: '#34d399' }}>{device.systemInfo?.publicIp || device.liveMetrics?.publicIp}</span> • LAN: {device.systemInfo?.ip || device.liveMetrics?.ip || '127.0.0.1'}
-                          </div>
-                        )}
+                        {(() => {
+                          const wanIp = (device.systemInfo?.publicIp && device.systemInfo.publicIp !== 'N/A')
+                            ? device.systemInfo.publicIp
+                            : ((device.liveMetrics?.publicIp && device.liveMetrics.publicIp !== 'N/A') ? device.liveMetrics.publicIp : null);
+                          const lanIp = (device.systemInfo?.ip && device.systemInfo.ip !== '127.0.0.1')
+                            ? device.systemInfo.ip
+                            : (device.liveMetrics?.ip || '10.x.x.x');
+                          return (
+                            <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
+                              {wanIp ? <>🌐 WAN: <span style={{ color: '#34d399' }}>{wanIp}</span> • </> : null}
+                              <span>LAN: {lanIp}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Live Telemetry Gauges */}

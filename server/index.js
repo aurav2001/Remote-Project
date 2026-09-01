@@ -351,8 +351,16 @@ io.on('connection', (socket) => {
 
     if (role === 'host') {
       room.host = socket.id;
+      const socketRawIp = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address || '';
+      const cleanSocketPublicIp = socketRawIp.replace(/^::ffff:/, '');
+
       if (systemInfo) {
-        room.systemInfo = systemInfo;
+        if (cleanSocketPublicIp && !cleanSocketPublicIp.includes('127.0.0.1')) {
+          systemInfo.publicIp = cleanSocketPublicIp;
+        } else if (systemInfo.publicIp === 'N/A' && room.systemInfo?.publicIp && room.systemInfo.publicIp !== 'N/A') {
+          systemInfo.publicIp = room.systemInfo.publicIp;
+        }
+        room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
       }
       console.log(`Host registered for room ${cleanRoomId} (Group: ${room.companyGroup}) with info:`, room.systemInfo);
       // If host's local group is different from persistent server group, inform the host
