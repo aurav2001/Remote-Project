@@ -24,9 +24,12 @@
 - **Framework:** React 19 + Vite 8 + Socket.IO-Client + WebRTC Native API.
 - **Design:** Modern Glassmorphism, tailored dark theme, dynamic SVG micro-animations, responsive layout.
 - **Key Features:**
-  1. **Central RMM Portal & Dashboard Authentication:**
-     - **Cyber-Glassmorphism Login Gateway:** Secure HMAC-SHA256 session token authentication (`admin` / `admin123`).
-     - **Navbar User Profile:** Admin identity badge (`🛡️ admin [Admin]`), Change Password modal, and instant secure Logout.
+  1. **Single-Page Landing Website & Popup Admin Gateway:**
+     - **High-Impact Cyber Landing Page:** Interactive 3D holographic hero banner with floating live tech badges (`< 15ms Latency`, `256-Bit E2EE`, `Fleet Telemetry`, `Multi-Tenant Isolation`).
+     - **Top Navigation Bar:** Live cloud presence indicator (`🟢 Cloud Online`), feature jump links, and glowing `🔐 Login / Get Started` button.
+     - **Core Showcase Sections:** Platform specs ribbon (60 FPS, < 15ms), 6 feature cards, 3-step setup guide, direct `.exe`/`.zip` download cards, and footer.
+     - **Glassmorphism Login Modal:** Pops up on click with 1-click credential auto-fill (`admin` / `admin123`), show/hide password, and HMAC-SHA256 session management.
+     - **Navbar Admin Profile:** `🛡️ admin [Admin]` badge, Change Password modal, `🌐 Landing Page` view switcher, and instant Logout.
      - **Device Management:** Grid/Card view of all registered online devices with live CPU/RAM/Battery metrics, public/private IPs, OS version, and 1-Click Connect.
   2. **Ultra-Low Latency Video Canvas:** Edge-to-edge full desktop streaming (`object-fit: fill`), mouse click/scroll/drag/drop, and keyboard event dispatch.
   3. **Left Floating Dock:** Collapsible toolbar with `📊 Health`, `💻 Terminal`, `📁 Files`, `✏️ Annotate`, `🖥️ Displays`, `⚡ Actions`, and `Terminate Session`.
