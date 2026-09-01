@@ -293,32 +293,9 @@ function App() {
     if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit('file-explorer-event', { roomId: room, payload: req });
     }
-
-    // Fallback for older host clients: if host doesn't respond in 1200ms, use silent PowerShell terminal query
-    if (activeFallbackTimerRef.current) clearTimeout(activeFallbackTimerRef.current);
-    activeFallbackTimerRef.current = setTimeout(() => {
-      const escapedPath = targetPath ? targetPath.replace(/"/g, '\\"') : '';
-      const psCmd = `$p = "${escapedPath}"; if (-not $p) { $p = [Environment]::GetFolderPath('Desktop') }; if (-not (Test-Path -LiteralPath $p)) { $p = 'C:\\' }; $entries = Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, @{Name='IsDirectory';Expression={$_.PSIsContainer}}; $parent = Split-Path -Path $p -Parent; $drives = [System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }; $desk = [Environment]::GetFolderPath('Desktop'); $down = [IO.Path]::Combine($env:USERPROFILE, 'Downloads'); $docs = [Environment]::GetFolderPath('MyDocuments'); $out = @{ currentPath = $p; parentPath = $parent; drives = $drives; desktop = $desk; downloads = $down; documents = $docs; items = $entries }; $json = $out | ConvertTo-Json -Compress -Depth 3; Write-Output "---FE_LIST_JSON_START---$json---FE_LIST_JSON_END---"`;
-
-      const cmdPayload = {
-        type: 'terminal-command',
-        id: 'fe_list_' + Date.now(),
-        command: psCmd,
-        shellType: 'powershell',
-        isSilent: true
-      };
-      sendControlData(cmdPayload);
-      if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('terminal-command', cmdPayload);
-      }
-    }, 1200);
   };
 
   const handleReceiveFileList = (data) => {
-    if (activeFallbackTimerRef.current) {
-      clearTimeout(activeFallbackTimerRef.current);
-      activeFallbackTimerRef.current = null;
-    }
     setIsLoadingRemoteFiles(false);
     if (data.success) {
       setRemoteCurrentPath(data.currentPath || '');
@@ -367,23 +344,10 @@ function App() {
       fileName: fileName || filePath.split(/[\/\\]/).pop()
     };
     sendControlData(req);
-
-    // Fallback timer for download on older host clients
-    setTimeout(() => {
-      const stateObj = downloadChunksMapRef.current[transferId];
-      if (stateObj && stateObj.receivedBytes === 0) {
-        const cleanPath = filePath.replace(/"/g, '\\"');
-        const cleanName = (fileName || filePath.split(/[\/\\]/).pop()).replace(/"/g, '\\"');
-        const psCmd = `$p = "${cleanPath}"; if (Test-Path -LiteralPath $p) { $bytes = [System.IO.File]::ReadAllBytes($p); $b64 = [Convert]::ToBase64String($bytes); $meta = @{ transferId = '${transferId}'; fileName = '${cleanName}'; totalSize = $bytes.Length } | ConvertTo-Json -Compress; Write-Output ("---FE_DL_START---" + $meta + [Environment]::NewLine + $b64 + "---FE_DL_END---") } else { Write-Output "File not found" }`;
-        sendControlData({
-          type: 'terminal-command',
-          id: 'fe_dl_' + Date.now(),
-          command: psCmd,
-          shellType: 'powershell',
-          isSilent: true
-        });
-      }
-    }, 1500);
+    if (socketRef.current && socketRef.current.connected) {
+      const room = activeRoomIdRef.current || targetRoomId.trim();
+      socketRef.current.emit('file-explorer-event', { roomId: room, payload: req });
+    }
   };
 
   const handleProcessTerminalOutput = (data) => {
