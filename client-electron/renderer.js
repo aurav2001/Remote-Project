@@ -1044,6 +1044,9 @@ async function handleControllerJoined() {
     updateStatus('connecting', 'Establishing WebRTC connection...');
     pendingIceCandidates = [];
 
+    // Start instant fallback streaming so remote screen appears immediately without spinner delay
+    startHybridFrameStreaming();
+
     const pcCreated = await createPeerConnection();
     if (pcCreated === false) {
       console.error('[Host]: PeerConnection creation aborted because no active video tracks exist!');
