@@ -761,20 +761,105 @@ let lastSystemStats = {
   isCharging: false
 };
 
-// Zero-overhead pure native Node.js system telemetry (0% CPU, 0 spawned processes)
-function updateSystemStatsNative() {
-  try {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    lastSystemStats.ramTotalGb = (totalMem / (1024 * 1024 * 1024)).toFixed(1);
-    lastSystemStats.ramUsedGb = (usedMem / (1024 * 1024 * 1024)).toFixed(1);
-    lastSystemStats.ramPercent = Math.round((usedMem / totalMem) * 100);
-  } catch (e) {}
+// Asynchronously fetch accurate Task Manager RAM, Disk C: & Battery status via PowerShell
+function updateSystemStats() {
+  const psScript = `
+$os = Get-CimInstance Win32_OperatingSystem
+$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+$batt = Get-CimInstance Win32_Battery
+
+$totalRamMb = [math]::Round($os.TotalVisibleMemorySize / 1024, 0)
+$freeRamMb = [math]::Round($os.FreePhysicalMemory / 1024, 0)
+$usedRamMb = $totalRamMb - $freeRamMb
+
+$diskTotalGb = if ($disk) { [math]::Round($disk.Size / 1073741824, 1) } else { 0 }
+$diskFreeGb = if ($disk) { [math]::Round($disk.FreeSpace / 1073741824, 1) } else { 0 }
+
+$batteryPct = if ($batt) { $batt.EstimatedChargeRemaining } else { -1 }
+$batteryStatus = if ($batt) { $batt.BatteryStatus } else { -1 }
+
+"$totalRamMb|$freeRamMb|$usedRamMb|$diskTotalGb|$diskFreeGb|$batteryPct|$batteryStatus"
+`.trim();
+
+  const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
+  exec(`powershell -NoProfile -EncodedCommand ${b64}`, { windowsHide: true }, (err, stdout) => {
+    if (!err && stdout) {
+      const parts = stdout.trim().split('|');
+      if (parts.length >= 3) {
+        const totalMb = parseFloat(parts[0]);
+        const freeMb = parseFloat(parts[1]);
+        const usedMb = parseFloat(parts[2]);
+        if (totalMb > 0) {
+          lastSystemStats.ramTotalGb = (totalMb / 1024).toFixed(1);
+          lastSystemStats.ramUsedGb = (usedMb / 1024).toFixed(1);
+          lastSystemStats.ramPercent = Math.round((usedMb / totalMb) * 100);
+        }
+      }
+      if (parts.length >= 5) {
+        const dTot = parseFloat(parts[3]);
+        const dFree = parseFloat(parts[4]);
+        if (dTot > 0) {
+          lastSystemStats.diskTotalGb = dTot.toFixed(1);
+          lastSystemStats.diskFreeGb = dFree.toFixed(1);
+          const dUsed = dTot - dFree;
+          lastSystemStats.diskPercent = Math.round((dUsed / dTot) * 100);
+        }
+      }
+      if (parts.length >= 7) {
+        const battVal = parseInt(parts[5], 10);
+        const battStatus = parseInt(parts[6], 10);
+        if (!isNaN(battVal) && battVal >= 0) {
+          lastSystemStats.batteryPercent = battVal;
+          lastSystemStats.isCharging = (battStatus === 2 || battStatus === 6 || battStatus === 7 || battStatus === 8);
+        }
+      }
+    }
+  });
 }
 
-updateSystemStatsNative();
-setInterval(updateSystemStatsNative, 3000);
+// Fetch network bytes via netstat -e
+function updateNetworkSpeed() {
+  exec('netstat -e', { windowsHide: true }, (err, stdout) => {
+    if (!err && stdout) {
+      const lines = stdout.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('Bytes')) {
+          const nums = trimmed.match(/\d+/g);
+          if (nums && nums.length >= 2) {
+            const rxBytes = parseInt(nums[0], 10);
+            const txBytes = parseInt(nums[1], 10);
+            const now = Date.now();
+
+            if (lastNetBytes) {
+              const dt = (now - lastNetTime) / 1000;
+              if (dt > 0) {
+                const rxDiff = Math.max(0, rxBytes - lastNetBytes.rx);
+                const txDiff = Math.max(0, txBytes - lastNetBytes.tx);
+
+                const rxKb = rxDiff / 1024 / dt;
+                const txKb = txDiff / 1024 / dt;
+
+                lastNetSpeed.download = rxKb > 1024 ? `${(rxKb / 1024).toFixed(1)} MB/s` : `${Math.round(rxKb)} KB/s`;
+                lastNetSpeed.upload = txKb > 1024 ? `${(txKb / 1024).toFixed(1)} MB/s` : `${Math.round(txKb)} KB/s`;
+              }
+            }
+
+            lastNetBytes = { rx: rxBytes, tx: txBytes };
+            lastNetTime = now;
+            break;
+          }
+        }
+      }
+    }
+  });
+}
+
+// Initialize system metrics collection
+updateSystemStats();
+updateNetworkSpeed();
+setInterval(updateNetworkSpeed, 2000);
+setInterval(updateSystemStats, 10000);
 
 function formatUptime(seconds) {
   const hrs = Math.floor(seconds / 3600);
@@ -869,7 +954,7 @@ function collectLiveMetrics() {
   };
 }
 
-// Push live metrics to renderer every 4 seconds (ultra-low bandwidth)
+// Push live metrics to renderer every 2 seconds
 setInterval(() => {
   const metrics = collectLiveMetrics();
   const allWindows = BrowserWindow.getAllWindows();
@@ -878,7 +963,7 @@ setInterval(() => {
       win.webContents.send('system-metrics-update', metrics);
     }
   }
-}, 4000);
+}, 2000);
 
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
@@ -1048,28 +1133,10 @@ ipcMain.handle('set-company-group', (event, newGroup) => {
   return hostCompanyGroup;
 });
 
-// Helper to get real local LAN IPv4 address (e.g. 192.168.x.x)
-function getLocalLanIp() {
-  try {
-    const interfaces = os.networkInterfaces();
-    for (const devName in interfaces) {
-      const iface = interfaces[devName];
-      for (let i = 0; i < iface.length; i++) {
-        const alias = iface[i];
-        if (alias.family === 'IPv4' && !alias.internal) {
-          return alias.address;
-        }
-      }
-    }
-  } catch (e) {}
-  return '127.0.0.1';
-}
-
 // Send direct HTTP POST Heartbeat to Signaling Server (Works on any PC, 0 dependencies)
 function sendHttpHeartbeat() {
   if (!hostRoomId) return;
   const https = require('https');
-  const lanIp = getLocalLanIp();
   const payload = JSON.stringify({
     roomId: hostRoomId,
     companyGroup: hostCompanyGroup,
@@ -1077,12 +1144,12 @@ function sendHttpHeartbeat() {
       hostname: os.hostname(),
       companyGroup: hostCompanyGroup,
       platform: `${os.type()} ${os.arch()}`,
-      ip: lanIp
+      ip: '127.0.0.1'
     }
   });
 
   const req = https.request({
-    hostname: 'remoteg-all-in-one-production-6122.up.railway.app',
+    hostname: 'remote-project.onrender.com',
     port: 443,
     path: '/api/register-host',
     method: 'POST',

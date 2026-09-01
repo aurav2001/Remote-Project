@@ -107,49 +107,11 @@ async function updateCompanyGroup(newGroup) {
   registerHostOnServer();
 }
 
-const companyEditPanel = document.getElementById('company-edit-panel');
-const companyGroupInput = document.getElementById('company-group-input');
-const btnSaveGroup = document.getElementById('btn-save-group');
-const btnCancelGroup = document.getElementById('btn-cancel-group');
-
-if (btnEditGroup && companyEditPanel && companyGroupInput) {
-  btnEditGroup.addEventListener('click', () => {
-    const isHidden = companyEditPanel.style.display === 'none' || !companyEditPanel.style.display;
-    if (isHidden) {
-      companyGroupInput.value = companyGroup || 'USPL';
-      companyEditPanel.style.display = 'block';
-      companyGroupInput.focus();
-      companyGroupInput.select();
-    } else {
-      companyEditPanel.style.display = 'none';
-    }
-  });
-
-  if (btnSaveGroup) {
-    btnSaveGroup.addEventListener('click', async () => {
-      const val = companyGroupInput.value.trim();
-      if (val) {
-        await updateCompanyGroup(val);
-      }
-      companyEditPanel.style.display = 'none';
-    });
-  }
-
-  if (btnCancelGroup) {
-    btnCancelGroup.addEventListener('click', () => {
-      companyEditPanel.style.display = 'none';
-    });
-  }
-
-  companyGroupInput.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      const val = companyGroupInput.value.trim();
-      if (val) {
-        await updateCompanyGroup(val);
-      }
-      companyEditPanel.style.display = 'none';
-    } else if (e.key === 'Escape') {
-      companyEditPanel.style.display = 'none';
+if (btnEditGroup) {
+  btnEditGroup.addEventListener('click', async () => {
+    const input = prompt('Enter Company / Organization Workspace Code (e.g. USPL, TechCorp, Default):', companyGroup);
+    if (input && input.trim()) {
+      await updateCompanyGroup(input.trim());
     }
   });
 }
@@ -324,45 +286,24 @@ function initSocket() {
     handleTerminalCommand(data);
   });
 
-  // Receive company group update from Admin / Server
-  socket.on('company-group-updated', async ({ companyGroup: newGroup }) => {
-    if (newGroup) {
-      console.log('[Host]: Received remote company group update:', newGroup);
-      await updateCompanyGroup(newGroup);
-    }
-  });
-
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
-    if (!data) return;
-    if (data.type === 'file-explorer-list-req') {
-      handleFileExplorerListRequest(data);
-      return;
-    }
-    if (data.type === 'file-explorer-download-req') {
-      handleFileExplorerDownloadRequest(data);
-      return;
-    }
-    if (data.type === 'terminal-command') {
-      handleTerminalCommand(data);
-      return;
-    }
-    if (data.type === 'system-reboot') {
+    if (data && data.type === 'system-reboot') {
       console.log('[Host]: Received remote system reboot command from controller (socket)!');
       if (window.electronAPI && window.electronAPI.executeSystemReboot) {
         window.electronAPI.executeSystemReboot({ force: true, delaySec: 3 });
       }
       return;
     }
-    if (data.type === 'get-screens-list') {
+    if (data && data.type === 'get-screens-list') {
       sendScreensListToController();
       return;
     }
-    if (data.type === 'switch-screen' && data.screenId) {
+    if (data && data.type === 'switch-screen' && data.screenId) {
       handleSwitchScreen(data.screenId);
       return;
     }
-    if (data.type === 'annotation-event') {
+    if (data && data.type === 'annotation-event') {
       if (window.electronAPI && window.electronAPI.showAnnotation) {
         window.electronAPI.showAnnotation(data.payload);
       }
@@ -403,7 +344,6 @@ function initSocket() {
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
       console.log('[Host]: Controller disconnected. Resetting peer connection.');
-      stopHybridFrameStreaming();
       if (peerConnection) {
         try { peerConnection.close(); } catch(e) {}
         peerConnection = null;
@@ -411,11 +351,6 @@ function initSocket() {
       activeDataChannel = null;
       updateStatus('connecting', 'Waiting for Controller...');
     }
-  });
-
-  socket.on('request-frame-stream', () => {
-    console.log('[Host]: Controller requested hybrid frame streaming fallback.');
-    startHybridFrameStreaming();
   });
 
   // Keep-alive heartbeat: Re-announce host presence every 15s to keep room registered on Render
@@ -669,6 +604,7 @@ async function startSharing(sourceId) {
     const activeTrack = localStream.getVideoTracks()[0];
     if (activeTrack.readyState === 'live') {
       console.log('[Host]: Screen capture stream already active:', activeTrack.id);
+      startHybridFrameStreaming();
       return;
     }
   }
@@ -861,7 +797,6 @@ async function loadSources() {
 
 function onStreamConnected() {
   updateStatus('connected', 'Connected & Streaming');
-  stopHybridFrameStreaming(); // WebRTC is active, stop software JPEG encoder to free CPU
   sendScreensListToController();
   if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
     console.log('[Host]: Triggering auto-minimize on stream connection...');
@@ -1043,9 +978,6 @@ async function handleControllerJoined() {
     console.log('[Host]: Controller ready! Initiating WebRTC SDP offer.');
     updateStatus('connecting', 'Establishing WebRTC connection...');
     pendingIceCandidates = [];
-
-    // Start instant fallback streaming so remote screen appears immediately without spinner delay
-    startHybridFrameStreaming();
 
     const pcCreated = await createPeerConnection();
     if (pcCreated === false) {

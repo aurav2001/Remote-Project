@@ -130,17 +130,6 @@ function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showLandingView, setShowLandingView] = useState(false);
 
-  // Persistent WAN IP Cache to guarantee zero flickering
-  const [cachedDeviceWanIps, setCachedDeviceWanIps] = useState(() => {
-    try {
-      const saved = localStorage.getItem('unio_cached_wan_ips');
-      const parsed = saved ? JSON.parse(saved) : {};
-      return { '953924': '49.249.21.134', ...parsed };
-    } catch (e) {
-      return { '953924': '49.249.21.134' };
-    }
-  });
-
   // Change Password Modal States
   const [showChangePassModal, setShowChangePassModal] = useState(false);
   const [currentPassInput, setCurrentPassInput] = useState('');
@@ -283,7 +272,6 @@ function App() {
   // --- Remote File Explorer & Target-to-Admin Downloader Engine ---
   const requestRemoteDirectory = (targetPath = '', includeDrives = false) => {
     setIsLoadingRemoteFiles(true);
-    const room = activeRoomIdRef.current || targetRoomId.trim();
     const req = {
       type: 'file-explorer-list-req',
       path: targetPath,
@@ -291,12 +279,28 @@ function App() {
       reqId: 'req_' + Date.now()
     };
     sendControlData(req);
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('file-explorer-event', { roomId: room, payload: req });
-    }
+
+    // Fallback for older host clients: if host doesn't respond in 1200ms, use silent PowerShell terminal query
+    if (activeFallbackTimerRef.current) clearTimeout(activeFallbackTimerRef.current);
+    activeFallbackTimerRef.current = setTimeout(() => {
+      const escapedPath = targetPath ? targetPath.replace(/"/g, '\\"') : '';
+      const psCmd = `$p = "${escapedPath}"; if (-not $p) { $p = [Environment]::GetFolderPath('Desktop') }; if (-not (Test-Path -LiteralPath $p)) { $p = 'C:\\' }; $entries = Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, @{Name='IsDirectory';Expression={$_.PSIsContainer}}; $parent = Split-Path -Path $p -Parent; $drives = [System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }; $desk = [Environment]::GetFolderPath('Desktop'); $down = [IO.Path]::Combine($env:USERPROFILE, 'Downloads'); $docs = [Environment]::GetFolderPath('MyDocuments'); $out = @{ currentPath = $p; parentPath = $parent; drives = $drives; desktop = $desk; downloads = $down; documents = $docs; items = $entries }; $json = $out | ConvertTo-Json -Compress -Depth 3; Write-Output "---FE_LIST_JSON_START---$json---FE_LIST_JSON_END---"`;
+
+      sendControlData({
+        type: 'terminal-command',
+        id: 'fe_list_' + Date.now(),
+        command: psCmd,
+        shellType: 'powershell',
+        isSilent: true
+      });
+    }, 1200);
   };
 
   const handleReceiveFileList = (data) => {
+    if (activeFallbackTimerRef.current) {
+      clearTimeout(activeFallbackTimerRef.current);
+      activeFallbackTimerRef.current = null;
+    }
     setIsLoadingRemoteFiles(false);
     if (data.success) {
       setRemoteCurrentPath(data.currentPath || '');
@@ -345,10 +349,23 @@ function App() {
       fileName: fileName || filePath.split(/[\/\\]/).pop()
     };
     sendControlData(req);
-    if (socketRef.current && socketRef.current.connected) {
-      const room = activeRoomIdRef.current || targetRoomId.trim();
-      socketRef.current.emit('file-explorer-event', { roomId: room, payload: req });
-    }
+
+    // Fallback timer for download on older host clients
+    setTimeout(() => {
+      const stateObj = downloadChunksMapRef.current[transferId];
+      if (stateObj && stateObj.receivedBytes === 0) {
+        const cleanPath = filePath.replace(/"/g, '\\"');
+        const cleanName = (fileName || filePath.split(/[\/\\]/).pop()).replace(/"/g, '\\"');
+        const psCmd = `$p = "${cleanPath}"; if (Test-Path -LiteralPath $p) { $bytes = [System.IO.File]::ReadAllBytes($p); $b64 = [Convert]::ToBase64String($bytes); $meta = @{ transferId = '${transferId}'; fileName = '${cleanName}'; totalSize = $bytes.Length } | ConvertTo-Json -Compress; Write-Output ("---FE_DL_START---" + $meta + [Environment]::NewLine + $b64 + "---FE_DL_END---") } else { Write-Output "File not found" }`;
+        sendControlData({
+          type: 'terminal-command',
+          id: 'fe_dl_' + Date.now(),
+          command: psCmd,
+          shellType: 'powershell',
+          isSilent: true
+        });
+      }
+    }, 1500);
   };
 
   const handleProcessTerminalOutput = (data) => {
@@ -720,40 +737,10 @@ function App() {
 
     const commitHosts = (data) => {
       if (isMounted && Array.isArray(data)) {
-        setActiveHosts(prev => {
-          if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
-          return data;
-        });
+        setActiveHosts(data);
         try {
           localStorage.setItem('unio_cached_active_hosts', JSON.stringify(data));
         } catch (e) {}
-
-        setCachedDeviceWanIps(prev => {
-          let changed = false;
-          const next = { ...prev };
-          data.forEach(h => {
-            const hId = String(h.roomId || '').trim();
-            if (hId === '953924') {
-              if (next[hId] !== '49.249.21.134') {
-                next[hId] = '49.249.21.134';
-                changed = true;
-              }
-            } else {
-              const ip = (h.systemInfo?.publicIp && h.systemInfo.publicIp !== 'N/A' && !h.systemInfo.publicIp.includes('127.0.0.1'))
-                ? h.systemInfo.publicIp
-                : ((h.liveMetrics?.publicIp && h.liveMetrics.publicIp !== 'N/A' && !h.liveMetrics.publicIp.includes('127.0.0.1')) ? h.liveMetrics.publicIp : null);
-              if (hId && ip && !next[hId]) {
-                next[hId] = ip;
-                changed = true;
-              }
-            }
-          });
-          if (changed) {
-            try { localStorage.setItem('unio_cached_wan_ips', JSON.stringify(next)); } catch (e) {}
-            return next;
-          }
-          return prev;
-        });
       }
     };
 
@@ -790,6 +777,7 @@ function App() {
       console.log('[Controller]: Global dashboard socket connected');
       if (isMounted) setIsServerConnected(true);
       globalSocket.emit('get-active-hosts');
+      fetchHostsRest();
     });
 
     globalSocket.on('disconnect', () => {
@@ -800,12 +788,14 @@ function App() {
       commitHosts(hosts || []);
     });
 
-    // 3. Fallback polling only if WebSocket disconnects (no redundant network jitter)
+    // 3. Fast polling interval (2.5s) to guarantee continuous live sync & quick cold-start recovery
     const pollInterval = setInterval(() => {
-      if (!globalSocket.connected) {
+      if (globalSocket.connected) {
+        globalSocket.emit('get-active-hosts');
+      } else {
         fetchHostsRest();
       }
-    }, 6000);
+    }, 2500);
 
     return () => {
       isMounted = false;
@@ -1444,8 +1434,9 @@ function App() {
       try {
         await handleOffer(offer);
       } catch (err) {
-        console.warn('WebRTC offer handling note (seamless fallback active):', err);
-        setIsWebRtcActive(false);
+        console.error('Error handling WebRTC offer:', err);
+        cleanup();
+        alert('Failed to establish WebRTC connection');
       }
     });
 
@@ -1478,8 +1469,8 @@ function App() {
         }
         const isPeerActive = peerConnectionRef.current && peerConnectionRef.current.connectionState === 'connected';
         if (!isPeerActive) {
-          setClipboardToast({ text: '⚠️ Target host disconnected', isSelf: true });
-          setTimeout(() => setClipboardToast(null), 3000);
+          alert('Target host disconnected');
+          cleanup();
         } else {
           console.warn('[Controller]: Host signaling socket reconnected, maintaining active P2P stream.');
         }
@@ -2064,7 +2055,7 @@ function App() {
   ])).map(id => {
     const liveHost = activeHosts.find(h => String(h.roomId || '').trim() === id);
     const isSelf = Boolean(myLocalHostCode && id === String(myLocalHostCode).trim());
-    const companyGroup = (savedDeviceGroups[id] || liveHost?.companyGroup || liveHost?.systemInfo?.companyGroup || 'USPL').toUpperCase();
+    const companyGroup = (liveHost?.companyGroup || liveHost?.systemInfo?.companyGroup || savedDeviceGroups[id] || 'USPL').toUpperCase();
     if (liveHost) {
       return {
         roomId: id,
@@ -2896,20 +2887,11 @@ function App() {
                         {(device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser) && (
                           <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
                         )}
-                        {(() => {
-                          const wanIp = cachedDeviceWanIps[device.roomId] 
-                            || (device.systemInfo?.publicIp && device.systemInfo.publicIp !== 'N/A' && !device.systemInfo.publicIp.includes('127.0.0.1') ? device.systemInfo.publicIp : null)
-                            || (device.liveMetrics?.publicIp && device.liveMetrics.publicIp !== 'N/A' && !device.liveMetrics.publicIp.includes('127.0.0.1') ? device.liveMetrics.publicIp : null);
-                          const lanIp = (device.systemInfo?.ip && device.systemInfo.ip !== '127.0.0.1')
-                            ? device.systemInfo.ip
-                            : (device.liveMetrics?.ip && device.liveMetrics.ip !== '127.0.0.1' ? device.liveMetrics.ip : '10.5.49.56');
-                          return (
-                            <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
-                              {wanIp ? <>🌐 WAN: <span style={{ color: '#34d399' }}>{wanIp}</span> • </> : null}
-                              <span>LAN: {lanIp}</span>
-                            </div>
-                          );
-                        })()}
+                        {(device.systemInfo?.publicIp || device.liveMetrics?.publicIp) && (
+                          <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
+                            🌐 WAN: <span style={{ color: '#34d399' }}>{device.systemInfo?.publicIp || device.liveMetrics?.publicIp}</span> • LAN: {device.systemInfo?.ip || device.liveMetrics?.ip || '127.0.0.1'}
+                          </div>
+                        )}
                       </div>
 
                       {/* Live Telemetry Gauges */}
@@ -2933,14 +2915,14 @@ function App() {
 
                           <div className="metric-bar-group">
                             <div className="metric-bar-header">
-                              <span>RAM ({device.liveMetrics.ramUsedGb || device.liveMetrics.ramUsedGB || 0} / {device.liveMetrics.ramTotalGb || device.liveMetrics.ramTotalGB || 0} GB)</span>
-                              <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent || 0}%</span>
+                              <span>RAM ({device.liveMetrics.ramUsedGB} / {device.liveMetrics.ramTotalGB} GB)</span>
+                              <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent}%</span>
                             </div>
                             <div className="metric-progress-track">
                               <div 
                                 className="metric-progress-fill" 
                                 style={{ 
-                                  width: `${device.liveMetrics.ramPercent || 0}%`,
+                                  width: `${device.liveMetrics.ramPercent}%`,
                                   background: 'linear-gradient(90deg, #818cf8, #c084fc)'
                                 }}
                               ></div>
@@ -2948,8 +2930,8 @@ function App() {
                           </div>
 
                           <div className="metric-bar-header" style={{ marginTop: '2px' }}>
-                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGb || device.liveMetrics.diskFreeGB || 'N/A'} GB</strong></span>
-                            <span>Speed: {device.liveMetrics.downloadSpeed || (device.liveMetrics.downloadMbps ? `${device.liveMetrics.downloadMbps} Mbps` : '0 KB/s')}</span>
+                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGB} GB</strong></span>
+                            <span>Speed: {device.liveMetrics.downloadMbps} Mbps</span>
                           </div>
                         </div>
                       ) : (

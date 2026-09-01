@@ -175,11 +175,7 @@ app.get('/api/hosts', (req, res) => {
   res.json(list);
 });
 
-// Permanent In-Memory Storage for Assigned Company Groups & Public WAN IPs
-const persistentCompanyGroups = new Map([['953924', 'G-TECH']]);
-const persistentHostPublicIps = new Map([['953924', '49.249.21.134']]);
-
-// Host Agent Registration & Telemetry Heartbeat (Works with HTTP POST from Electron / C#)
+// HTTP Host Registration & Heartbeat Endpoint (Guarantees online presence from any PC)
 app.post('/api/register-host', (req, res) => {
   const { roomId, systemInfo, liveMetrics, companyGroup } = req.body || {};
   if (!roomId) {
@@ -187,48 +183,17 @@ app.post('/api/register-host', (req, res) => {
   }
   const cleanRoomId = String(roomId).trim();
   if (!rooms.has(cleanRoomId)) {
-    const initialGroup = persistentCompanyGroups.get(cleanRoomId) || (companyGroup ? String(companyGroup).trim().toUpperCase() : 'USPL');
-    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: initialGroup, lastSeen: Date.now() });
+    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: 'USPL', lastSeen: Date.now() });
   }
   const room = rooms.get(cleanRoomId);
   room.lastSeen = Date.now();
-  const rawIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '';
-  const cleanPublicIp = rawIp.replace(/^::ffff:/, '');
-
-  if (!persistentHostPublicIps.has(cleanRoomId)) {
-    if (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') && !cleanPublicIp.includes('localhost') && cleanPublicIp !== '::1' && cleanPublicIp.length >= 7) {
-      persistentHostPublicIps.set(cleanRoomId, cleanPublicIp);
-    }
-  }
-
-  const lockedPublicIp = persistentHostPublicIps.get(cleanRoomId) || (cleanPublicIp && !cleanPublicIp.includes('127.0.0.1') ? cleanPublicIp : null);
-
-  if (systemInfo) {
-    if (lockedPublicIp) {
-      systemInfo.publicIp = lockedPublicIp;
-    }
-    if (systemInfo.ip === '127.0.0.1' && room.systemInfo?.ip && room.systemInfo.ip !== '127.0.0.1') {
-      systemInfo.ip = room.systemInfo.ip;
-    }
-    room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
-  }
-  if (liveMetrics) {
-    if (lockedPublicIp) {
-      liveMetrics.publicIp = lockedPublicIp;
-    }
-    room.liveMetrics = { ...(room.liveMetrics || {}), ...liveMetrics };
-  }
-
-  if (persistentCompanyGroups.has(cleanRoomId)) {
-    room.companyGroup = persistentCompanyGroups.get(cleanRoomId);
-  } else if (companyGroup) {
+  if (systemInfo) room.systemInfo = systemInfo;
+  if (liveMetrics) room.liveMetrics = liveMetrics;
+  if (companyGroup) {
     room.companyGroup = String(companyGroup).trim().toUpperCase();
-    persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
   } else if (systemInfo && systemInfo.companyGroup) {
     room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
-    persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
   }
-  if (room.systemInfo) room.systemInfo.companyGroup = room.companyGroup;
 
   broadcastActiveHosts();
   res.json({ success: true, roomId: cleanRoomId, companyGroup: room.companyGroup });
@@ -242,7 +207,6 @@ app.post('/api/set-company-group', (req, res) => {
   }
   const cleanRoomId = String(roomId).trim();
   const cleanGroup = String(companyGroup).trim().toUpperCase();
-  persistentCompanyGroups.set(cleanRoomId, cleanGroup);
   if (!rooms.has(cleanRoomId)) {
     rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: cleanGroup, lastSeen: Date.now() });
   }
@@ -301,22 +265,11 @@ function getActiveHostsList() {
     const isAlive = (room.host && room.host !== null) || (room.lastSeen && (now - room.lastSeen < 25000));
     if (isAlive) {
       const company = room.companyGroup || room.systemInfo?.companyGroup || 'USPL';
-      const lockedPublicIp = persistentHostPublicIps.get(roomId) || room.systemInfo?.publicIp || room.liveMetrics?.publicIp || null;
-
-      const cleanSysInfo = room.systemInfo ? { ...room.systemInfo } : null;
-      if (cleanSysInfo && lockedPublicIp && lockedPublicIp !== 'N/A') {
-        cleanSysInfo.publicIp = lockedPublicIp;
-      }
-      const cleanMetrics = room.liveMetrics ? { ...room.liveMetrics } : null;
-      if (cleanMetrics && lockedPublicIp && lockedPublicIp !== 'N/A') {
-        cleanMetrics.publicIp = lockedPublicIp;
-      }
-
       list.push({
         roomId,
         companyGroup: company,
-        systemInfo: cleanSysInfo,
-        liveMetrics: cleanMetrics,
+        systemInfo: room.systemInfo || null,
+        liveMetrics: room.liveMetrics || null,
         isOnline: true,
         lastSeen: room.lastSeen ? new Date(room.lastSeen).toISOString() : new Date().toISOString()
       });
@@ -353,45 +306,22 @@ io.on('connection', (socket) => {
     socket.role = role;
 
     if (!rooms.has(cleanRoomId)) {
-      const initialGroup = persistentCompanyGroups.get(cleanRoomId) || (companyGroup ? String(companyGroup).trim().toUpperCase() : 'USPL');
-      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, companyGroup: initialGroup, lastSeen: Date.now() });
+      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, companyGroup: 'USPL', lastSeen: Date.now() });
     }
 
     const room = rooms.get(cleanRoomId);
-    if (persistentCompanyGroups.has(cleanRoomId)) {
-      room.companyGroup = persistentCompanyGroups.get(cleanRoomId);
-    } else if (companyGroup) {
+    if (companyGroup) {
       room.companyGroup = String(companyGroup).trim().toUpperCase();
-      persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
     } else if (systemInfo && systemInfo.companyGroup) {
       room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
-      persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
     }
-    if (room.systemInfo) room.systemInfo.companyGroup = room.companyGroup;
 
     if (role === 'host') {
       room.host = socket.id;
-      const socketRawIp = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address || '';
-      const cleanSocketPublicIp = socketRawIp.replace(/^::ffff:/, '');
-
-      if (!persistentHostPublicIps.has(cleanRoomId)) {
-        if (cleanSocketPublicIp && !cleanSocketPublicIp.includes('127.0.0.1') && cleanSocketPublicIp.length >= 7) {
-          persistentHostPublicIps.set(cleanRoomId, cleanSocketPublicIp);
-        }
-      }
-      const lockedSocketIp = persistentHostPublicIps.get(cleanRoomId);
-
       if (systemInfo) {
-        if (lockedSocketIp) {
-          systemInfo.publicIp = lockedSocketIp;
-        }
-        room.systemInfo = { ...(room.systemInfo || {}), ...systemInfo };
+        room.systemInfo = systemInfo;
       }
       console.log(`Host registered for room ${cleanRoomId} (Group: ${room.companyGroup}) with info:`, room.systemInfo);
-      // If host's local group is different from persistent server group, inform the host
-      if (persistentCompanyGroups.has(cleanRoomId) && persistentCompanyGroups.get(cleanRoomId) !== companyGroup) {
-        socket.emit('company-group-updated', { companyGroup: room.companyGroup });
-      }
       broadcastActiveHosts();
     } else if (role === 'controller') {
       room.controller = socket.id;
@@ -415,7 +345,6 @@ io.on('connection', (socket) => {
     const targetRoom = String(roomId || socket.roomId || '').trim();
     if (targetRoom && companyGroup) {
       const cleanGroup = String(companyGroup).trim().toUpperCase();
-      persistentCompanyGroups.set(targetRoom, cleanGroup);
       if (!rooms.has(targetRoom)) {
         rooms.set(targetRoom, { host: null, controller: null, systemInfo: null, companyGroup: cleanGroup, lastSeen: Date.now() });
       }
@@ -483,17 +412,12 @@ io.on('connection', (socket) => {
 
   // Relay System Metrics from host to controller (O(1) Constant Time Complexity)
   socket.on('system-metrics', ({ roomId, metrics }) => {
-    const cleanRoomId = String(roomId || socket.roomId || '').trim();
-    if (cleanRoomId && rooms.has(cleanRoomId)) {
-      const room = rooms.get(cleanRoomId);
-      const lockedIp = persistentHostPublicIps.get(cleanRoomId);
-      if (lockedIp && metrics) {
-        metrics.publicIp = lockedIp;
-      }
-      room.liveMetrics = { ...(room.liveMetrics || {}), ...(metrics || {}) };
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      room.liveMetrics = metrics;
     }
     // O(1) targeted relay to the controller in this room (bypasses global broadcast CPU overhead)
-    socket.to(cleanRoomId).emit('system-metrics', { metrics });
+    socket.to(roomId).emit('system-metrics', { metrics });
   });
 
   // Relay Terminal Command (controller -> host)
@@ -544,9 +468,9 @@ io.on('connection', (socket) => {
 
   // Relay File Explorer Events (requests & chunk download streaming bidirectional)
   socket.on('file-explorer-event', (data) => {
-    const targetRoom = String(socket.roomId || data?.roomId || '').trim();
-    if (targetRoom) {
-      socket.to(targetRoom).emit('file-explorer-event', data);
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('file-explorer-event', data);
     }
   });
 
