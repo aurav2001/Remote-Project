@@ -869,7 +869,7 @@ function collectLiveMetrics() {
   };
 }
 
-// Push live metrics to renderer every 2 seconds
+// Push live metrics to renderer every 4 seconds (ultra-low bandwidth)
 setInterval(() => {
   const metrics = collectLiveMetrics();
   const allWindows = BrowserWindow.getAllWindows();
@@ -878,7 +878,7 @@ setInterval(() => {
       win.webContents.send('system-metrics-update', metrics);
     }
   }
-}, 2000);
+}, 4000);
 
 // IPC Listener to execute control events using native input-helper
 ipcMain.on('control-event', (event, data) => {
