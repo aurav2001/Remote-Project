@@ -1149,7 +1149,7 @@ function sendHttpHeartbeat() {
   });
 
   const req = https.request({
-    hostname: 'remote-project.onrender.com',
+    hostname: 'remoteg-all-in-one-production-6122.up.railway.app',
     port: 443,
     path: '/api/register-host',
     method: 'POST',

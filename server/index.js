@@ -175,7 +175,10 @@ app.get('/api/hosts', (req, res) => {
   res.json(list);
 });
 
-// HTTP Host Registration & Heartbeat Endpoint (Guarantees online presence from any PC)
+// Permanent In-Memory Storage for Assigned Company Groups
+const persistentCompanyGroups = new Map();
+
+// Host Agent Registration & Telemetry Heartbeat (Works with HTTP POST from Electron / C#)
 app.post('/api/register-host', (req, res) => {
   const { roomId, systemInfo, liveMetrics, companyGroup } = req.body || {};
   if (!roomId) {
@@ -183,17 +186,24 @@ app.post('/api/register-host', (req, res) => {
   }
   const cleanRoomId = String(roomId).trim();
   if (!rooms.has(cleanRoomId)) {
-    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: 'USPL', lastSeen: Date.now() });
+    const initialGroup = persistentCompanyGroups.get(cleanRoomId) || (companyGroup ? String(companyGroup).trim().toUpperCase() : 'USPL');
+    rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: initialGroup, lastSeen: Date.now() });
   }
   const room = rooms.get(cleanRoomId);
   room.lastSeen = Date.now();
   if (systemInfo) room.systemInfo = systemInfo;
   if (liveMetrics) room.liveMetrics = liveMetrics;
-  if (companyGroup) {
+
+  if (persistentCompanyGroups.has(cleanRoomId)) {
+    room.companyGroup = persistentCompanyGroups.get(cleanRoomId);
+  } else if (companyGroup) {
     room.companyGroup = String(companyGroup).trim().toUpperCase();
+    persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
   } else if (systemInfo && systemInfo.companyGroup) {
     room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
+    persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
   }
+  if (room.systemInfo) room.systemInfo.companyGroup = room.companyGroup;
 
   broadcastActiveHosts();
   res.json({ success: true, roomId: cleanRoomId, companyGroup: room.companyGroup });
@@ -207,6 +217,7 @@ app.post('/api/set-company-group', (req, res) => {
   }
   const cleanRoomId = String(roomId).trim();
   const cleanGroup = String(companyGroup).trim().toUpperCase();
+  persistentCompanyGroups.set(cleanRoomId, cleanGroup);
   if (!rooms.has(cleanRoomId)) {
     rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, liveMetrics: null, companyGroup: cleanGroup, lastSeen: Date.now() });
   }
@@ -306,15 +317,21 @@ io.on('connection', (socket) => {
     socket.role = role;
 
     if (!rooms.has(cleanRoomId)) {
-      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, companyGroup: 'USPL', lastSeen: Date.now() });
+      const initialGroup = persistentCompanyGroups.get(cleanRoomId) || (companyGroup ? String(companyGroup).trim().toUpperCase() : 'USPL');
+      rooms.set(cleanRoomId, { host: null, controller: null, systemInfo: null, companyGroup: initialGroup, lastSeen: Date.now() });
     }
 
     const room = rooms.get(cleanRoomId);
-    if (companyGroup) {
+    if (persistentCompanyGroups.has(cleanRoomId)) {
+      room.companyGroup = persistentCompanyGroups.get(cleanRoomId);
+    } else if (companyGroup) {
       room.companyGroup = String(companyGroup).trim().toUpperCase();
+      persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
     } else if (systemInfo && systemInfo.companyGroup) {
       room.companyGroup = String(systemInfo.companyGroup).trim().toUpperCase();
+      persistentCompanyGroups.set(cleanRoomId, room.companyGroup);
     }
+    if (room.systemInfo) room.systemInfo.companyGroup = room.companyGroup;
 
     if (role === 'host') {
       room.host = socket.id;
@@ -322,6 +339,10 @@ io.on('connection', (socket) => {
         room.systemInfo = systemInfo;
       }
       console.log(`Host registered for room ${cleanRoomId} (Group: ${room.companyGroup}) with info:`, room.systemInfo);
+      // If host's local group is different from persistent server group, inform the host
+      if (persistentCompanyGroups.has(cleanRoomId) && persistentCompanyGroups.get(cleanRoomId) !== companyGroup) {
+        socket.emit('company-group-updated', { companyGroup: room.companyGroup });
+      }
       broadcastActiveHosts();
     } else if (role === 'controller') {
       room.controller = socket.id;
@@ -345,6 +366,7 @@ io.on('connection', (socket) => {
     const targetRoom = String(roomId || socket.roomId || '').trim();
     if (targetRoom && companyGroup) {
       const cleanGroup = String(companyGroup).trim().toUpperCase();
+      persistentCompanyGroups.set(targetRoom, cleanGroup);
       if (!rooms.has(targetRoom)) {
         rooms.set(targetRoom, { host: null, controller: null, systemInfo: null, companyGroup: cleanGroup, lastSeen: Date.now() });
       }

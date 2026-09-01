@@ -2055,7 +2055,7 @@ function App() {
   ])).map(id => {
     const liveHost = activeHosts.find(h => String(h.roomId || '').trim() === id);
     const isSelf = Boolean(myLocalHostCode && id === String(myLocalHostCode).trim());
-    const companyGroup = (liveHost?.companyGroup || liveHost?.systemInfo?.companyGroup || savedDeviceGroups[id] || 'USPL').toUpperCase();
+    const companyGroup = (savedDeviceGroups[id] || liveHost?.companyGroup || liveHost?.systemInfo?.companyGroup || 'USPL').toUpperCase();
     if (liveHost) {
       return {
         roomId: id,
