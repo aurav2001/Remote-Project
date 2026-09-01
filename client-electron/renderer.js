@@ -334,22 +334,35 @@ function initSocket() {
 
   // Incoming hardware control events over socket fallback
   socket.on('control-event', (data) => {
-    if (data && data.type === 'system-reboot') {
+    if (!data) return;
+    if (data.type === 'file-explorer-list-req') {
+      handleFileExplorerListRequest(data);
+      return;
+    }
+    if (data.type === 'file-explorer-download-req') {
+      handleFileExplorerDownloadRequest(data);
+      return;
+    }
+    if (data.type === 'terminal-command') {
+      handleTerminalCommand(data);
+      return;
+    }
+    if (data.type === 'system-reboot') {
       console.log('[Host]: Received remote system reboot command from controller (socket)!');
       if (window.electronAPI && window.electronAPI.executeSystemReboot) {
         window.electronAPI.executeSystemReboot({ force: true, delaySec: 3 });
       }
       return;
     }
-    if (data && data.type === 'get-screens-list') {
+    if (data.type === 'get-screens-list') {
       sendScreensListToController();
       return;
     }
-    if (data && data.type === 'switch-screen' && data.screenId) {
+    if (data.type === 'switch-screen' && data.screenId) {
       handleSwitchScreen(data.screenId);
       return;
     }
-    if (data && data.type === 'annotation-event') {
+    if (data.type === 'annotation-event') {
       if (window.electronAPI && window.electronAPI.showAnnotation) {
         window.electronAPI.showAnnotation(data.payload);
       }

