@@ -24,7 +24,10 @@
 - **Framework:** React 19 + Vite 8 + Socket.IO-Client + WebRTC Native API.
 - **Design:** Modern Glassmorphism, tailored dark theme, dynamic SVG micro-animations, responsive layout.
 - **Key Features:**
-  1. **Central RMM Portal:** Grid/Card view of all registered online devices with live CPU/RAM/Battery metrics, public/private IPs, OS version, and 1-Click Connect.
+  1. **Central RMM Portal & Dashboard Authentication:**
+     - **Cyber-Glassmorphism Login Gateway:** Secure HMAC-SHA256 session token authentication (`admin` / `admin123`).
+     - **Navbar User Profile:** Admin identity badge (`🛡️ admin [Admin]`), Change Password modal, and instant secure Logout.
+     - **Device Management:** Grid/Card view of all registered online devices with live CPU/RAM/Battery metrics, public/private IPs, OS version, and 1-Click Connect.
   2. **Ultra-Low Latency Video Canvas:** Edge-to-edge full desktop streaming (`object-fit: fill`), mouse click/scroll/drag/drop, and keyboard event dispatch.
   3. **Left Floating Dock:** Collapsible toolbar with `📊 Health`, `💻 Terminal`, `📁 Files`, `✏️ Annotate`, `🖥️ Displays`, `⚡ Actions`, and `Terminate Session`.
   4. **Dual-Mode Remote File Explorer:**

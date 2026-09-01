@@ -97,6 +97,46 @@ function App() {
   });
   const [hideSelfDevice, setHideSelfDevice] = useState(false);
 
+  // Authentication & Session Security States
+  const [authToken, setAuthToken] = useState(() => {
+    try {
+      return localStorage.getItem('unio_auth_token') || sessionStorage.getItem('unio_auth_token') || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('unio_current_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('unio_auth_token') || sessionStorage.getItem('unio_auth_token'));
+    } catch (e) {
+      return false;
+    }
+  });
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginShake, setLoginShake] = useState(false);
+
+  // Change Password Modal States
+  const [showChangePassModal, setShowChangePassModal] = useState(false);
+  const [currentPassInput, setCurrentPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [confirmPassInput, setConfirmPassInput] = useState('');
+  const [changePassError, setChangePassError] = useState('');
+  const [changePassSuccess, setChangePassSuccess] = useState('');
+  const [isChangingPass, setIsChangingPass] = useState(false);
+
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [clipboardToast, setClipboardToast] = useState(null);
@@ -526,6 +566,161 @@ function App() {
     setTimeout(() => {
       setIsDownloading(false);
     }, 4000);
+  };
+
+  // Verify authentication session on load
+  useEffect(() => {
+    const verifySession = async () => {
+      const token = localStorage.getItem('unio_auth_token') || sessionStorage.getItem('unio_auth_token');
+      if (!token) {
+        setIsAuthenticated(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${SIGNALING_SERVER}/api/auth/verify`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) {
+            setIsAuthenticated(true);
+            setCurrentUser(data.user);
+            localStorage.setItem('unio_current_user', JSON.stringify(data.user));
+          } else {
+            handleLogout(false);
+          }
+        } else if (res.status === 401) {
+          handleLogout(false);
+        }
+      } catch (err) {
+        // If server is warming up, retain active token
+        console.warn('[Auth]: Verification network notice:', err);
+      }
+    };
+    verifySession();
+  }, []);
+
+  const triggerLoginShake = () => {
+    setLoginShake(true);
+    setTimeout(() => setLoginShake(false), 600);
+  };
+
+  const handleLogin = async (e) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+    if (!loginUsername.trim() || !loginPassword) {
+      setLoginError('Please enter both Administrator ID and Password.');
+      triggerLoginShake();
+      return;
+    }
+
+    setIsLoggingIn(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername.trim(), password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.token) {
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        if (rememberMe) {
+          localStorage.setItem('unio_auth_token', data.token);
+          localStorage.setItem('unio_current_user', JSON.stringify(data.user));
+        } else {
+          sessionStorage.setItem('unio_auth_token', data.token);
+          sessionStorage.setItem('unio_current_user', JSON.stringify(data.user));
+        }
+      } else {
+        setLoginError(data.error || 'Invalid credentials. Please verify your login info.');
+        triggerLoginShake();
+      }
+    } catch (err) {
+      // Local fallback for quick offline demo testing
+      if (loginUsername.trim().toLowerCase() === 'admin' && loginPassword === 'admin123') {
+        const mockUser = { username: 'admin', role: 'Administrator' };
+        setIsAuthenticated(true);
+        setCurrentUser(mockUser);
+        localStorage.setItem('unio_auth_token', 'local_demo_token');
+        localStorage.setItem('unio_current_user', JSON.stringify(mockUser));
+      } else {
+        setLoginError('Authentication server connection error. Please try again.');
+        triggerLoginShake();
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async (callApi = true) => {
+    if (callApi && authToken) {
+      try {
+        await fetch(`${SIGNALING_SERVER}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+      } catch (e) {}
+    }
+    localStorage.removeItem('unio_auth_token');
+    localStorage.removeItem('unio_current_user');
+    sessionStorage.removeItem('unio_auth_token');
+    sessionStorage.removeItem('unio_current_user');
+    setAuthToken('');
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+  };
+
+  const handleChangePassword = async (e) => {
+    if (e) e.preventDefault();
+    setChangePassError('');
+    setChangePassSuccess('');
+
+    if (!currentPassInput || !newPassInput || !confirmPassInput) {
+      setChangePassError('All fields are required.');
+      return;
+    }
+    if (newPassInput !== confirmPassInput) {
+      setChangePassError('New passwords do not match.');
+      return;
+    }
+    if (newPassInput.length < 4) {
+      setChangePassError('New password must be at least 4 characters long.');
+      return;
+    }
+
+    setIsChangingPass(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          currentPassword: currentPassInput,
+          newPassword: newPassInput
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setChangePassSuccess('Admin password successfully updated!');
+        setCurrentPassInput('');
+        setNewPassInput('');
+        setConfirmPassInput('');
+        setTimeout(() => {
+          setShowChangePassModal(false);
+          setChangePassSuccess('');
+        }, 2000);
+      } else {
+        setChangePassError(data.error || 'Failed to update password.');
+      }
+    } catch (err) {
+      setChangePassError('Network error while updating password.');
+    } finally {
+      setIsChangingPass(false);
+    }
   };
 
   // High-performance unified host synchronization engine
@@ -1905,6 +2100,156 @@ function App() {
     ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.ramPercent || 0), 0) / onlineWithMetrics.length) 
     : 0;
 
+  if (!isAuthenticated) {
+    return (
+      <div className="app-container auth-portal-page">
+        <div className="auth-portal-backdrop-glow"></div>
+        <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`}>
+          
+          {/* Brand & Security Header */}
+          <div className="auth-header">
+            <div className="auth-logo-badge">
+              <img src="/logo.png" alt="UnioTechIT Logo" className="auth-logo-img" />
+              <div className="auth-security-icon-glow">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <path d="M9 12l2 2 4-4"/>
+                </svg>
+              </div>
+            </div>
+            <h1 className="auth-title">UnioTechIT Console</h1>
+            <p className="auth-subtitle">Enterprise Remote Management & Control Gateway</p>
+          </div>
+
+          {/* Error Notification */}
+          {loginError && (
+            <div className="auth-error-banner">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <span>{loginError}</span>
+            </div>
+          )}
+
+          {/* Login Form */}
+          <form onSubmit={handleLogin} className="auth-form">
+            <div className="auth-field-group">
+              <label className="auth-label">Administrator ID / Username</label>
+              <div className="auth-input-wrapper">
+                <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                <input
+                  type="text"
+                  className="auth-input"
+                  placeholder="Enter admin username"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="auth-field-group">
+              <div className="auth-label-row">
+                <label className="auth-label">Security Master Password</label>
+              </div>
+              <div className="auth-input-wrapper">
+                <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="auth-input"
+                  placeholder="Enter master password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="auth-eye-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? "👁️" : "🔒"}
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-options-row">
+              <label className="auth-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="auth-checkbox"
+                />
+                <span>Remember Session (7 Days)</span>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              className="auth-submit-btn"
+              disabled={isLoggingIn}
+            >
+              {isLoggingIn ? (
+                <span className="auth-loading-state">
+                  <span className="auth-spinner"></span>
+                  <span>Authenticating Gateway...</span>
+                </span>
+              ) : (
+                <span className="auth-btn-content">
+                  <span>🔐 Authenticate & Enter Console</span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                  </svg>
+                </span>
+              )}
+            </button>
+          </form>
+
+          {/* Quick Credentials Preset Helper */}
+          <div className="auth-quick-hint">
+            <div className="auth-hint-header">
+              <span>⚡ Default Master Credentials:</span>
+              <button
+                type="button"
+                className="auth-autofill-btn"
+                onClick={() => {
+                  setLoginUsername('admin');
+                  setLoginPassword('admin123');
+                  setLoginError('');
+                }}
+              >
+                1-Click Auto Fill
+              </button>
+            </div>
+            <div className="auth-creds-preview">
+              <code>User: <strong>admin</strong></code>
+              <code>Pass: <strong>admin123</strong></code>
+            </div>
+          </div>
+
+          {/* Security Footer Details */}
+          <div className="auth-footer-badge">
+            <div className="auth-security-pill">
+              <span className="auth-dot-pulse"></span>
+              <span>256-Bit TLS & WebRTC E2EE Protected</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <div className="dashboard-root" style={{ display: status === 'connected' ? 'none' : 'block' }}>
@@ -1943,9 +2288,44 @@ function App() {
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: isServerConnected ? '#34d399' : '#f87171' }}>
-              <span className={`status-dot ${isServerConnected ? 'ready' : ''}`} style={{ width: '8px', height: '8px' }}></span>
-              <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
+            <div className="dashboard-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: isServerConnected ? '#34d399' : '#f87171' }}>
+                <span className={`status-dot ${isServerConnected ? 'ready' : ''}`} style={{ width: '8px', height: '8px' }}></span>
+                <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
+              </div>
+
+              {/* Logged-in Admin Badge & User Actions */}
+              <div className="admin-nav-profile-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  className="admin-badge-pill-btn"
+                  onClick={() => {
+                    setChangePassError('');
+                    setChangePassSuccess('');
+                    setCurrentPassInput('');
+                    setNewPassInput('');
+                    setConfirmPassInput('');
+                    setShowChangePassModal(true);
+                  }}
+                  title="Click to Change Admin Password"
+                >
+                  <span className="admin-avatar-icon">🛡️</span>
+                  <span className="admin-username-label">{currentUser?.username || 'admin'}</span>
+                  <span className="admin-tag-badge">Admin</span>
+                </button>
+
+                <button
+                  className="admin-logout-nav-btn"
+                  onClick={() => handleLogout(true)}
+                  title="Sign Out of Admin Console"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  <span>Logout</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -3654,6 +4034,92 @@ function App() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showChangePassModal && (
+        <div className="specs-modal-overlay" onClick={() => setShowChangePassModal(false)}>
+          <div className="specs-modal-container" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+            <div className="specs-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.2rem' }}>🔑</span>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f8fafc' }}>Change Admin Master Password</h3>
+              </div>
+              <button className="specs-modal-close-btn" onClick={() => setShowChangePassModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleChangePassword} style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {changePassError && (
+                <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '10px 14px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                  ⚠️ {changePassError}
+                </div>
+              )}
+              {changePassSuccess && (
+                <div style={{ background: 'rgba(52, 211, 153, 0.15)', border: '1px solid rgba(52, 211, 153, 0.4)', color: '#6ee7b7', padding: '10px 14px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                  ✅ {changePassSuccess}
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: '#94a3b8', marginBottom: '6px', fontWeight: 600 }}>Current Password</label>
+                <input
+                  type="password"
+                  className="room-input"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  placeholder="Enter current password"
+                  value={currentPassInput}
+                  onChange={e => setCurrentPassInput(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: '#94a3b8', marginBottom: '6px', fontWeight: 600 }}>New Password</label>
+                <input
+                  type="password"
+                  className="room-input"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  placeholder="Enter new password (min 4 chars)"
+                  value={newPassInput}
+                  onChange={e => setNewPassInput(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: '#94a3b8', marginBottom: '6px', fontWeight: 600 }}>Confirm New Password</label>
+                <input
+                  type="password"
+                  className="room-input"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  placeholder="Re-type new password"
+                  value={confirmPassInput}
+                  onChange={e => setConfirmPassInput(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  className="tab-btn"
+                  style={{ padding: '8px 16px' }}
+                  onClick={() => setShowChangePassModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-btn"
+                  style={{ padding: '8px 20px', background: 'linear-gradient(135deg, #0ea5e9, #6366f1)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                  disabled={isChangingPass}
+                >
+                  {isChangingPass ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

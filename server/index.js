@@ -9,6 +9,106 @@ app.use(cors());
 app.use(express.json());
 
 const fs = require('fs');
+const crypto = require('crypto');
+
+// Admin Credentials & Authentication Secret
+let ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
+let ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
+const AUTH_SECRET = process.env.AUTH_SECRET || 'remoteg-unio-tech-it-auth-secret-key-2026';
+
+function generateAuthToken(username) {
+  const payload = {
+    username,
+    role: 'Administrator',
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days session
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
+  return `${payloadB64}.${signature}`;
+}
+
+function verifyAuthToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payloadB64, signature] = parts;
+  const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
+  if (signature !== expectedSig) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (Date.now() > payload.expiresAt) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Authentication REST Endpoints
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  
+  if (username.trim().toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
+    const token = generateAuthToken(username.trim());
+    return res.json({
+      success: true,
+      token,
+      user: {
+        username: ADMIN_USERNAME,
+        role: 'Administrator',
+        loginTime: new Date().toISOString()
+      }
+    });
+  }
+  
+  return res.status(401).json({ error: 'Invalid username or password' });
+});
+
+app.get('/api/auth/verify', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token || '');
+  const user = verifyAuthToken(token);
+  if (user) {
+    return res.json({
+      authenticated: true,
+      user: {
+        username: user.username,
+        role: user.role
+      }
+    });
+  }
+  return res.status(401).json({ authenticated: false, error: 'Invalid or expired session token' });
+});
+
+app.post('/api/auth/change-password', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token || '');
+  const user = verifyAuthToken(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized: Valid admin session required' });
+  }
+
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current and new password are required' });
+  }
+  if (currentPassword !== ADMIN_PASSWORD) {
+    return res.status(400).json({ error: 'Current password does not match' });
+  }
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: 'New password must be at least 4 characters long' });
+  }
+
+  ADMIN_PASSWORD = newPassword;
+  return res.json({ success: true, message: 'Admin password successfully updated' });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.json({ success: true, message: 'Logged out successfully' });
+});
 
 // Direct Setup & Installer Download endpoints (Handles clicks from Web Controller UI)
 app.get(['/download', '/RemoteG-Setup.zip', '/UnioTechIT-Setup.zip'], (req, res) => {
