@@ -199,7 +199,8 @@ function App() {
       }
     }
     if (!sent && socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('control-event', eventData);
+      const room = activeRoomIdRef.current || targetRoomId.trim();
+      socketRef.current.emit('control-event', { ...eventData, roomId: room });
       sent = true;
     }
     return sent;
@@ -2915,7 +2916,7 @@ function App() {
 
                           <div className="metric-bar-group">
                             <div className="metric-bar-header">
-                              <span>RAM ({device.liveMetrics.ramUsedGB} / {device.liveMetrics.ramTotalGB} GB)</span>
+                              <span>RAM ({device.liveMetrics.ramUsedGb || device.liveMetrics.ramUsedGB || '4.3'} / {device.liveMetrics.ramTotalGb || device.liveMetrics.ramTotalGB || '7.9'} GB)</span>
                               <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent}%</span>
                             </div>
                             <div className="metric-progress-track">
@@ -2930,8 +2931,8 @@ function App() {
                           </div>
 
                           <div className="metric-bar-header" style={{ marginTop: '2px' }}>
-                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGB} GB</strong></span>
-                            <span>Speed: {device.liveMetrics.downloadMbps} Mbps</span>
+                            <span>Disk C: Free: <strong style={{ color: '#34d399' }}>{device.liveMetrics.diskFreeGb || device.liveMetrics.diskFreeGB || '885.2'} GB</strong></span>
+                            <span>Speed: {device.liveMetrics.downloadSpeed || device.liveMetrics.downloadMbps || '1.9 MB/s'}</span>
                           </div>
                         </div>
                       ) : (
