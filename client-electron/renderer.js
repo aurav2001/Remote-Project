@@ -340,6 +340,11 @@ function initSocket() {
     }
   });
 
+  // Incoming system diagnostics report request (for Excel export)
+  socket.on('request-system-diagnostics', (data) => {
+    handleRequestSystemDiagnostics(data);
+  });
+
   // When controller disconnects, reset peer connection & return to waiting state
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
@@ -405,6 +410,39 @@ async function handleTerminalCommand(data) {
     }
   } catch (err) {
     console.error('[Host]: Failed executing terminal command:', err);
+  }
+}
+
+// Gather full system diagnostics and return to controller (for Excel Export)
+async function handleRequestSystemDiagnostics(data) {
+  console.log('[Host]: Generating full system diagnostics report for controller...');
+  try {
+    if (!window.electronAPI || !window.electronAPI.getFullSystemDiagnostics) {
+      console.warn('[Host]: getFullSystemDiagnostics API not available in preload.');
+      return;
+    }
+    const diagnostics = await window.electronAPI.getFullSystemDiagnostics();
+    const resultPayload = {
+      type: 'system-diagnostics-response',
+      requestId: data?.requestId || null,
+      roomId: data?.roomId || roomId || null,
+      diagnostics: diagnostics,
+      timestamp: new Date().toISOString()
+    };
+
+    if (activeDataChannel && activeDataChannel.readyState === 'open') {
+      try {
+        activeDataChannel.send(JSON.stringify(resultPayload));
+      } catch (dcErr) {
+        console.warn('[Host]: DataChannel diagnostics send failed, falling back to socket:', dcErr);
+      }
+    }
+    if (socket && socket.connected) {
+      socket.emit('system-diagnostics-response', resultPayload);
+    }
+    console.log('[Host]: Full system diagnostics successfully sent to controller.');
+  } catch (err) {
+    console.error('[Host]: Error generating system diagnostics report:', err);
   }
 }
 
@@ -872,6 +910,8 @@ function setupDataChannel(channel) {
       }
       if (data.type === 'terminal-command') {
         handleTerminalCommand(data);
+      } else if (data.type === 'request-system-diagnostics') {
+        handleRequestSystemDiagnostics(data);
       } else {
         if (window.electronAPI && window.electronAPI.sendControlEvent) {
           window.electronAPI.sendControlEvent(data);

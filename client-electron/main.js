@@ -729,6 +729,167 @@ ipcMain.handle('get-system-info', async () => {
   return info;
 });
 
+// IPC Handler to get complete system diagnostics for Excel Export
+ipcMain.handle('get-full-system-diagnostics', async () => {
+  const os = require('os');
+  const publicIp = await getPublicIp();
+  
+  return new Promise((resolve) => {
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+
+# 1. Disks
+$disks = @(Get-CimInstance Win32_LogicalDisk | ForEach-Object {
+    $tot = if ($_.Size) { [math]::Round($_.Size / 1GB, 2) } else { 0 }
+    $free = if ($_.FreeSpace) { [math]::Round($_.FreeSpace / 1GB, 2) } else { 0 }
+    $used = [math]::Round($tot - $free, 2)
+    $pct = if ($tot -gt 0) { [math]::Round(($used / $tot) * 100, 1) } else { 0 }
+    $dType = switch ($_.DriveType) {
+        2 { 'Removable Disk' }
+        3 { 'Local Fixed Disk' }
+        4 { 'Network Disk' }
+        5 { 'CD/DVD-ROM' }
+        default { 'Unknown' }
+    }
+    [PSCustomObject]@{
+        Drive = $_.DeviceID
+        VolumeName = if ($_.VolumeName) { $_.VolumeName } else { 'Local Disk' }
+        FileSystem = if ($_.FileSystem) { $_.FileSystem } else { 'N/A' }
+        TotalGB = $tot
+        FreeGB = $free
+        UsedGB = $used
+        UsagePercent = $pct
+        DriveType = $dType
+    }
+})
+
+# 2. Processes
+$procs = @(Get-Process | ForEach-Object {
+    $memMb = [math]::Round($_.WorkingSet64 / 1MB, 2)
+    $cpuSec = if ($_.CPU) { [math]::Round($_.CPU, 2) } else { 0 }
+    [PSCustomObject]@{
+        PID = $_.Id
+        Name = $_.ProcessName
+        MemoryMB = $memMb
+        CPUTimeSec = $cpuSec
+        Responding = if ($_.Responding) { 'Running' } else { 'Not Responding' }
+        Path = if ($_.Path) { $_.Path } else { 'N/A' }
+    }
+} | Sort-Object MemoryMB -Descending | Select-Object -First 250)
+
+# 3. System Specs
+$osInfo = Get-CimInstance Win32_OperatingSystem
+$cs = Get-CimInstance Win32_ComputerSystem
+$proc = Get-CimInstance Win32_Processor | Select-Object -First 1
+
+$totalRamMb = [math]::Round($osInfo.TotalVisibleMemorySize / 1024, 0)
+$freeRamMb = [math]::Round($osInfo.FreePhysicalMemory / 1024, 0)
+$usedRamMb = $totalRamMb - $freeRamMb
+$ramPct = if ($totalRamMb -gt 0) { [math]::Round(($usedRamMb / $totalRamMb) * 100, 1) } else { 0 }
+
+$uptime = (Get-Date) - $osInfo.LastBootUpTime
+$uptimeStr = "$($uptime.Days)d $($uptime.Hours)h $($uptime.Minutes)m"
+
+$systemSpecs = [PSCustomObject]@{
+    Hostname = $env:COMPUTERNAME
+    Manufacturer = if ($cs.Manufacturer) { $cs.Manufacturer } else { 'Standard PC' }
+    Model = if ($cs.Model) { $cs.Model } else { 'Standard System' }
+    OSName = $osInfo.Caption
+    OSVersion = $osInfo.Version
+    Architecture = $osInfo.OSArchitecture
+    CPU = if ($proc.Name) { $proc.Name.Trim() } else { 'Standard CPU' }
+    CPUCores = $proc.NumberOfCores
+    CPULogical = $proc.NumberOfLogicalProcessors
+    TotalRAM_GB = [math]::Round($totalRamMb / 1024, 2)
+    FreeRAM_GB = [math]::Round($freeRamMb / 1024, 2)
+    UsedRAM_GB = [math]::Round($usedRamMb / 1024, 2)
+    RAMUsagePercent = $ramPct
+    LoggedUser = "$($env:USERDOMAIN)\\$($env:USERNAME)"
+    LastBootTime = $osInfo.LastBootUpTime.ToString('yyyy-MM-dd HH:mm:ss')
+    Uptime = $uptimeStr
+}
+
+# 4. Network Adapters
+$adapters = @(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object {
+    [PSCustomObject]@{
+        Interface = $_.InterfaceAlias
+        IPv4 = $_.IPAddress
+        PrefixLength = $_.PrefixLength
+    }
+})
+
+$result = [PSCustomObject]@{
+    System = $systemSpecs
+    Disks = $disks
+    Processes = $procs
+    Network = $adapters
+}
+
+$result | ConvertTo-Json -Depth 4 -Compress
+`.trim();
+
+    const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -EncodedCommand ${b64}`, { windowsHide: true, maxBuffer: 15 * 1024 * 1024 }, (err, stdout) => {
+      if (err || !stdout) {
+        console.warn('[Main Process]: Diagnostics PS error or empty:', err);
+        const cpus = os.cpus();
+        const totalRamGb = (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2);
+        const freeRamGb = (os.freemem() / (1024 * 1024 * 1024)).toFixed(2);
+        resolve({
+          System: {
+            Hostname: os.hostname(),
+            OSName: `${os.type()} ${os.release()}`,
+            Architecture: os.arch(),
+            CPU: cpus && cpus.length > 0 ? cpus[0].model : 'Standard CPU',
+            TotalRAM_GB: parseFloat(totalRamGb),
+            FreeRAM_GB: parseFloat(freeRamGb),
+            UsedRAM_GB: parseFloat((totalRamGb - freeRamGb).toFixed(2)),
+            PublicIP: publicIp,
+            LoggedUser: process.env.USERNAME || 'Admin',
+            ExportedAt: new Date().toLocaleString()
+          },
+          Disks: [
+            {
+              Drive: 'C:',
+              VolumeName: 'System Drive',
+              FileSystem: 'NTFS',
+              TotalGB: lastSystemStats.diskTotalGb || 'N/A',
+              FreeGB: lastSystemStats.diskFreeGb || 'N/A',
+              UsagePercent: lastSystemStats.diskPercent || 0,
+              DriveType: 'Local Fixed Disk'
+            }
+          ],
+          Processes: [],
+          Network: []
+        });
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        if (parsed.System) {
+          parsed.System.PublicIP = publicIp;
+          parsed.System.CompanyGroup = typeof hostCompanyGroup !== 'undefined' ? hostCompanyGroup : 'USPL';
+          parsed.System.ExportedAt = new Date().toLocaleString();
+        }
+        resolve(parsed);
+      } catch (parseErr) {
+        console.error('[Main Process]: Failed parsing diagnostics JSON:', parseErr);
+        resolve({
+          System: {
+            Hostname: os.hostname(),
+            PublicIP: publicIp,
+            ExportedAt: new Date().toLocaleString()
+          },
+          Disks: [],
+          Processes: [],
+          Network: []
+        });
+      }
+    });
+  });
+});
+
 // --- LIVE SYSTEM HEALTH & METRICS ENGINE ---
 const os = require('os');
 const { exec } = require('child_process');

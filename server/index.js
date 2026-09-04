@@ -492,6 +492,27 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay System Diagnostics Request (controller -> host for Excel export)
+  socket.on('request-system-diagnostics', (data) => {
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      if (room.host) {
+        io.to(room.host).emit('request-system-diagnostics', data);
+      } else {
+        socket.to(roomId).emit('request-system-diagnostics', data);
+      }
+    }
+  });
+
+  // Relay System Diagnostics Response (host -> controller)
+  socket.on('system-diagnostics-response', (data) => {
+    const roomId = socket.roomId || data?.roomId;
+    if (roomId && rooms.has(roomId)) {
+      socket.to(roomId).emit('system-diagnostics-response', data);
+    }
+  });
+
   // Handle Disconnect with brief grace period for Wi-Fi reconnects
   socket.on('disconnect', (reason) => {
     console.log(`User disconnected: ${socket.id}, reason: ${reason}`);

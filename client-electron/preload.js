@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  getFullSystemDiagnostics: () => ipcRenderer.invoke('get-full-system-diagnostics'),
   executeRemoteCommand: (data) => ipcRenderer.invoke('execute-remote-command', data),
   sendControlEvent: (event) => ipcRenderer.send('control-event', event),
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),

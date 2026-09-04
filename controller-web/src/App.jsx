@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
+import { exportHostDiagnosticsToExcel } from './utils/excelExport';
 
 const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://')) 
   ? window.location.origin 
@@ -51,6 +52,7 @@ function App() {
   const [socketFrame, setSocketFrame] = useState(null);
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // Central Dashboard RMM States (Cached for 0-second instant display)
   const [activeHosts, setActiveHosts] = useState(() => {
@@ -462,6 +464,115 @@ function App() {
       });
       setIsExecutingCmd(false);
     }
+  };
+
+  // Handle incoming full system diagnostics from host for Excel Export
+  const handleReceiveDiagnosticsReport = (data) => {
+    if (!data || !data.diagnostics) return;
+    console.log('[Controller]: Received full system diagnostics from host:', data);
+    setIsExportingExcel(false);
+
+    const hostLabel = data.diagnostics?.System?.Hostname || hostSystemInfo?.hostname || liveMetrics?.hostname || data.roomId || 'TargetPC';
+    exportHostDiagnosticsToExcel(data.diagnostics, hostLabel);
+
+    setClipboardToast({
+      text: `📊 Excel diagnostic report downloaded for ${hostLabel}!`,
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 4000);
+  };
+
+  // Trigger full system diagnostic collection and Excel export
+  const handleExportSystemReport = (specRoomId) => {
+    const reqRoom = String(specRoomId || roomId || targetRoomId || '').trim();
+    if (!reqRoom) {
+      alert('Please connect to or select an online target host PC first.');
+      return;
+    }
+
+    setIsExportingExcel(true);
+    setClipboardToast({
+      text: `⏳ Gathering Disks, Processes & Telemetry from Target PC (${reqRoom})...`,
+      isSelf: true
+    });
+
+    const payload = {
+      type: 'request-system-diagnostics',
+      roomId: reqRoom,
+      requestId: 'diag_' + Date.now()
+    };
+
+    // If DataChannel is open and we are connected to this room, send via P2P
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open' && (!specRoomId || specRoomId === roomId)) {
+      try {
+        dataChannelRef.current.send(JSON.stringify(payload));
+      } catch (e) {
+        console.warn('[Controller]: Error sending diagnostics req over DC:', e);
+      }
+    }
+
+    // Also emit via socket signaling
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('request-system-diagnostics', payload);
+    }
+
+    // Safety timeout: If host doesn't respond in 8 seconds, export cached metrics fallback
+    setTimeout(() => {
+      setIsExportingExcel(prev => {
+        if (prev) {
+          console.warn('[Controller]: Diagnostic request timed out, exporting cached system telemetry.');
+          const targetHost = activeHosts.find(h => h.roomId === reqRoom);
+          const cachedInfo = hostSystemInfo || targetHost?.systemInfo;
+          const cachedMetrics = liveMetrics || targetHost?.liveMetrics;
+
+          exportHostDiagnosticsToExcel({
+            System: {
+              Hostname: cachedInfo?.hostname || cachedMetrics?.hostname || `Device-${reqRoom}`,
+              CompanyGroup: cachedInfo?.companyGroup || targetHost?.companyGroup || 'USPL',
+              OSName: cachedInfo?.platform || 'Windows Endpoint',
+              CPU: cachedInfo?.cpu || cachedMetrics?.cpuModel || 'Standard Processor',
+              TotalRAM_GB: cachedMetrics?.ramTotalGb || (cachedInfo?.ram ? parseFloat(cachedInfo.ram) : 'N/A'),
+              FreeRAM_GB: (cachedMetrics?.ramTotalGb && cachedMetrics?.ramUsedGb) ? (parseFloat(cachedMetrics.ramTotalGb) - parseFloat(cachedMetrics.ramUsedGb)).toFixed(1) : 'N/A',
+              UsedRAM_GB: cachedMetrics?.ramUsedGb || 'N/A',
+              RAMUsagePercent: cachedMetrics?.ramPercent || 'N/A',
+              PublicIP: cachedInfo?.publicIp || cachedMetrics?.publicIp || 'N/A',
+              LoggedUser: cachedInfo?.loggedUser || cachedMetrics?.loggedUser || 'Admin',
+              Uptime: cachedMetrics?.uptime || 'N/A',
+              LastBootTime: cachedInfo?.lastReboot || cachedMetrics?.lastReboot || 'N/A',
+              ExportedAt: new Date().toLocaleString()
+            },
+            Disks: [
+              {
+                Drive: 'C:',
+                VolumeName: 'Local System Disk',
+                FileSystem: 'NTFS',
+                TotalGB: cachedMetrics?.diskTotalGb || 'N/A',
+                FreeGB: cachedMetrics?.diskFreeGb || 'N/A',
+                UsedGB: (cachedMetrics?.diskTotalGb && cachedMetrics?.diskFreeGb) ? (parseFloat(cachedMetrics.diskTotalGb) - parseFloat(cachedMetrics.diskFreeGb)).toFixed(1) : 'N/A',
+                UsagePercent: cachedMetrics?.diskPercent || 0,
+                DriveType: 'Local Fixed Disk'
+              }
+            ],
+            Processes: [],
+            Network: [
+              {
+                Interface: 'Primary LAN',
+                IPv4: cachedInfo?.ip || cachedMetrics?.ip || '127.0.0.1',
+                PrefixLength: '24'
+              }
+            ]
+          }, reqRoom);
+
+          setClipboardToast({
+            text: `📊 Excel report generated from cached telemetry!`,
+            isSelf: true
+          });
+          setTimeout(() => setClipboardToast(null), 3000);
+          return false;
+        }
+        return false;
+      });
+    }, 8000);
   };
 
   const handleReceiveDownloadChunk = (chunkData) => {
@@ -1420,6 +1531,11 @@ function App() {
       }
     });
 
+    // Receive full system diagnostics report from host for Excel Export
+    socket.on('system-diagnostics-response', (data) => {
+      handleReceiveDiagnosticsReport(data);
+    });
+
     // Both host and controller are in the room
     socket.on('ready', ({ systemInfo } = {}) => {
       console.log('Host is ready, waiting for WebRTC offer...');
@@ -1615,6 +1731,8 @@ function App() {
             setTimeout(() => setClipboardToast(null), 3000);
           } else if (data.type === 'terminal-result') {
             handleProcessTerminalOutput(data);
+          } else if (data.type === 'system-diagnostics-response') {
+            handleReceiveDiagnosticsReport(data);
           }
         } catch (err) {}
       };
@@ -2976,6 +3094,24 @@ function App() {
                           💻 Specs
                         </button>
                       )}
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportSystemReport(device.roomId);
+                        }}
+                        disabled={!device.isOnline || isExportingExcel}
+                        className="btn-card-action"
+                        style={{
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          color: '#34d399',
+                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          flex: '0 0 auto'
+                        }}
+                        title="Export Target PC Disks, Processes & Telemetry to Excel (.xlsx)"
+                      >
+                        {isExportingExcel ? '⏳ Exporting...' : '📊 Excel'}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -3209,6 +3345,15 @@ function App() {
                   title="Toggle Screen Annotation & Laser Pointer Tool"
                 >
                   ✏️ Annotate
+                </button>
+
+                <button
+                  onClick={() => handleExportSystemReport()}
+                  disabled={isExportingExcel}
+                  className="control-btn btn-excel-toolbar"
+                  title="Export Target PC Disk Space, Running Processes & Specs to Excel (.xlsx)"
+                >
+                  {isExportingExcel ? '⏳ Exporting...' : '📑 Excel'}
                 </button>
 
                 {/* Multi-Monitor Dual/Triple Display Switcher */}
@@ -3889,6 +4034,17 @@ function App() {
                       </div>
                     </div>
                   </div>
+
+                  {/* 1-Click Excel Diagnostic Export Button */}
+                  <div style={{ marginTop: '14px', padding: '6px 0' }}>
+                    <button
+                      onClick={() => handleExportSystemReport()}
+                      disabled={isExportingExcel}
+                      className="btn-export-excel-action"
+                    >
+                      {isExportingExcel ? '⏳ Harvesting Telemetry & Exporting Excel...' : '📊 Export Full Diagnostic Report (.xlsx)'}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="drawer-loading">
@@ -3967,6 +4123,17 @@ function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94a3b8' }}>💻 OS Platform:</span>
                   <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.platform || 'N/A'}</strong>
+                </div>
+
+                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button
+                    onClick={() => handleExportSystemReport(hostSystemInfo.roomId || targetRoomId || roomId)}
+                    disabled={isExportingExcel}
+                    className="btn-export-excel-action"
+                    style={{ width: '100%', fontSize: '0.82rem', padding: '9px 12px' }}
+                  >
+                    {isExportingExcel ? '⏳ Generating Excel Report...' : '📊 Export Full System Report (.xlsx)'}
+                  </button>
                 </div>
               </div>
             </div>
