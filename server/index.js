@@ -572,8 +572,49 @@ function broadcastActiveHosts() {
   io.emit('active-hosts-list', hosts);
 }
 
+// Central Signaling Cluster Sync (Bridges Railway and cPanel in real-time)
+const PEER_CLUSTER_URL = process.env.PEER_CLUSTER_URL || 'https://remoteg-all-in-one-production-6122.up.railway.app';
+
+function syncWithCluster() {
+  try {
+    const https = require('https');
+    const url = `${PEER_CLUSTER_URL}/api/hosts`;
+    https.get(url, { timeout: 4000, rejectUnauthorized: false }, (res) => {
+      if (res.statusCode !== 200) return;
+      let raw = '';
+      res.on('data', d => raw += d);
+      res.on('end', () => {
+        try {
+          const peerHosts = JSON.parse(raw);
+          if (Array.isArray(peerHosts)) {
+            for (const h of peerHosts) {
+              if (h && h.roomId) {
+                const isLocal = rooms.has(h.roomId) && rooms.get(h.roomId).host;
+                if (!isLocal) {
+                  rooms.set(h.roomId, {
+                    host: null,
+                    controller: null,
+                    systemInfo: h.systemInfo,
+                    liveMetrics: h.liveMetrics,
+                    companyGroup: h.companyGroup || 'USPL',
+                    lastSeen: Date.now()
+                  });
+                }
+              }
+            }
+            broadcastActiveHosts();
+          }
+        } catch (e) {}
+      });
+    }).on('error', () => {});
+  } catch (e) {}
+}
+
+// Run cluster sync every 3 seconds
+setInterval(syncWithCluster, 3000);
+syncWithCluster();
+
 // Throttled 5-second background interval for central dashboard telemetry updates
-// (Runs O(N) once every 5s instead of O(N*M) 50 times per second on every packet pulse)
 setInterval(() => {
   if (rooms.size > 0) {
     broadcastActiveHosts();

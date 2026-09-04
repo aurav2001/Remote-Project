@@ -1,5 +1,11 @@
-// Root entry point for cPanel Phusion Passenger & Node.js Application Manager
+// Universal Root entry point for cPanel Phusion Passenger & Node.js Application Manager
 const path = require('path');
+const fs = require('fs');
 
-// Launch the main signaling server & static web controller
-require(path.join(__dirname, 'server', 'index.js'));
+if (fs.existsSync(path.join(__dirname, 'index.js'))) {
+  require(path.join(__dirname, 'index.js'));
+} else if (fs.existsSync(path.join(__dirname, 'server', 'index.js'))) {
+  require(path.join(__dirname, 'server', 'index.js'));
+} else {
+  console.error('No valid index.js found in', __dirname);
+}
