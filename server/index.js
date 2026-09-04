@@ -155,9 +155,18 @@ function getStaticDistPath() {
 }
 
 const distPath = getStaticDistPath();
-app.use(express.static(path.join(__dirname, '../controller-web/dist')));
-app.use(express.static(distPath));
-app.use(express.static(path.join(__dirname, 'public')));
+const staticOptions = {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+};
+app.use(express.static(path.join(__dirname, '../controller-web/dist'), staticOptions));
+app.use(express.static(distPath, staticOptions));
+app.use(express.static(path.join(__dirname, 'public'), staticOptions));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -547,6 +556,27 @@ io.on('connection', (socket) => {
       }, 3000);
     }
   });
+});
+
+// Wildcard SPA route to always serve the latest compiled index.html without caching
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) {
+    return next();
+  }
+  const possibleIndex = [
+    path.join(__dirname, '../controller-web/dist/index.html'),
+    path.join(distPath, 'index.html'),
+    path.join(__dirname, 'public/index.html')
+  ];
+  for (const idx of possibleIndex) {
+    if (fs.existsSync(idx)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      return res.sendFile(idx);
+    }
+  }
+  next();
 });
 
 const PORT = process.env.PORT || 5000;
