@@ -1,0 +1,14 @@
+# cPanel Phusion Passenger & WebSocket Configuration for Remote Node App
+PassengerAppRoot "/home/uniotechit/public_html/remote-app"
+PassengerAppType node
+PassengerStartupFile app.js
+
+RewriteEngine On
+
+# Ensure HTTPS
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Support WebSocket upgrade proxying if applicable
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule /(.*) ws://127.0.0.1:5000/$1 [P,L]
