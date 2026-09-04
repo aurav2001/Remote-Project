@@ -120,3 +120,36 @@ export function exportHostDiagnosticsToExcel(reportData, fallbackHostId = 'Targe
   console.log(`[Excel Export]: Successfully generated and downloaded ${fileName}`);
   return true;
 }
+
+/**
+ * Generates and downloads an Excel file containing all registered client leads
+ * @param {Array} clients - Array of registered user objects
+ */
+export function exportRegisteredClientsToExcel(clients = []) {
+  const workbook = XLSX.utils.book_new();
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fileName = `UnioTechIT_Registered_Clients_${dateStr}.xlsx`;
+
+  const rows = clients.map((c, idx) => ({
+    'S.No': idx + 1,
+    'Client Name': c.name || 'N/A',
+    'Company / Org': c.companyName || 'N/A',
+    'Phone / WhatsApp': c.phone || 'N/A',
+    'Email Address': c.email || 'N/A',
+    'Desktops Required': c.desktopCount || '1-5 PCs',
+    'Role': c.role || 'Client',
+    'Registration Date': c.registeredAt ? new Date(c.registeredAt).toLocaleString() : 'N/A'
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [
+    { 'S.No': 1, 'Client Name': 'No registrations yet', 'Company / Org': '', 'Phone / WhatsApp': '', 'Email Address': '', 'Desktops Required': '', 'Role': '', 'Registration Date': '' }
+  ]);
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 22 }, { wch: 24 }, { wch: 20 },
+    { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 22 }
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, ws, 'Registered Clients');
+  XLSX.writeFile(workbook, fileName);
+  return true;
+}

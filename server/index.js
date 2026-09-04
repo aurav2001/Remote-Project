@@ -16,10 +16,55 @@ let ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 let ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
 const AUTH_SECRET = process.env.AUTH_SECRET || 'remoteg-unio-tech-it-auth-secret-key-2026';
 
-function generateAuthToken(username) {
+const DATA_DIR = path.join(__dirname, 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+function ensureDataStorage() {
+  if (!fs.existsSync(DATA_DIR)) {
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+  }
+  if (!fs.existsSync(USERS_FILE)) {
+    try { fs.writeFileSync(USERS_FILE, JSON.stringify([]), 'utf8'); } catch (e) {}
+  }
+}
+ensureDataStorage();
+
+function getRegisteredUsers() {
+  try {
+    ensureDataStorage();
+    const data = fs.readFileSync(USERS_FILE, 'utf8');
+    return JSON.parse(data || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveRegisteredUser(user) {
+  try {
+    ensureDataStorage();
+    const users = getRegisteredUsers();
+    users.unshift(user);
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('Failed saving user to storage:', e);
+    return false;
+  }
+}
+
+function generateAuthToken(user) {
+  const isString = typeof user === 'string';
+  const username = isString ? user : (user.email || user.username);
+  const role = isString && user.toLowerCase() === ADMIN_USERNAME.toLowerCase() ? 'Administrator' : (!isString && user.role ? user.role : 'Client');
+
   const payload = {
     username,
-    role: 'Administrator',
+    name: !isString && user.name ? user.name : (role === 'Administrator' ? 'System Administrator' : username),
+    companyName: !isString && user.companyName ? user.companyName : 'USPL',
+    phone: !isString && user.phone ? user.phone : '',
+    email: !isString && user.email ? user.email : '',
+    desktopCount: !isString && user.desktopCount ? user.desktopCount : '1-5 PCs',
+    role,
     issuedAt: Date.now(),
     expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days session
   };
@@ -45,28 +90,117 @@ function verifyAuthToken(token) {
 }
 
 // Authentication REST Endpoints
+
+// 1. User / Client Registration Endpoint
+app.post('/api/auth/register', (req, res) => {
+  const { name, companyName, phone, email, desktopCount, password } = req.body || {};
+
+  if (!name || !companyName || !phone || !email || !password) {
+    return res.status(400).json({ error: 'All fields (Name, Company, Phone, Email, Password) are required' });
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  const cleanPhone = String(phone).trim();
+  const cleanName = String(name).trim();
+  const cleanCompany = String(companyName).trim().toUpperCase();
+  const cleanCount = String(desktopCount || '1-5 PCs').trim();
+
+  const users = getRegisteredUsers();
+  const existing = users.find(u => u.email === cleanEmail);
+  if (existing) {
+    return res.status(400).json({ error: 'An account with this email already exists. Please login instead.' });
+  }
+
+  const newUser = {
+    id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    name: cleanName,
+    companyName: cleanCompany,
+    phone: cleanPhone,
+    email: cleanEmail,
+    desktopCount: cleanCount,
+    password: password,
+    role: 'Client',
+    registeredAt: new Date().toISOString()
+  };
+
+  saveRegisteredUser(newUser);
+
+  // Auto-generate authenticated token for immediate access
+  const token = generateAuthToken(newUser);
+
+  console.log(`[Registration]: New customer registered - Name: ${cleanName}, Company: ${cleanCompany}, Phone: ${cleanPhone}, Email: ${cleanEmail}, Desktops: ${cleanCount}`);
+
+  return res.json({
+    success: true,
+    message: 'Registration successful! Your account is ready.',
+    token,
+    user: {
+      id: newUser.id,
+      name: newUser.name,
+      companyName: newUser.companyName,
+      phone: newUser.phone,
+      email: newUser.email,
+      desktopCount: newUser.desktopCount,
+      role: newUser.role,
+      loginTime: new Date().toISOString()
+    }
+  });
+});
+
+// 2. Login Endpoint (Supports Admin and Registered Client users)
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
+    return res.status(400).json({ error: 'Username/Email and password are required' });
   }
-  
-  if (username.trim().toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
-    const token = generateAuthToken(username.trim());
+
+  const cleanUser = String(username).trim();
+
+  // Check Admin Master Credentials
+  if (cleanUser.toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
+    const token = generateAuthToken(ADMIN_USERNAME);
     return res.json({
       success: true,
       token,
       user: {
         username: ADMIN_USERNAME,
+        name: 'System Administrator',
+        companyName: 'USPL Headquarter',
         role: 'Administrator',
         loginTime: new Date().toISOString()
       }
     });
   }
-  
-  return res.status(401).json({ error: 'Invalid username or password' });
+
+  // Check Registered Client Accounts
+  const users = getRegisteredUsers();
+  const user = users.find(u => 
+    (u.email.toLowerCase() === cleanUser.toLowerCase() || u.phone === cleanUser || u.name.toLowerCase() === cleanUser.toLowerCase()) && 
+    u.password === password
+  );
+
+  if (user) {
+    const token = generateAuthToken(user);
+    return res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        companyName: user.companyName,
+        phone: user.phone,
+        email: user.email,
+        desktopCount: user.desktopCount,
+        role: user.role,
+        loginTime: new Date().toISOString()
+      }
+    });
+  }
+
+  return res.status(401).json({ error: 'Invalid email/username or password. If you are new, please register.' });
 });
 
+// 3. Verify Session Token
 app.get('/api/auth/verify', (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token || '');
@@ -76,11 +210,33 @@ app.get('/api/auth/verify', (req, res) => {
       authenticated: true,
       user: {
         username: user.username,
+        name: user.name || user.username,
+        companyName: user.companyName || 'USPL',
+        phone: user.phone || '',
+        email: user.email || '',
+        desktopCount: user.desktopCount || '1-5 PCs',
         role: user.role
       }
     });
   }
   return res.status(401).json({ authenticated: false, error: 'Invalid or expired session token' });
+});
+
+// 4. Admin List of All Registered Clients / Leads
+app.get('/api/admin/registrations', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token || '');
+  const user = verifyAuthToken(token);
+  if (!user || user.role !== 'Administrator') {
+    return res.status(403).json({ error: 'Forbidden: Admin authorization required' });
+  }
+  const users = getRegisteredUsers();
+  const safeUsers = users.map(({ password, ...rest }) => rest);
+  return res.json({
+    success: true,
+    total: safeUsers.length,
+    users: safeUsers
+  });
 });
 
 app.post('/api/auth/change-password', (req, res) => {

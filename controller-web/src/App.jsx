@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
-import { exportHostDiagnosticsToExcel } from './utils/excelExport';
+import { exportHostDiagnosticsToExcel, exportRegisteredClientsToExcel } from './utils/excelExport';
 
 const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://')) 
   ? window.location.origin 
@@ -131,6 +131,21 @@ function App() {
   const [loginShake, setLoginShake] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showLandingView, setShowLandingView] = useState(false);
+
+  // Registration Form States
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [regName, setRegName] = useState('');
+  const [regCompany, setRegCompany] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regDesktopCount, setRegDesktopCount] = useState('1-5 PCs');
+  const [regPassword, setRegPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+
+  // Admin Leads Management States
+  const [registeredClients, setRegisteredClients] = useState([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
+  const [adminActiveSection, setAdminActiveSection] = useState('devices'); // 'devices' or 'clients'
 
   // Change Password Modal States
   const [showChangePassModal, setShowChangePassModal] = useState(false);
@@ -771,6 +786,112 @@ function App() {
       setIsLoggingIn(false);
     }
   };
+
+  // Client User Registration Handler
+  const handleRegister = async (e) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+
+    if (!regName.trim() || !regCompany.trim() || !regPhone.trim() || !regEmail.trim() || !regPassword) {
+      setLoginError('Please fill out all registration fields.');
+      triggerLoginShake();
+      return;
+    }
+
+    setIsRegistering(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: regName.trim(),
+          companyName: regCompany.trim(),
+          phone: regPhone.trim(),
+          email: regEmail.trim(),
+          desktopCount: regDesktopCount,
+          password: regPassword
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.token) {
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        setShowAuthModal(false);
+        setShowLandingView(false);
+        localStorage.setItem('unio_auth_token', data.token);
+        localStorage.setItem('unio_current_user', JSON.stringify(data.user));
+
+        setClipboardToast({
+          text: `🎉 Welcome ${data.user.name}! Downloading Windows Host Agent...`,
+          isSelf: true
+        });
+        setTimeout(() => setClipboardToast(null), 6000);
+
+        // Auto trigger .exe download immediately upon registration!
+        handleDownloadSetupDirect('/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe');
+      } else {
+        setLoginError(data.error || 'Registration failed. Please verify your details.');
+        triggerLoginShake();
+      }
+    } catch (err) {
+      setLoginError('Network connection error during registration. Please try again.');
+      triggerLoginShake();
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  // Protected Installer Download Interceptor
+  const handleProtectedDownload = (e, fileUrl = '/UnioTechIT-Setup.exe', fileName = 'UnioTechIT-Setup.exe') => {
+    if (e) e.preventDefault();
+    if (!isAuthenticated) {
+      setAuthMode('register');
+      setLoginError('Please register your company details or sign in to download the Windows Host Agent.');
+      setShowAuthModal(true);
+      return false;
+    }
+    handleDownloadSetupDirect(fileUrl, fileName);
+    return true;
+  };
+
+  const handleDownloadSetupDirect = (fileUrl = '/UnioTechIT-Setup.exe', fileName = 'UnioTechIT-Setup.exe') => {
+    const a = document.createElement('a');
+    a.href = fileUrl;
+    a.setAttribute('download', fileName);
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      if (document.body.contains(a)) document.body.removeChild(a);
+    }, 500);
+  };
+
+  // Fetch Registered Clients for Admin Dashboard
+  const fetchRegisteredClients = async () => {
+    if (!authToken || currentUser?.role !== 'Administrator') return;
+    setIsLoadingClients(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/admin/registrations`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.users) {
+          setRegisteredClients(data.users);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch registered clients:', err);
+    } finally {
+      setIsLoadingClients(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated && currentUser?.role === 'Administrator') {
+      fetchRegisteredClients();
+    }
+  }, [isAuthenticated, currentUser]);
 
   const handleLogout = async (callApi = true) => {
     if (callApi && authToken) {
@@ -2317,10 +2438,14 @@ function App() {
                 </button>
               )}
 
-              <a href="/UnioTechIT-Setup.exe" className="hero-secondary-btn" download="UnioTechIT-Setup.exe">
+              <button 
+                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')} 
+                className="hero-secondary-btn"
+                style={{ cursor: 'pointer', border: 'none' }}
+              >
                 <span>📥 Download Host Agent (.exe)</span>
                 <span className="btn-sub-tag">v1.0.0</span>
-              </a>
+              </button>
             </div>
 
             {/* Hero Visual Preview with Floating Badges */}
@@ -2477,8 +2602,8 @@ function App() {
           <div className="steps-container">
             <div className="step-card">
               <div className="step-num">01</div>
-              <h3 className="step-title">Install Agent on Host PC</h3>
-              <p className="step-desc">Download and run <code>UnioTechIT Setup.exe</code> on the remote Windows computer. It assigns an instant 6-digit node code.</p>
+              <h3 className="step-title">Register & Download Agent</h3>
+              <p className="step-desc">Register with your company name to download <code>UnioTechIT Setup.exe</code> for your managed Windows endpoints.</p>
             </div>
 
             <div className="step-card">
@@ -2499,26 +2624,34 @@ function App() {
         <section id="download" className="landing-download-section">
           <div className="download-box-glass">
             <h2 className="download-title">Download UnioTechIT Windows Agent</h2>
-            <p className="download-desc">Supported on Windows 10, Windows 11, and Windows Server (64-bit). No license keys required.</p>
+            <p className="download-desc">Supported on Windows 10, Windows 11, and Windows Server (64-bit). Registration required for fleet deployment.</p>
             
             <div className="download-buttons-group">
-              <a href="/UnioTechIT-Setup.exe" className="download-action-card" download="UnioTechIT-Setup.exe">
+              <button 
+                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')} 
+                className="download-action-card"
+                style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', width: '100%', font: 'inherit' }}
+              >
                 <div className="dl-icon">⚡</div>
                 <div className="dl-info">
                   <strong>Standalone Windows Setup (.exe)</strong>
-                  <small>Recommended • 1-Click Installer (Auto Desktop Shortcut)</small>
+                  <small>{isAuthenticated ? 'Ready • 1-Click Installer (Auto Desktop Shortcut)' : '🔒 Register / Login Required to Download'}</small>
                 </div>
-                <span className="dl-arrow">⬇️</span>
-              </a>
+                <span className="dl-arrow">{isAuthenticated ? '⬇️' : '🔐'}</span>
+              </button>
 
-              <a href="/download" className="download-action-card" download="UnioTechIT-Setup.zip">
+              <button 
+                onClick={(e) => handleProtectedDownload(e, '/download', 'UnioTechIT-Setup.zip')} 
+                className="download-action-card"
+                style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', width: '100%', font: 'inherit' }}
+              >
                 <div className="dl-icon">📦</div>
                 <div className="dl-info">
                   <strong>Portable ZIP Package (.zip)</strong>
-                  <small>Portable executable package for USB / network deployment</small>
+                  <small>{isAuthenticated ? 'Portable executable package for USB / network deployment' : '🔒 Register / Login Required to Download'}</small>
                 </div>
-                <span className="dl-arrow">⬇️</span>
-              </a>
+                <span className="dl-arrow">{isAuthenticated ? '⬇️' : '🔐'}</span>
+              </button>
             </div>
           </div>
         </section>
@@ -2546,14 +2679,14 @@ function App() {
           </div>
         </footer>
 
-        {/* Glassmorphism Login Modal */}
+        {/* Glassmorphism Login & Registration Modal */}
         {showAuthModal && (
           <div className="auth-modal-overlay" onClick={() => setShowAuthModal(false)}>
-            <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`} onClick={e => e.stopPropagation()}>
+            <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`} style={{ maxWidth: authMode === 'register' ? '520px' : '440px' }} onClick={e => e.stopPropagation()}>
               <button className="auth-modal-close-btn" onClick={() => setShowAuthModal(false)} title="Close">✕</button>
               
               {/* Brand & Security Header */}
-              <div className="auth-header">
+              <div className="auth-header" style={{ marginBottom: '16px' }}>
                 <div className="auth-logo-badge">
                   <img src="/logo.png" alt="UnioTechIT Logo" className="auth-logo-img" />
                   <div className="auth-security-icon-glow">
@@ -2563,13 +2696,57 @@ function App() {
                     </svg>
                   </div>
                 </div>
-                <h1 className="auth-title">Admin Console Login</h1>
-                <p className="auth-subtitle">Sign in to manage active remote devices & sessions</p>
+                <h1 className="auth-title">{authMode === 'register' ? 'Register & Download Agent' : 'Remote Console Sign In'}</h1>
+                <p className="auth-subtitle">
+                  {authMode === 'register' 
+                    ? 'Register your company details to download the Windows Host Agent' 
+                    : 'Sign in to access your remote fleet & active sessions'}
+                </p>
+              </div>
+
+              {/* Mode Switcher Tabs */}
+              <div className="auth-tab-switch" style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', marginBottom: '18px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setLoginError(''); }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    background: authMode === 'login' ? 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)' : 'transparent',
+                    color: authMode === 'login' ? '#ffffff' : '#94a3b8',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  🔐 Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('register'); setLoginError(''); }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    background: authMode === 'register' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
+                    color: authMode === 'register' ? '#ffffff' : '#94a3b8',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  📝 Register & Download
+                </button>
               </div>
 
               {/* Error Notification */}
               {loginError && (
-                <div className="auth-error-banner">
+                <div className="auth-error-banner" style={{ marginBottom: '16px' }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -2579,110 +2756,223 @@ function App() {
                 </div>
               )}
 
-              {/* Login Form */}
-              <form onSubmit={handleLogin} className="auth-form">
-                <div className="auth-field-group">
-                  <label className="auth-label">Administrator ID / Username</label>
-                  <div className="auth-input-wrapper">
-                    <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                    <input
-                      type="text"
-                      className="auth-input"
-                      placeholder="Enter admin username"
-                      value={loginUsername}
-                      onChange={(e) => setLoginUsername(e.target.value)}
-                      autoFocus
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="auth-field-group">
-                  <div className="auth-label-row">
-                    <label className="auth-label">Security Master Password</label>
-                  </div>
-                  <div className="auth-input-wrapper">
-                    <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      className="auth-input"
-                      placeholder="Enter master password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="auth-eye-btn"
-                      onClick={() => setShowPassword(!showPassword)}
-                      title={showPassword ? "Hide password" : "Show password"}
-                    >
-                      {showPassword ? "👁️" : "🔒"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="auth-options-row">
-                  <label className="auth-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="auth-checkbox"
-                    />
-                    <span>Remember Session (7 Days)</span>
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  className="auth-submit-btn"
-                  disabled={isLoggingIn}
-                >
-                  {isLoggingIn ? (
-                    <span className="auth-loading-state">
-                      <span className="auth-spinner"></span>
-                      <span>Authenticating Gateway...</span>
-                    </span>
-                  ) : (
-                    <span className="auth-btn-content">
-                      <span>🔐 Authenticate & Enter Console</span>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                        <polyline points="12 5 19 12 12 19"></polyline>
+              {/* Tab 1: Login Form */}
+              {authMode === 'login' ? (
+                <form onSubmit={handleLogin} className="auth-form">
+                  <div className="auth-field-group">
+                    <label className="auth-label">Administrator ID / Registered Email</label>
+                    <div className="auth-input-wrapper">
+                      <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
                       </svg>
-                    </span>
-                  )}
-                </button>
-              </form>
+                      <input
+                        type="text"
+                        className="auth-input"
+                        placeholder="Enter username or email"
+                        value={loginUsername}
+                        onChange={(e) => setLoginUsername(e.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </div>
+                  </div>
 
-              {/* Quick Credentials Preset Helper */}
-              <div className="auth-quick-hint">
-                <div className="auth-hint-header">
-                  <span>⚡ Default Master Credentials:</span>
+                  <div className="auth-field-group">
+                    <div className="auth-label-row">
+                      <label className="auth-label">Security Master Password</label>
+                    </div>
+                    <div className="auth-input-wrapper">
+                      <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                      </svg>
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        className="auth-input"
+                        placeholder="Enter account password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="auth-eye-btn"
+                        onClick={() => setShowPassword(!showPassword)}
+                        title={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? "👁️" : "🔒"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="auth-options-row">
+                    <label className="auth-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="auth-checkbox"
+                      />
+                      <span>Remember Session (7 Days)</span>
+                    </label>
+                  </div>
+
                   <button
-                    type="button"
-                    className="auth-autofill-btn"
-                    onClick={() => {
-                      setLoginUsername('admin');
-                      setLoginPassword('admin123');
-                      setLoginError('');
-                    }}
+                    type="submit"
+                    className="auth-submit-btn"
+                    disabled={isLoggingIn}
                   >
-                    1-Click Auto Fill
+                    {isLoggingIn ? (
+                      <span className="auth-loading-state">
+                        <span className="auth-spinner"></span>
+                        <span>Authenticating Gateway...</span>
+                      </span>
+                    ) : (
+                      <span className="auth-btn-content">
+                        <span>🔐 Authenticate & Enter Console</span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                          <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                      </span>
+                    )}
                   </button>
-                </div>
-                <div className="auth-creds-preview">
-                  <code>User: <strong>admin</strong></code>
-                  <code>Pass: <strong>admin123</strong></code>
-                </div>
-              </div>
+
+                  {/* Quick Credentials Preset Helper */}
+                  <div className="auth-quick-hint" style={{ marginTop: '14px' }}>
+                    <div className="auth-hint-header">
+                      <span>⚡ Default Master Admin:</span>
+                      <button
+                        type="button"
+                        className="auth-autofill-btn"
+                        onClick={() => {
+                          setLoginUsername('admin');
+                          setLoginPassword('admin123');
+                          setLoginError('');
+                        }}
+                      >
+                        1-Click Fill
+                      </button>
+                    </div>
+                    <div className="auth-creds-preview">
+                      <code>admin / admin123</code>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                /* Tab 2: Client Registration Form */
+                <form onSubmit={handleRegister} className="auth-form">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="auth-field-group">
+                      <label className="auth-label">👤 Full Name *</label>
+                      <input
+                        type="text"
+                        className="auth-input"
+                        placeholder="e.g. Rahul Sharma"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="auth-field-group">
+                      <label className="auth-label">🏢 Company / Org *</label>
+                      <input
+                        type="text"
+                        className="auth-input"
+                        placeholder="e.g. USPL Tech / G-Tech"
+                        value={regCompany}
+                        onChange={(e) => setRegCompany(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+                    <div className="auth-field-group">
+                      <label className="auth-label">📞 Phone / WhatsApp *</label>
+                      <input
+                        type="tel"
+                        className="auth-input"
+                        placeholder="e.g. +91 9876543210"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="auth-field-group">
+                      <label className="auth-label">📧 Official Email *</label>
+                      <input
+                        type="email"
+                        className="auth-input"
+                        placeholder="e.g. rahul@company.com"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+                    <div className="auth-field-group">
+                      <label className="auth-label">🖥️ Desktops Needed *</label>
+                      <select
+                        className="auth-input"
+                        value={regDesktopCount}
+                        onChange={(e) => setRegDesktopCount(e.target.value)}
+                        style={{ cursor: 'pointer', background: 'rgba(15, 23, 42, 0.9)' }}
+                      >
+                        <option value="1-5 PCs">1 - 5 Desktops (Starter)</option>
+                        <option value="6-20 PCs">6 - 20 Desktops (Small Office)</option>
+                        <option value="21-50 PCs">21 - 50 Desktops (Mid-Size Org)</option>
+                        <option value="51-100 PCs">51 - 100 Desktops (Enterprise)</option>
+                        <option value="100+ PCs">100+ Desktops (Corporate Fleet)</option>
+                      </select>
+                    </div>
+
+                    <div className="auth-field-group">
+                      <label className="auth-label">🔑 Create Password *</label>
+                      <input
+                        type="password"
+                        className="auth-input"
+                        placeholder="Min 4 characters"
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="auth-submit-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      marginTop: '16px',
+                      boxShadow: '0 4px 15px rgba(16, 185, 129, 0.4)'
+                    }}
+                    disabled={isRegistering}
+                  >
+                    {isRegistering ? (
+                      <span className="auth-loading-state">
+                        <span className="auth-spinner"></span>
+                        <span>Registering & Preparing Download...</span>
+                      </span>
+                    ) : (
+                      <span className="auth-btn-content">
+                        <span>🚀 Register & Download Agent (.exe)</span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                          <polyline points="7 10 12 15 17 10"></polyline>
+                          <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         )}
@@ -2726,6 +3016,28 @@ function App() {
               >
                 ⚡ Code Connect
               </button>
+
+              {currentUser?.role === 'Administrator' && (
+                <button 
+                  className={`tab-btn ${activeTab === 'clients' ? 'active' : ''}`}
+                  onClick={() => { setActiveTab('clients'); fetchRegisteredClients(); }}
+                >
+                  👥 Registered Clients
+                  {registeredClients.length > 0 && (
+                    <span style={{ 
+                      background: 'rgba(56, 189, 248, 0.25)',
+                      color: '#38bdf8',
+                      padding: '2px 8px',
+                      borderRadius: '100px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      marginLeft: '6px'
+                    }}>
+                      {registeredClients.length}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="dashboard-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -3115,6 +3427,187 @@ function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          ) : activeTab === 'clients' ? (
+            <div className="dashboard-content" style={{ padding: '24px' }}>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                backdropFilter: 'blur(16px)',
+                borderRadius: '16px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '24px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+              }}>
+                {/* Header & Actions */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '18px' }}>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
+                      <span>👥</span>
+                      <span>Registered Client Inquiries & Host Downloads</span>
+                    </h2>
+                    <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+                      Real-time records of registered users, company scale, contact details, and host installer leads.
+                    </p>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                      onClick={() => fetchRegisteredClients()}
+                      className="tab-btn"
+                      style={{ padding: '8px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      title="Reload latest registrations"
+                    >
+                      <span>🔄</span>
+                      <span>Refresh</span>
+                    </button>
+
+                    <button
+                      onClick={() => exportRegisteredClientsToExcel(registeredClients)}
+                      disabled={!registeredClients || registeredClients.length === 0}
+                      style={{
+                        padding: '8px 18px',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        cursor: (!registeredClients || registeredClients.length === 0) ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                        opacity: (!registeredClients || registeredClients.length === 0) ? 0.6 : 1
+                      }}
+                      title="Download full client directory into structured Microsoft Excel Workbook"
+                    >
+                      <span>📥</span>
+                      <span>Export All Leads (.xlsx)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Table or Empty State */}
+                {(!registeredClients || registeredClients.length === 0) ? (
+                  <div style={{ textAlign: 'center', padding: '48px 16px', color: '#94a3b8' }}>
+                    <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📋</div>
+                    <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0' }}>No Client Registrations Yet</h3>
+                    <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                      When visitors register on the landing page to download the host installer, their company details and requirements will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)', color: '#94a3b8', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>
+                          <th style={{ padding: '12px 14px' }}>#</th>
+                          <th style={{ padding: '12px 14px' }}>Client / Contact</th>
+                          <th style={{ padding: '12px 14px' }}>Company / Organization</th>
+                          <th style={{ padding: '12px 14px' }}>Phone / WhatsApp</th>
+                          <th style={{ padding: '12px 14px' }}>Email Address</th>
+                          <th style={{ padding: '12px 14px' }}>Desktops Required</th>
+                          <th style={{ padding: '12px 14px' }}>Registration Date</th>
+                          <th style={{ padding: '12px 14px' }}>Role / Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {registeredClients.map((client, idx) => (
+                          <tr 
+                            key={client.id || idx}
+                            style={{ 
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <td style={{ padding: '14px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                            <td style={{ padding: '14px', color: '#f8fafc', fontWeight: 600 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>
+                                  {(client.name || 'U').charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div>{client.name || 'Anonymous User'}</div>
+                                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 400 }}>@{client.username}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ padding: '14px', color: '#e2e8f0' }}>
+                              <span style={{ 
+                                display: 'inline-block',
+                                background: 'rgba(56, 189, 248, 0.1)',
+                                color: '#38bdf8',
+                                border: '1px solid rgba(56, 189, 248, 0.25)',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                fontWeight: 600
+                              }}>
+                                🏢 {client.companyName || 'Not Specified'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '14px', color: '#38bdf8' }}>
+                              {client.phone ? (
+                                <a 
+                                  href={`tel:${client.phone}`}
+                                  style={{ color: '#34d399', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                >
+                                  📞 {client.phone}
+                                </a>
+                              ) : (
+                                <span style={{ color: '#64748b' }}>-</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '14px', color: '#94a3b8' }}>
+                              {client.email ? (
+                                <a 
+                                  href={`mailto:${client.email}`}
+                                  style={{ color: '#818cf8', textDecoration: 'none' }}
+                                >
+                                  📧 {client.email}
+                                </a>
+                              ) : (
+                                <span style={{ color: '#64748b' }}>-</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '14px' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                background: 'rgba(168, 85, 247, 0.15)',
+                                color: '#c084fc',
+                                border: '1px solid rgba(168, 85, 247, 0.3)',
+                                padding: '3px 10px',
+                                borderRadius: '100px',
+                                fontWeight: 700,
+                                fontSize: '0.8rem'
+                              }}>
+                                🖥️ {client.desktopCount || '1'} {client.desktopCount === '100+' ? 'PCs' : 'Desktops'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '14px', color: '#94a3b8', fontSize: '0.8rem' }}>
+                              {client.createdAt ? new Date(client.createdAt).toLocaleString() : 'Recent'}
+                            </td>
+                            <td style={{ padding: '14px' }}>
+                              <span style={{
+                                background: client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                color: client.role === 'Administrator' ? '#f87171' : '#34d399',
+                                border: `1px solid ${client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                                padding: '2px 8px',
+                                borderRadius: '100px',
+                                fontSize: '0.72rem',
+                                fontWeight: 600
+                              }}>
+                                {client.role || 'Client'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
