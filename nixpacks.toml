@@ -3,8 +3,10 @@ nixPkgs = ["nodejs_22"]
 
 [phases.build]
 cmds = [
-  "cd controller-web && npm install && npm run build",
-  "cd server && npm install"
+  "npm --prefix controller-web install",
+  "npm --prefix controller-web run build",
+  "npm --prefix server install",
+  "npm install"
 ]
 
 [start]
