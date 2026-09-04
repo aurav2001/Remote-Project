@@ -190,7 +190,6 @@ async function registerHostOnServer() {
   if (!companyGroup) {
     await getOrInitCompanyGroup();
   }
-  if (!socket || !socket.connected || !roomId) return;
   let systemInfo = null;
   try {
     if (window.electronAPI && window.electronAPI.getSystemInfo) {
@@ -202,9 +201,29 @@ async function registerHostOnServer() {
   if (systemInfo) {
     systemInfo.companyGroup = companyGroup;
   }
-  console.log(`[Host]: Registering room on server. Room ID: ${roomId}, Company: ${companyGroup}`);
-  socket.emit('join-room', { roomId, role: 'host', systemInfo, companyGroup });
+
+  // 1. WebSocket Join Room
+  if (socket && socket.connected && roomId) {
+    console.log(`[Host]: Registering room on server (Socket). Room ID: ${roomId}, Company: ${companyGroup}`);
+    socket.emit('join-room', { roomId, role: 'host', systemInfo, companyGroup });
+  }
+
+  // 2. Guaranteed HTTP Heartbeat Post (Works even if WebSocket is proxy-delayed)
+  try {
+    fetch(`${SIGNALING_SERVER}/api/register-host`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId, systemInfo, companyGroup })
+    }).catch(() => {});
+  } catch(e) {}
 }
+
+// Background 5s HTTP Keepalive Heartbeat
+setInterval(() => {
+  if (roomId) {
+    registerHostOnServer();
+  }
+}, 5000);
 
 // Initialize Socket.io Connection Directly
 function initSocket() {
@@ -222,7 +241,8 @@ function initSocket() {
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    timeout: 20000
+    timeout: 20000,
+    transports: ['websocket', 'polling']
   });
 
   socket.on('connect', () => {
