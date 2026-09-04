@@ -1,3 +1,5 @@
+try { require('dotenv').config(); } catch (e) {}
+
 const path = require('path');
 const express = require('express');
 const http = require('http');
@@ -16,8 +18,63 @@ let ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 let ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
 const AUTH_SECRET = process.env.AUTH_SECRET || 'remoteg-unio-tech-it-auth-secret-key-2026';
 
+// ----------------------------------------------------
+// cPanel MySQL & Persistent Storage Setup
+// ----------------------------------------------------
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+let dbPool = null;
+let isMysqlActive = false;
+
+// Initialize MySQL pool if cPanel database credentials exist
+const DB_HOST = process.env.DB_HOST || 'localhost';
+const DB_USER = process.env.DB_USER || '';
+const DB_PASS = process.env.DB_PASSWORD || process.env.DB_PASS || '';
+const DB_NAME = process.env.DB_NAME || '';
+const DB_PORT = process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306;
+
+if (DB_USER && DB_NAME) {
+  try {
+    const mysql = require('mysql2/promise');
+    dbPool = mysql.createPool({
+      host: DB_HOST,
+      port: DB_PORT,
+      user: DB_USER,
+      password: DB_PASS,
+      database: DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000
+    });
+
+    (async () => {
+      try {
+        await dbPool.query(`
+          CREATE TABLE IF NOT EXISTS registered_users (
+            id VARCHAR(100) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            company_name VARCHAR(255) NOT NULL,
+            phone VARCHAR(50) NOT NULL,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            desktop_count VARCHAR(50) DEFAULT '1-5 PCs',
+            password VARCHAR(255) NOT NULL,
+            role VARCHAR(50) DEFAULT 'Client',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        isMysqlActive = true;
+        console.log(`[cPanel Database]: Connected to MySQL database "${DB_NAME}" on ${DB_HOST} successfully.`);
+      } catch (err) {
+        console.error('[cPanel MySQL Error]: Connection failed, using JSON storage:', err.message);
+      }
+    })();
+  } catch (err) {
+    console.log('[cPanel MySQL]: mysql2 module not loaded, using JSON file storage.');
+  }
+}
 
 function ensureDataStorage() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -29,7 +86,7 @@ function ensureDataStorage() {
 }
 ensureDataStorage();
 
-function getRegisteredUsers() {
+function getRegisteredUsersLocal() {
   try {
     ensureDataStorage();
     const data = fs.readFileSync(USERS_FILE, 'utf8');
@@ -39,17 +96,79 @@ function getRegisteredUsers() {
   }
 }
 
-function saveRegisteredUser(user) {
+function saveRegisteredUserLocal(user) {
   try {
     ensureDataStorage();
-    const users = getRegisteredUsers();
+    const users = getRegisteredUsersLocal();
     users.unshift(user);
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
     return true;
   } catch (e) {
-    console.error('Failed saving user to storage:', e);
+    console.error('Failed saving user to local storage:', e);
     return false;
   }
+}
+
+// Unified Async Database Operations (MySQL with Automatic Local Fallback)
+async function getRegisteredUsersAsync() {
+  if (isMysqlActive && dbPool) {
+    try {
+      const [rows] = await dbPool.query('SELECT id, name, company_name AS companyName, phone, email, desktop_count AS desktopCount, password, role, created_at AS createdAt FROM registered_users ORDER BY created_at DESC');
+      return rows;
+    } catch (e) {
+      console.error('MySQL query error, fallback to local:', e.message);
+    }
+  }
+  return getRegisteredUsersLocal();
+}
+
+async function saveRegisteredUserAsync(user) {
+  if (isMysqlActive && dbPool) {
+    try {
+      await dbPool.query(
+        'INSERT INTO registered_users (id, name, company_name, phone, email, desktop_count, password, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [user.id, user.name, user.companyName, user.phone, user.email, user.desktopCount, user.password, user.role || 'Client']
+      );
+      saveRegisteredUserLocal(user); // Also save backup to local
+      return true;
+    } catch (e) {
+      console.error('MySQL insert error, fallback to local:', e.message);
+    }
+  }
+  return saveRegisteredUserLocal(user);
+}
+
+async function findUserByEmailAsync(email) {
+  const clean = String(email || '').trim().toLowerCase();
+  if (isMysqlActive && dbPool) {
+    try {
+      const [rows] = await dbPool.query('SELECT id, name, company_name AS companyName, phone, email, desktop_count AS desktopCount, password, role, created_at AS createdAt FROM registered_users WHERE LOWER(email) = ? LIMIT 1', [clean]);
+      if (rows && rows.length > 0) return rows[0];
+    } catch (e) {
+      console.error('MySQL lookup error:', e.message);
+    }
+  }
+  const users = getRegisteredUsersLocal();
+  return users.find(u => (u.email || '').toLowerCase() === clean);
+}
+
+async function findUserForLoginAsync(cleanUser, password) {
+  if (isMysqlActive && dbPool) {
+    try {
+      const [rows] = await dbPool.query(
+        'SELECT id, name, company_name AS companyName, phone, email, desktop_count AS desktopCount, password, role, created_at AS createdAt FROM registered_users WHERE (LOWER(email) = ? OR phone = ? OR LOWER(name) = ?) AND password = ? LIMIT 1',
+        [cleanUser.toLowerCase(), cleanUser, cleanUser.toLowerCase(), password]
+      );
+      if (rows && rows.length > 0) return rows[0];
+    } catch (e) {
+      console.error('MySQL login query error:', e.message);
+    }
+  }
+  const users = getRegisteredUsersLocal();
+  return users.find(u => 
+    ((u.email || '').toLowerCase() === cleanUser.toLowerCase() || u.phone === cleanUser || (u.name || '').toLowerCase() === cleanUser.toLowerCase()) && 
+    u.password === password
+  );
 }
 
 function generateAuthToken(user) {
@@ -92,7 +211,7 @@ function verifyAuthToken(token) {
 // Authentication REST Endpoints
 
 // 1. User / Client Registration Endpoint
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { name, companyName, phone, email, desktopCount, password } = req.body || {};
 
   if (!name || !companyName || !phone || !email || !password) {
@@ -105,8 +224,7 @@ app.post('/api/auth/register', (req, res) => {
   const cleanCompany = String(companyName).trim().toUpperCase();
   const cleanCount = String(desktopCount || '1-5 PCs').trim();
 
-  const users = getRegisteredUsers();
-  const existing = users.find(u => u.email === cleanEmail);
+  const existing = await findUserByEmailAsync(cleanEmail);
   if (existing) {
     return res.status(400).json({ error: 'An account with this email already exists. Please login instead.' });
   }
@@ -123,7 +241,7 @@ app.post('/api/auth/register', (req, res) => {
     registeredAt: new Date().toISOString()
   };
 
-  saveRegisteredUser(newUser);
+  await saveRegisteredUserAsync(newUser);
 
   // Auto-generate authenticated token for immediate access
   const token = generateAuthToken(newUser);
@@ -148,7 +266,7 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 // 2. Login Endpoint (Supports Admin and Registered Client users)
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Username/Email and password are required' });
@@ -172,12 +290,8 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
 
-  // Check Registered Client Accounts
-  const users = getRegisteredUsers();
-  const user = users.find(u => 
-    (u.email.toLowerCase() === cleanUser.toLowerCase() || u.phone === cleanUser || u.name.toLowerCase() === cleanUser.toLowerCase()) && 
-    u.password === password
-  );
+  // Check Registered Client Accounts (MySQL or JSON)
+  const user = await findUserForLoginAsync(cleanUser, password);
 
   if (user) {
     const token = generateAuthToken(user);
@@ -223,14 +337,14 @@ app.get('/api/auth/verify', (req, res) => {
 });
 
 // 4. Admin List of All Registered Clients / Leads
-app.get('/api/admin/registrations', (req, res) => {
+app.get('/api/admin/registrations', async (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token || '');
   const user = verifyAuthToken(token);
   if (!user || user.role !== 'Administrator') {
     return res.status(403).json({ error: 'Forbidden: Admin authorization required' });
   }
-  const users = getRegisteredUsers();
+  const users = await getRegisteredUsersAsync();
   const safeUsers = users.map(({ password, ...rest }) => rest);
   return res.json({
     success: true,
