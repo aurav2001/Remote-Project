@@ -39,13 +39,14 @@ const args = process.argv.slice(2);
 let targetVersion = readCurrentVersion();
 
 const bumpArg = args.find(a => a.startsWith('--bump') || a === 'bump');
+const noBumpArg = args.includes('--no-bump');
 const directVerArg = args.find(a => /^[vV]?\d+\.\d+\.\d+/.test(a));
 
 if (directVerArg) {
   targetVersion = directVerArg.replace(/^v/, '');
-} else if (bumpArg) {
+} else if (!noBumpArg) {
   let bumpType = 'patch';
-  if (bumpArg.includes('=')) {
+  if (bumpArg && bumpArg.includes('=')) {
     bumpType = bumpArg.split('=')[1];
   }
   targetVersion = bumpSemver(targetVersion, bumpType);
