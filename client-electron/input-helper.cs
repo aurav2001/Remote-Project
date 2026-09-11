@@ -37,10 +37,19 @@ class InputHelper {
     static extern bool CloseDesktop(IntPtr hDesktop);
 
     [DllImport("user32.dll", SetLastError = true)]
+    static extern bool GetUserObjectInformation(IntPtr hObj, int nIndex, [Out] byte[] pvInfo, uint nLength, out uint lpnLengthNeeded);
+
+    [DllImport("user32.dll", SetLastError = true)]
     static extern IntPtr GetDC(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    static extern IntPtr CreateDC(string lpszDriver, string lpszDevice, string lpszOutput, IntPtr lpInitData);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    static extern bool DeleteDC(IntPtr hdc);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight, IntPtr hdcSrc, int nXSrc, int nYSrc, uint dwRop);
@@ -48,7 +57,38 @@ class InputHelper {
     [DllImport("sas.dll", SetLastError = true)]
     static extern void SendSAS(bool asUser);
 
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern bool LookupPrivilegeValue(string lpSystemName, string lpName, out LUID lpLuid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool AdjustTokenPrivileges(IntPtr TokenHandle, bool DisableAllPrivileges, ref TOKEN_PRIVILEGES NewState, uint BufferLengthInBytes, IntPtr PreviousState, IntPtr ReturnLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct LUID {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct TOKEN_PRIVILEGES {
+        public uint PrivilegeCount;
+        public LUID Luid;
+        public uint Attributes;
+    }
+
+    const uint TOKEN_ADJUST_PRIVILEGES = 0x0020;
+    const uint TOKEN_QUERY = 0x0008;
+    const uint SE_PRIVILEGE_ENABLED = 0x00000002;
+
     const uint DESKTOP_ALL_ACCESS = 0x01FF;
+    const uint DESKTOP_READOBJECTS = 0x0001;
+    const uint DESKTOP_WRITEOBJECTS = 0x0004;
+    const uint DESKTOP_SWITCHDESKTOP = 0x0100;
+    const int UOI_NAME = 2;
+
     const uint SRCCOPY = 0x00CC0020;
 
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
@@ -74,6 +114,7 @@ class InputHelper {
     const byte VK_SPACE = 0x20;    // 32
     const byte VK_RETURN = 0x0D;   // 13
     const byte VK_BACK = 0x08;     // 8
+    const byte VK_TAB = 0x09;      // 9
     const byte VK_D = 0x44;        // 68
     const byte VK_E = 0x45;        // 69
     const byte VK_L = 0x4C;        // 76
@@ -88,17 +129,64 @@ class InputHelper {
     static int currentDisplayW = 0;
     static int currentDisplayH = 0;
     static IntPtr activeDesktop = IntPtr.Zero;
+    static string lastReportedDesktop = "";
+
+    // Enable process token privileges for full Windows subsystem access
+    static void EnableTokenPrivileges() {
+        try {
+            IntPtr hToken;
+            if (OpenProcessToken(Process.GetCurrentProcess().Handle, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out hToken)) {
+                string[] privs = new string[] { "SeDebugPrivilege", "SeTcbPrivilege", "SeShutdownPrivilege", "SeIncreaseWorkingSetPrivilege" };
+                foreach (string p in privs) {
+                    try {
+                        LUID luid;
+                        if (LookupPrivilegeValue(null, p, out luid)) {
+                            TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+                            tp.PrivilegeCount = 1;
+                            tp.Luid = luid;
+                            tp.Attributes = SE_PRIVILEGE_ENABLED;
+                            AdjustTokenPrivileges(hToken, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
 
     // Dynamically switch current thread to whatever desktop is active (Winlogon, Default, ScreenSaver, UAC)
     static void SyncDesktop() {
         try {
             IntPtr hDesktop = OpenInputDesktop(0, false, DESKTOP_ALL_ACCESS);
-            if (hDesktop != IntPtr.Zero && hDesktop != activeDesktop) {
-                SetThreadDesktop(hDesktop);
-                if (activeDesktop != IntPtr.Zero) {
-                    try { CloseDesktop(activeDesktop); } catch {}
+            if (hDesktop == IntPtr.Zero) {
+                hDesktop = OpenInputDesktop(0, false, DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS | DESKTOP_SWITCHDESKTOP);
+            }
+            if (hDesktop != IntPtr.Zero) {
+                if (hDesktop != activeDesktop) {
+                    SetThreadDesktop(hDesktop);
+                    if (activeDesktop != IntPtr.Zero) {
+                        try { CloseDesktop(activeDesktop); } catch {}
+                    }
+                    activeDesktop = hDesktop;
                 }
-                activeDesktop = hDesktop;
+
+                // Query desktop name
+                try {
+                    byte[] info = new byte[256];
+                    uint needed;
+                    if (GetUserObjectInformation(hDesktop, UOI_NAME, info, (uint)info.Length, out needed)) {
+                        string name = Encoding.Unicode.GetString(info, 0, (int)needed).Replace("\0", "").Trim();
+                        if (name != lastReportedDesktop) {
+                            lastReportedDesktop = name;
+                            if (name.Equals("Winlogon", StringComparison.OrdinalIgnoreCase)) {
+                                Console.WriteLine("DESKTOP_IS_WINLOGON");
+                            } else if (name.Equals("Default", StringComparison.OrdinalIgnoreCase)) {
+                                Console.WriteLine("DESKTOP_IS_DEFAULT");
+                            } else {
+                                Console.WriteLine("DESKTOP_NAME " + name);
+                            }
+                        }
+                    }
+                } catch {}
             }
         } catch {}
     }
@@ -209,7 +297,7 @@ class InputHelper {
                 SendSAS(false);
             } catch {}
 
-            // Secure Attention Sequence
+            // Secure Attention Sequence (Ctrl + Alt + Del)
             keybd_event(VK_CONTROL, 0x1D, 0, 0);
             keybd_event(VK_MENU, 0x38, 0, 0);
             keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
@@ -221,9 +309,9 @@ class InputHelper {
 
             Thread.Sleep(100);
             SyncDesktop();
-            PressKeyWithScan(VK_SPACE);
+            PressKeyWithScan(VK_ESCAPE);
             Thread.Sleep(50);
-            PressKeyWithScan(VK_RETURN);
+            PressKeyWithScan(VK_SPACE);
 
             // Click middle of screen to ensure password input focus
             int screenW = GetSystemMetrics(0);
@@ -244,13 +332,26 @@ class InputHelper {
         if (string.IsNullOrEmpty(pin)) return;
         try {
             SyncDesktop();
+
             // 1. Wake screen and clear lock screen curtain / previous error dialogs
             PressKeyWithScan(VK_ESCAPE);
-            Thread.Sleep(60);
+            Thread.Sleep(50);
             PressKeyWithScan(VK_SPACE);
-            Thread.Sleep(200);
+            Thread.Sleep(150);
 
-            // 2. Click in center of screen where Windows Credential Provider PIN input box is located
+            // 2. Also simulate Ctrl+Alt+Del in case SAS policy requires it
+            try { SendSAS(false); } catch {}
+            keybd_event(VK_CONTROL, 0x1D, 0, 0);
+            keybd_event(VK_MENU, 0x38, 0, 0);
+            keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
+            Thread.Sleep(30);
+            keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_MENU, 0x38, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
+            ReleaseAllModifiers();
+            Thread.Sleep(150);
+
+            // 3. Click in center of screen where Windows Credential Provider PIN input box is located
             SyncDesktop();
             int screenW = GetSystemMetrics(0);
             int screenH = GetSystemMetrics(1);
@@ -263,22 +364,27 @@ class InputHelper {
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
             Thread.Sleep(100);
 
-            // 3. Clear any existing characters in PIN box (Ctrl+A then Backspace)
+            // 4. Clear any existing characters in PIN box (Ctrl+A then Backspaces)
             PressKeyCombo(VK_CONTROL, VK_A);
             Thread.Sleep(30);
             PressKeyWithScan(VK_BACK);
+            Thread.Sleep(20);
+            for (int b = 0; b < 10; b++) {
+                PressKeyWithScan(VK_BACK);
+                Thread.Sleep(10);
+            }
             Thread.Sleep(50);
 
-            // 4. Type each PIN character
+            // 5. Type each PIN character
             TypeText(pin);
             Thread.Sleep(100);
 
-            // 5. Submit Enter key
+            // 6. Submit Enter key
             SyncDesktop();
             PressKeyWithScan(VK_RETURN);
             Console.WriteLine("PIN_UNLOCK_COMPLETED");
 
-            // 6. Capture frame immediately so controller gets instant visual feedback
+            // 7. Capture immediate frame for fast visual feedback
             Thread.Sleep(250);
             CaptureDesktopFrame();
         } catch (Exception ex) {
@@ -311,8 +417,17 @@ class InputHelper {
                 using (Graphics g = Graphics.FromImage(bmp)) {
                     IntPtr hdcDest = g.GetHdc();
                     IntPtr hdcSrc = GetDC(IntPtr.Zero);
+                    bool needDelete = false;
+                    if (hdcSrc == IntPtr.Zero) {
+                        hdcSrc = CreateDC("DISPLAY", null, null, IntPtr.Zero);
+                        needDelete = true;
+                    }
                     BitBlt(hdcDest, 0, 0, screenW, screenH, hdcSrc, 0, 0, SRCCOPY);
-                    ReleaseDC(IntPtr.Zero, hdcSrc);
+                    if (needDelete) {
+                        DeleteDC(hdcSrc);
+                    } else {
+                        ReleaseDC(IntPtr.Zero, hdcSrc);
+                    }
                     g.ReleaseHdc(hdcDest);
                 }
 
@@ -348,6 +463,7 @@ class InputHelper {
     }
 
     static void Main(string[] args) {
+        EnableTokenPrivileges();
         SyncDesktop();
         ReleaseAllModifiers();
         Console.WriteLine("INPUT_HELPER_READY");
@@ -457,6 +573,9 @@ class InputHelper {
                 }
                 else if (command == "space") {
                     PressKeyWithScan(VK_SPACE);
+                }
+                else if (command == "tab") {
+                    PressKeyWithScan(VK_TAB);
                 }
                 else if (command == "releaseallmodifiers" || command == "resetkeys") {
                     ReleaseAllModifiers();

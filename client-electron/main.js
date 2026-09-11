@@ -142,6 +142,24 @@ function startInputHelper() {
             frame: 'data:image/jpeg;base64,' + b64
           });
         }
+      } else if (line === 'DESKTOP_IS_WINLOGON') {
+        if (!isHostScreenLocked) {
+          console.log('[InputHelper]: Detected active Winlogon lock screen desktop!');
+          isHostScreenLocked = true;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('host-lock-status', { isLocked: true });
+          }
+          startLockCaptureLoop();
+        }
+      } else if (line === 'DESKTOP_IS_DEFAULT') {
+        if (isHostScreenLocked) {
+          console.log('[InputHelper]: Detected interactive Default user desktop (Unlocked)!');
+          isHostScreenLocked = false;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('host-lock-status', { isLocked: false });
+          }
+          stopLockCaptureLoop();
+        }
       } else {
         console.log(`[InputHelper Stdout]: ${line}`);
       }
@@ -596,6 +614,25 @@ if (!gotTheLock) {
 let isHostScreenLocked = false;
 let lockCaptureInterval = null;
 
+function startLockCaptureLoop() {
+  if (lockCaptureInterval) clearInterval(lockCaptureInterval);
+  sendInputHelperCommand('captureframe');
+  lockCaptureInterval = setInterval(() => {
+    if (isHostScreenLocked) {
+      sendInputHelperCommand('captureframe');
+    } else {
+      stopLockCaptureLoop();
+    }
+  }, 200); // 5 FPS smooth lock-screen stream
+}
+
+function stopLockCaptureLoop() {
+  if (lockCaptureInterval) {
+    clearInterval(lockCaptureInterval);
+    lockCaptureInterval = null;
+  }
+}
+
 function setupPowerMonitor() {
   try {
     if (!powerMonitor) return;
@@ -607,24 +644,13 @@ function setupPowerMonitor() {
         mainWindow.webContents.send('host-lock-status', { isLocked: true });
       }
       sendInputHelperCommand('syncdesktop');
-
-      // Start live lock screen frame capture loop
-      if (lockCaptureInterval) clearInterval(lockCaptureInterval);
-      sendInputHelperCommand('captureframe');
-      lockCaptureInterval = setInterval(() => {
-        if (isHostScreenLocked) {
-          sendInputHelperCommand('captureframe');
-        }
-      }, 250);
+      startLockCaptureLoop();
     });
 
     powerMonitor.on('unlock-screen', () => {
       console.log('[PowerMonitor]: Windows screen UNLOCKED (Interactive user desktop active)');
       isHostScreenLocked = false;
-      if (lockCaptureInterval) {
-        clearInterval(lockCaptureInterval);
-        lockCaptureInterval = null;
-      }
+      stopLockCaptureLoop();
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('host-lock-status', { isLocked: false });
       }
@@ -639,6 +665,11 @@ function setupPowerMonitor() {
       console.log('[PowerMonitor]: System resumed from sleep');
       sendInputHelperCommand('syncdesktop');
     });
+
+    // Periodic desktop state heartbeat (every 2.5s) to guarantee desktop state sync
+    setInterval(() => {
+      sendInputHelperCommand('syncdesktop');
+    }, 2500);
 
     // Configure Windows Policy for Software SAS Generation so Ctrl+Alt+Del simulation works on lock screen
     try {
