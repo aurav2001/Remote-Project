@@ -1316,16 +1316,15 @@ ipcMain.on('control-event', (event, data) => {
         sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
       }
       sendInputHelperCommand(`mouseup ${button || 'left'}`);
-    } else if (type === 'click' || type === 'doubleclick') {
+    } else if (type === 'click') {
       if (nx !== undefined && ny !== undefined) {
         sendInputHelperCommand(`movenorm ${nx} ${ny}`);
       } else if (x !== undefined && y !== undefined) {
         sendInputHelperCommand(`move ${Math.round(x)} ${Math.round(y)}`);
       }
       sendInputHelperCommand(`click ${button || 'left'}`);
-      if (type === 'doubleclick') {
-        sendInputHelperCommand(`click ${button || 'left'}`);
-      }
+    } else if (type === 'doubleclick') {
+      // Intentionally no-op: native mousedown/mouseup pairs already trigger Windows natural double-click
     } else if (type === 'wheel') {
       const { deltaY, ctrlKey } = data;
       if (!ctrlKey) {

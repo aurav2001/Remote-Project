@@ -2587,7 +2587,10 @@ function App() {
       localCursorRef.current.style.opacity = '0';
     }
   };
-  const handleDoubleClick = (e) => sendMouseEvent('doubleclick', e);
+  const handleDoubleClick = (e) => {
+    // Prevent synthetic duplicate clicks. Windows natively processes mousedown/mouseup pairs as a natural double-click.
+    if (e && e.preventDefault) e.preventDefault();
+  };
 
   const handleContextMenu = (e) => {
     e.preventDefault(); // Prevent browser right-click context menu (mousedown/mouseup handles native right click)
@@ -5052,7 +5055,6 @@ function App() {
                               <span className="item-icon">{icon}</span>
                               <span
                                 className="item-label"
-                                onClick={() => item.isDirectory && requestRemoteDirectory(item.path)}
                                 title={item.name}
                               >
                                 {item.name}
