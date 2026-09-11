@@ -1,14 +1,17 @@
-# cPanel Phusion Passenger & WebSocket Configuration for Remote Node App
-PassengerAppRoot "/home/uniotechit/public_html/remote-app"
-PassengerAppType node
-PassengerStartupFile app.js
+# Safe cPanel & Node.js Application .htaccess configuration
+<IfModule mod_rewrite.c>
+  RewriteEngine On
 
-RewriteEngine On
+  # Redirect HTTP to HTTPS
+  RewriteCond %{HTTPS} off
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-# Ensure HTTPS
-RewriteCond %{HTTPS} off
-RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+  # Enable WebSocket Proxying for Socket.io on cPanel / Apache / LiteSpeed
+  RewriteCond %{HTTP:Upgrade} =websocket [NC]
+  RewriteCond %{HTTP:Connection} upgrade [NC]
+  RewriteRule ^socket.io/(.*) ws://127.0.0.1:3000/socket.io/$1 [P,L]
+</IfModule>
 
-# Support WebSocket upgrade proxying if applicable
-RewriteCond %{HTTP:Upgrade} =websocket [NC]
-RewriteRule /(.*) ws://127.0.0.1:5000/$1 [P,L]
+# Prevent directory browsing
+Options -Indexes
+

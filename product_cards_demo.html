@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tyka Men's Tops & Performance Apparel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Pure Clean White E-Commerce Palette (Tyka / Nike official look) */
+      --bg-page: #ffffff;
+      --card-bg: #ffffff;
+      --card-border: #f0f0f0;
+      --card-border-hover: #e2e8f0;
+      --card-shadow-hover: 0 12px 32px rgba(0, 0, 0, 0.08);
+      --accent: #ff4d00;
+      --text-main: #111827;
+      --text-sub: #6b7280;
+      --text-muted: #9ca3af;
+      --img-bg: #f8fafc;
+      --tag-sale-bg: #ef4444;
+      --tag-new-bg: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 30px 24px 80px;
+    }
+
+    .container {
+      max-width: 1320px;
+      margin: 0 auto;
+    }
+
+    /* Clean Brand Header */
+    .store-navbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0 24px;
+      border-bottom: 1px solid #f1f5f9;
+      margin-bottom: 36px;
+    }
+
+    .brand-title-box {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-name {
+      font-size: 1.6rem;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      color: #0f172a;
+      text-transform: uppercase;
+    }
+
+    .brand-name span {
+      color: var(--accent);
+    }
+
+    .nav-stats {
+      font-size: 0.9rem;
+      color: var(--text-sub);
+      font-weight: 600;
+    }
+
+    /* Section Intro */
+    .catalog-header {
+      margin-bottom: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .catalog-heading {
+      font-size: 1.85rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+
+    .catalog-subtitle {
+      color: var(--text-sub);
+      font-size: 0.95rem;
+    }
+
+    .view-filter-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #334155;
+    }
+
+    /* 4-Column Responsive Grid */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 28px;
+    }
+
+    @media (max-width: 1100px) {
+      .products-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+    }
+
+    @media (max-width: 580px) {
+      .products-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Tyka Product Card */
+    .product-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #f1f5f9;
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+      position: relative;
+    }
+
+    .product-card:hover {
+      transform: translateY(-5px);
+      border-color: #e2e8f0;
+      box-shadow: var(--card-shadow-hover);
+    }
+
+    /* 3:4 Aspect Ratio Image Wrapper */
+    .image-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: #f8fafc;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .product-img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+      transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    .product-img.img-front {
+      opacity: 1;
+      z-index: 1;
+      transform: scale(1);
+    }
+
+    .product-img.img-back {
+      opacity: 0;
+      z-index: 2;
+      transform: scale(1.03);
+    }
+
+    /* Dynamic Flip on Hover */
+    .product-card:hover .img-front {
+      opacity: 0;
+      transform: scale(1.03);
+    }
+
+    .product-card:hover .img-back {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* Badges */
+    .badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 4px;
+      color: #ffffff;
+    }
+
+    .badge-bestseller {
+      background: #dc2626;
+    }
+
+    .badge-new {
+      background: #059669;
+    }
+
+    .badge-popular {
+      background: #d97706;
+    }
+
+    /* Wishlist Heart */
+    .wishlist-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 10;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+      transition: all 0.2s;
+    }
+
+    .wishlist-btn:hover {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      transform: scale(1.1);
+    }
+
+    /* Quick Action Slide-up */
+    .quick-action-bar {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 10;
+      transform: translateY(120%);
+      opacity: 0;
+      transition: all 0.25s ease-out;
+    }
+
+    .product-card:hover .quick-action-bar {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .btn-quick-view {
+      width: 100%;
+      padding: 9px;
+      border-radius: 6px;
+      background: #0f172a;
+      color: #ffffff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transition: background 0.2s;
+    }
+
+    .btn-quick-view:hover {
+      background: var(--accent);
+    }
+
+    /* Card Details */
+    .card-body {
+      padding: 16px 14px 18px;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+      gap: 6px;
+      background: #ffffff;
+    }
+
+    .brand-tag {
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .item-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1e293b;
+      line-height: 1.35;
+      text-decoration: none;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      transition: color 0.2s;
+    }
+
+    .item-title:hover {
+      color: var(--accent);
+    }
+
+    .price-wrap {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .price-current {
+      font-size: 1.18rem;
+      font-weight: 800;
+      color: #0f172a;
+    }
+
+    .price-mrp {
+      font-size: 0.88rem;
+      color: #94a3b8;
+      text-decoration: line-through;
+    }
+
+    .price-discount {
+      font-size: 0.78rem;
+      color: #16a34a;
+      font-weight: 800;
+    }
+
+    /* Footer Meta / Sizes */
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 10px;
+      border-top: 1px solid #f1f5f9;
+      margin-top: auto;
+    }
+
+    .sizes-list {
+      display: flex;
+      gap: 4px;
+    }
+
+    .size-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+    }
+
+    .size-badge:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .flip-hint {
+      font-size: 0.7rem;
+      color: #64748b;
+      font-weight: 600;
+    }
+
+    /* Benefits Strip at bottom */
+    .benefits-bar {
+      margin-top: 50px;
+      background: #fafafa;
+      border: 1px solid #f0f0f0;
+      border-radius: 12px;
+      padding: 24px 28px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .benefits-bar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .benefit-col {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .benefit-col-icon {
+      font-size: 1.5rem;
+      background: #ffffff;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #e2e8f0;
+    }
+
+    .benefit-col h4 {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 2px;
+    }
+
+    .benefit-col p {
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Navbar Header -->
+    <header class="store-navbar">
+      <div class="brand-title-box">
+        <h2 class="brand-name">TYKA<span>.</span>COM</h2>
+      </div>
+      <div class="nav-stats">
+        Clean White Catalog Mode (3:4 Frame)
+      </div>
+    </header>
+
+    <!-- Category Header -->
+    <section class="catalog-header">
+      <div>
+        <h1 class="catalog-heading">Men's Sports Tops & Performance Tees</h1>
+        <p class="catalog-subtitle">Same athlete model shown across multiple performance jersey brands with hover front/back flip</p>
+      </div>
+      <div class="view-filter-badge">
+        ✨ 4 Products Loaded
+      </div>
+    </section>
+
+    <!-- Product Cards Grid -->
+    <div class="products-grid">
+      <!-- CARD 1: TYKA NAVY / ORANGE -->
+      <article class="product-card">
+        <div class="image-wrapper">
+          <span class="badge badge-bestseller">Best Seller</span>
+          <button class="wishlist-btn" title="Add to Wishlist">♥</button>
+          <img 
+            class="product-img img-front" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/tyka_jersey_front_1788796779090.jpg" 
+            alt="Tyka Aerodry Strike Training Tee Front" 
+          />
+          <img 
+            class="product-img img-back" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/tyka_jersey_back_1788796793092.jpg" 
+            alt="Tyka Aerodry Strike Training Tee Back" 
+          />
+          <div class="quick-action-bar">
+            <button class="btn-quick-view">Quick View ⇄</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="brand-tag">TYKA SPORTS</span>
+          <a href="#" class="item-title">AeroDry Strike Match Jersey - Navy & Orange</a>
+          <div class="price-wrap">
+            <span class="price-current">₹1,299</span>
+            <span class="price-mrp">₹1,799</span>
+            <span class="price-discount">28% OFF</span>
+          </div>
+          <div class="card-footer">
+            <div class="sizes-list">
+              <span class="size-badge">S</span>
+              <span class="size-badge">M</span>
+              <span class="size-badge">L</span>
+              <span class="size-badge">XL</span>
+            </div>
+            <span class="flip-hint">Hover Flip ↺</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD 2: STEALTH BLACK -->
+      <article class="product-card">
+        <div class="image-wrapper">
+          <span class="badge badge-new">New In</span>
+          <button class="wishlist-btn" title="Add to Wishlist">♥</button>
+          <img 
+            class="product-img img-front" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/black_jersey_front_1788796937109.jpg" 
+            alt="Apex Compression Training Tee Front" 
+          />
+          <img 
+            class="product-img img-back" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/black_jersey_back_1788796960079.jpg" 
+            alt="Apex Compression Training Tee Back" 
+          />
+          <div class="quick-action-bar">
+            <button class="btn-quick-view">Quick View ⇄</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="brand-tag">APEX PRO FIT</span>
+          <a href="#" class="item-title">HyperVapor Compression Tee - Stealth Black</a>
+          <div class="price-wrap">
+            <span class="price-current">₹1,499</span>
+            <span class="price-mrp">₹2,199</span>
+            <span class="price-discount">32% OFF</span>
+          </div>
+          <div class="card-footer">
+            <div class="sizes-list">
+              <span class="size-badge">M</span>
+              <span class="size-badge">L</span>
+              <span class="size-badge">XL</span>
+              <span class="size-badge">XXL</span>
+            </div>
+            <span class="flip-hint">Hover Flip ↺</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD 3: ELECTRIC CYAN -->
+      <article class="product-card">
+        <div class="image-wrapper">
+          <span class="badge badge-popular">Popular</span>
+          <button class="wishlist-btn" title="Add to Wishlist">♥</button>
+          <img 
+            class="product-img img-front" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/cyan_jersey_front_1788796981037.jpg" 
+            alt="Electric Cyan Marathon Running Tee Front" 
+          />
+          <img 
+            class="product-img img-back" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/cyan_jersey_back_1788797079064.jpg" 
+            alt="Electric Cyan Marathon Running Tee Back" 
+          />
+          <div class="quick-action-bar">
+            <button class="btn-quick-view">Quick View ⇄</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="brand-tag">PACE ATHLETICS</span>
+          <a href="#" class="item-title">Endurance Breathable Marathon Tee - Cyan</a>
+          <div class="price-wrap">
+            <span class="price-current">₹1,199</span>
+            <span class="price-mrp">₹1,599</span>
+            <span class="price-discount">25% OFF</span>
+          </div>
+          <div class="card-footer">
+            <div class="sizes-list">
+              <span class="size-badge">S</span>
+              <span class="size-badge">M</span>
+              <span class="size-badge">L</span>
+            </div>
+            <span class="flip-hint">Hover Flip ↺</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD 4: OPTIC WHITE & BLUE -->
+      <article class="product-card">
+        <div class="image-wrapper">
+          <span class="badge badge-new">Cricket Pro</span>
+          <button class="wishlist-btn" title="Add to Wishlist">♥</button>
+          <img 
+            class="product-img img-front" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/white_jersey_front_1788797100931.jpg" 
+            alt="Optic White Cricket Match Jersey Front" 
+          />
+          <img 
+            class="product-img img-back" 
+            src="C:/Users/Gulshan Pandey/.gemini/antigravity-ide/brain/5e9a28cf-3b2c-4555-9616-09ab9caeeb2a/white_jersey_back_1788797121779.jpg" 
+            alt="Optic White Cricket Match Jersey Back" 
+          />
+          <div class="quick-action-bar">
+            <button class="btn-quick-view">Quick View ⇄</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="brand-tag">CLUB EDITION</span>
+          <a href="#" class="item-title">Pro Tournament Cricket Jersey - White & Blue</a>
+          <div class="price-wrap">
+            <span class="price-current">₹1,349</span>
+            <span class="price-mrp">₹1,899</span>
+            <span class="price-discount">29% OFF</span>
+          </div>
+          <div class="card-footer">
+            <div class="sizes-list">
+              <span class="size-badge">S</span>
+              <span class="size-badge">M</span>
+              <span class="size-badge">L</span>
+              <span class="size-badge">XL</span>
+            </div>
+            <span class="flip-hint">Hover Flip ↺</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Features Strip -->
+    <div class="benefits-bar">
+      <div class="benefit-col">
+        <div class="benefit-col-icon">📐</div>
+        <div>
+          <h4>Clean 3:4 Aspect Frame</h4>
+          <p>Pixel-perfect responsive scaling with clean white backdrop.</p>
+        </div>
+      </div>
+      <div class="benefit-col">
+        <div class="benefit-col-icon">🔄</div>
+        <div>
+          <h4>Smooth Instant Hover Flip</h4>
+          <p>Seamless Front ⇄ Back transition without page reload.</p>
+        </div>
+      </div>
+      <div class="benefit-col">
+        <div class="benefit-col-icon">⚡</div>
+        <div>
+          <h4>Same Model Consistency</h4>
+          <p>Consistent athletic physique & lighting across all apparel.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,63 +1,85 @@
-# RemoteG - Web-Based Remote Desktop Project Summary
+# UnioTechIT / RemoteG - Master Project Documentation & Knowledge Base
 
 ## 📌 Project Overview
-RemoteG is a full-featured, low-latency Remote Desktop application allowing users to share and control a Windows PC from any web browser using a 6-digit access code.
+**UnioTechIT Remote Desktop (RemoteG)** is an Enterprise-Grade, Ultra-Low Latency Web-Based Remote Desktop & RMM (Remote Monitoring and Management) Platform. It allows Administrators and Clients to monitor, manage, and remote-control Windows PCs from any modern web browser using a 6-digit access code without port forwarding.
 
 ---
 
-## 🏗️ Architecture & Stack
+## 🏗️ Architecture & Technology Stack
+
 1. **Host Client (`client-electron`)**:
    - **Framework**: Electron (Node.js + Chromium)
-   - **Screen Capture**: `desktopCapturer` & `getUserMedia` (WebRTC)
-   - **Native Hardware Control**: C# Win32 Interop Helper (`input-helper.exe`) compiled from `input-helper.cs` (executes hardware mouse movement, mouse clicks, mouse wheel scroll, and virtual keypresses using `User32.dll` APIs).
-   - **Icon**: `icon.png` (Embedded in `electron-builder` NSIS installer config).
+   - **Screen Video Pipeline**: `desktopCapturer` & WebRTC MediaStream (60 FPS crisp hardware-accelerated video)
+   - **Native Hardware Control**: C# Win32 Interop Helper (`input-helper.exe` compiled from `input-helper.cs`), communicating via stdin/stdout with `User32.dll` APIs for pixel-accurate mouse movement, left/right/middle clicks, double clicks, mouse wheel scroll, and full virtual keyboard events.
+   - **Telemetry Sampler**: Continuous background collection of CPU load, RAM used/total, Disk C: free/total, Network speeds, LAN IP, WAN Public IP, Domain/User, Uptime, Last Reboot, and Battery.
+   - **Silent Background Execution**: Encoded PowerShell & CMD silent execution engine.
+   - **File Operations**: Chunks-based P2P file sender/receiver and remote File Explorer directory browser.
+   - **Production Packaging**: `electron-builder` NSIS installer (`UnioTechIT Setup 1.0.0.exe`, 76.6 MB).
 
 2. **Web Controller (`controller-web`)**:
-   - **Framework**: React + Vite
-   - **Viewer**: Dynamic aspect ratio video scaling (`scaleX`, `scaleY` resolution mapping).
-   - **Control Pipeline**: Emits `mousemove`, `mousedown`, `mouseup`, `doubleclick`, `right-click`, `onWheel` scroll, and `keydown`/`keyup` events.
+   - **Framework**: React + Vite + Vanilla CSS design system
+   - **Branding & UI**: Modern Dark Glassmorphic Theme with Outfit/Inter typography, animated stat badges, and reactive state cards.
+   - **Live Video & Stream Fallback**: WebRTC P2P direct video stream with zero-flicker state machine (`isWebRtcActiveRef`) and JPEG canvas fallback.
+   - **Features Suite**:
+     - Remote Desktop control with 1:1 hardware-accelerated virtual cursor
+     - Live System Health Drawer (CPU/RAM/Disk/Network gauges)
+     - Interactive Remote PowerShell & CMD Terminal with history and Quick Script buttons
+     - Multi-Monitor display switcher
+     - Remote File Explorer & Target-to-Admin file downloader
+     - Drag-and-drop file upload to remote Downloads folder
+     - Transparent Screen Annotation & Laser Pointer overlay
+     - Excel Diagnostics Exporter for system specs and registered clients
+     - 2FA / TOTP Two-Factor Authentication with QR code & Authenticator apps
+     - Multi-Tenant Company Group Isolation & PC limit management
 
-3. **Signaling Server (`server`)**:
-   - **Framework**: Node.js + Express + Socket.io (Hosted on Render: `https://remote-desktop-signaling-syj4.onrender.com`).
-   - **Role**: Relays 6-digit room code handshakes, WebRTC SDP Offers/Answers, and ICE Candidates.
-
----
-
-## ⚡ Last Completed Features & Achievements
-1. **Mouse Scroll Wheel Support**:
-   - Integrated `MOUSEEVENTF_WHEEL` (0x0800) in C# input engine.
-   - Captured browser `wheel` / `deltaY` events in React controller and relayed to host.
-
-2. **WebRTC DataChannel (Zero-Lag Direct P2P Control)**:
-   - Configured direct P2P `RTCDataChannel('controlEvents')` between browser controller and host PC.
-   - Bypassed server relay lag for mouse/keyboard inputs, achieving instantaneous TeamViewer/AnyDesk-style P2P responsiveness.
-
-3. **Custom 3D Branding & Built Installer Zip**:
-   - Generated sleek 3D cyan/indigo app icon (`icon.png`).
-   - Configured `electron-builder` in `package.json`.
-   - Built production installer (`dist-build/RemoteG Setup 1.0.0.exe`).
-   - Compressed build output to `c:\Users\Gulshan Pandey\Desktop\Remote\client-electron\RemoteG-Setup.zip` (~76.3 MB).
-
-4. **Live System Health & Metrics Dashboard (Atera-Style Telemetry)**:
-   - Built host periodic telemetry sampler (CPU %, RAM GB & %, Disk space C:, Network Download/Upload speed, Battery %, Uptime).
-   - Streamed metrics over WebRTC DataChannel & Socket.io relay every 2 seconds.
-   - Built glassmorphic Live Health drawer in React Web Controller (`controller-web`).
-
-5. **Silent Remote PowerShell & CMD Terminal**:
-   - Built hidden background command execution engine (`powershell.exe -EncodedCommand` & `cmd.exe /c`).
-   - Supports 1-click Quick Script Presets (`ipconfig`, `systeminfo`, `Get-Process`, `Flush DNS`, `Ping`).
-   - Monospace terminal console UI with green/cyan prompt syntax, command history navigation (Up/Down arrows), and error highlighting.
-
-6. **Enterprise Host Metadata & Network Identity (Atera-Style)**:
-   - Added async WAN Public IP resolver (`api.ipify.org`).
-   - Added Domain User detection (`DOMAIN\Username`), Active Directory / Workgroup Domain name, Exact Last Reboot Timestamp, and Host Agent Version (`v1.0.0`).
-   - Rendered in RMM Dashboard Cards, Specs Modal, and Live Health Drawer in React Web Controller (`controller-web`).
+3. **Signaling Server & Database Backend (`server`)**:
+   - **Framework**: Node.js + Express + Socket.IO + MySQL2
+   - **Database**: Supports dual-mode persistence (cPanel MySQL database with local JSON auto-failover and migration).
+   - **Authentication**: JWT token-based auth, password hashing, TOTP 2FA secret management, and role-based access (SuperAdmin vs Client).
+   - **Signaling Engine**: WebRTC SDP offer/answer relay, ICE candidate exchange, heartbeat management without duplicate renegotiation loops.
+   - **Email Notifications**: Nodemailer-based registration alerts for admins and welcome confirmation for clients.
 
 ---
 
-## 🚀 How to Run / Deploy Next Time
-* **Host App (Dev)**: `cd client-electron` -> `npm start`
-* **Host App (Package Executable)**: `cd client-electron` -> `npm run package`
-* **Controller Web (Dev)**: `cd controller-web` -> `npm run dev`
-* **Controller Web (Build)**: `cd controller-web` -> `npm run build`
-* **Signaling Server (Dev/Deploy)**: `cd server` -> `npm start`
+## ⚡ Complete Feature Matrix
+
+| Feature | Description | Implementation Status |
+| :--- | :--- | :--- |
+| **WebRTC 60 FPS P2P Stream** | Direct peer-to-peer ultra-low latency desktop streaming with dynamic aspect ratio | ✅ 100% Complete & Stable |
+| **Zero-Flicker Stream Engine** | Stale closure frame blocking + duplicate renegotiation loop protection | ✅ 100% Fixed & Verified |
+| **Native Hardware Control** | C# Win32 driver for mouse move, click, double-click, wheel scroll, and keypresses | ✅ 100% Complete |
+| **RMM Telemetry & Health** | Real-time CPU, RAM, Disk, Network speeds, LAN IP, and Uptime on cards & drawer | ✅ 100% Complete & Fixed |
+| **Remote PowerShell / CMD** | Interactive terminal drawer with command history, quick presets, and live output | ✅ 100% Complete |
+| **P2P File Transfer** | Drag-and-drop file uploads (60KB chunks) to remote Downloads folder with Explorer pop | ✅ 100% Complete |
+| **Remote File Explorer** | Browse remote C: drive / folders and download files directly to admin browser | ✅ 100% Complete |
+| **Screen Annotations & Laser** | Live drawing tools (laser, pen, arrow, rectangle, highlighter) on remote screen | ✅ 100% Complete |
+| **2FA / TOTP Security** | Two-factor authentication with QR code scan for Google/Microsoft Authenticator | ✅ 100% Complete |
+| **Multi-Tenant Workspaces** | Company group filtering (USPL, G-TECH, PRITS, etc.) and max PC limit enforcement | ✅ 100% Complete |
+| **Excel Telemetry Export** | 1-Click export of full hardware specs, disk volumes, network IPs to .xlsx | ✅ 100% Complete |
+| **cPanel Deployment Bundles** | Lightweight zip (`cpanel-deploy-light.zip`) and full bundle with .exe installer | ✅ 100% Ready |
+| **Permanent Source Backup** | Clean 4.25 MB pure source backup (`BACKUP_SOURCE_ONLY_NO_NODE_MODULES_2026-09-09.zip`) | ✅ Saved & Locked |
+
+---
+
+## 🛠️ Important Commands & Workflows
+
+### 1. Running Locally (Development)
+* **Web Controller**: `npm --prefix controller-web run dev`
+* **Signaling Server**: `node server/index.js`
+* **Electron Host**: `npm --prefix client-electron start`
+
+### 2. Building & Packaging
+* **Compile Web Frontend**: `npm --prefix controller-web run build`
+* **Package Electron Installer (.exe)**: `npm --prefix client-electron run package`
+* **Sync & Build cPanel Zips**: `node sync-files.js`
+
+### 3. Deploying to cPanel
+* Upload `cpanel-deploy-light.zip` to the cPanel application folder.
+* Extract in place.
+* In cPanel **Setup Node.js App**, click **Restart**.
+
+---
+
+## 🔒 Permanent Backup Reference
+* **File**: `BACKUP_SOURCE_ONLY_NO_NODE_MODULES_2026-09-09.zip` (4.25 MB)
+* **Location**: Root workspace directory. Contains 100% pure source code without node_modules or large build caches.

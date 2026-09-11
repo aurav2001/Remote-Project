@@ -1,0 +1,16 @@
+[
+  {
+    "id": "usr_1788647433948_gg08g",
+    "name": "MFA Tester",
+    "companyName": "TEST CORP",
+    "phone": "9999999999",
+    "email": "testmfa_1788647433621@uniotechit.com",
+    "desktopCount": "1-5 PCs",
+    "password": "Password123!",
+    "role": "Client",
+    "mfaEnabled": true,
+    "mfaSecret": "NX6HAQRYD6O54FNXOMQMSQMX7J2XY5HU",
+    "registeredAt": "2026-09-05T22:30:33.948Z",
+    "status": "approved"
+  }
+]

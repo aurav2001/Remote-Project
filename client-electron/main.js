@@ -8,10 +8,15 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('high-dpi-support', '1');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay');
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoEncoder,VaapiVideoDecoder,WebRtcHWDecoding,WebRtcHWEncoding');
 
 try {
   powerSaveBlocker.start('prevent-app-suspension');
-} catch(e) {}
+} catch (e) { }
 
 let tray = null;
 
@@ -68,6 +73,7 @@ try {
   // Expose real local IPv4 addresses (192.168.x.x) instead of anonymized .local mDNS hostnames for direct P2P connection on same Wi-Fi
   app.commandLine.appendSwitch('enable-webrtc-hide-local-ips-with-mdns', 'false');
   app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+  app.commandLine.appendSwitch('ignore-certificate-errors');
   // Disable background throttling & occlusion to prevent screen stream freezing when host window is minimized
   app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -75,6 +81,11 @@ try {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   app.commandLine.appendSwitch('enable-zero-copy');
+
+  app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+    event.preventDefault();
+    callback(true);
+  });
 
   const localUserData = path.join(app.getPath('temp'), 'remoteg-remote-desktop-data');
   if (!fs.existsSync(localUserData)) {
@@ -90,10 +101,10 @@ let mainWindow = null;
 
 // Initialize the C# native input helper process
 function startInputHelper() {
-  let exePath = app.isPackaged 
+  let exePath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'input-helper.exe')
     : path.join(__dirname, 'input-helper.exe');
-  
+
   if (!fs.existsSync(exePath)) {
     const altPath = path.join(__dirname, 'input-helper.exe');
     if (fs.existsSync(altPath)) {
@@ -107,7 +118,7 @@ function startInputHelper() {
   }
 
   console.log('Spawning input helper from:', exePath);
-  
+
   inputHelperProcess = spawn(exePath, [], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -175,7 +186,7 @@ function createWindow() {
       mainWindow.hide();
     }
   });
-  
+
   // Relay renderer console.log to main process terminal
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[Renderer Console]: ${message}`);
@@ -189,7 +200,7 @@ ipcMain.handle('minimize-host-window', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.minimize();
     }
-  } catch (e) {}
+  } catch (e) { }
 });
 
 // --- Transparent Screen Annotation & Laser Pointer Overlay Window ---
@@ -317,7 +328,7 @@ ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Ch
       transfer.stream.end();
       activeFileTransfers.delete(transferId);
       console.log(`[Main Process]: File transfer complete: ${transfer.fileName} (${transfer.bytesWritten} bytes saved to ${transfer.filePath})`);
-      
+
       // Automatically open Windows File Explorer and highlight the received file on target PC
       try {
         shell.showItemInFolder(transfer.filePath);
@@ -339,7 +350,7 @@ ipcMain.handle('save-file-chunk', async (event, { transferId, fileName, base64Ch
     if (activeFileTransfers.has(transferId)) {
       try {
         activeFileTransfers.get(transferId).stream.end();
-      } catch (e) {}
+      } catch (e) { }
       activeFileTransfers.delete(transferId);
     }
     return { success: false, error: err.message };
@@ -367,7 +378,7 @@ ipcMain.handle('get-drives-and-quick-paths', async () => {
           if (fs.existsSync(root)) {
             drives.push(root);
           }
-        } catch(e) {}
+        } catch (e) { }
       }
     } else {
       drives.push('/');
@@ -532,7 +543,7 @@ if (!gotTheLock) {
           callback({});
         });
       });
-    } catch (e) {}
+    } catch (e) { }
 
     startInputHelper();
     createWindow();
@@ -576,17 +587,17 @@ ipcMain.handle('get-screen-sources', async () => {
   try {
     const displays = screen.getAllDisplays();
     const primaryDisplay = screen.getPrimaryDisplay();
-    const sources = await desktopCapturer.getSources({ 
+    const sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: { width: 150, height: 150 }
     });
     if (!sources || sources.length === 0) {
-      return [{ 
-        id: 'screen:0:0', 
-        name: 'Primary Display', 
-        label: 'Monitor 1 (Primary)', 
-        isPrimary: true, 
-        bounds: primaryDisplay ? primaryDisplay.bounds : { x: 0, y: 0, width: 1920, height: 1080 } 
+      return [{
+        id: 'screen:0:0',
+        name: 'Primary Display',
+        label: 'Monitor 1 (Primary)',
+        isPrimary: true,
+        bounds: primaryDisplay ? primaryDisplay.bounds : { x: 0, y: 0, width: 1920, height: 1080 }
       }];
     }
     const mapped = sources.map((source, index) => {
@@ -670,16 +681,26 @@ ipcMain.handle('get-system-info', async () => {
   let ipAddress = '127.0.0.1';
   try {
     const interfaces = os.networkInterfaces();
+    let preferredIp = null;
     for (const devName in interfaces) {
       const iface = interfaces[devName];
       for (let i = 0; i < iface.length; i++) {
         const alias = iface[i];
-        if (alias.family === 'IPv4' && !alias.internal) {
-          ipAddress = alias.address;
-          break;
+        if (alias.family === 'IPv4' && !alias.internal && alias.address && !alias.address.startsWith('127.')) {
+          const name = devName.toLowerCase();
+          if (name.includes('wi-fi') || name.includes('ethernet') || name.includes('wlan') || name.includes('lan')) {
+            preferredIp = alias.address;
+            break;
+          } else if (!preferredIp) {
+            preferredIp = alias.address;
+          }
         }
       }
+      if (preferredIp && (devName.toLowerCase().includes('wi-fi') || devName.toLowerCase().includes('ethernet'))) {
+        break;
+      }
     }
+    if (preferredIp) ipAddress = preferredIp;
   } catch (err) {
     console.warn('Error reading network interfaces:', err);
   }
@@ -710,7 +731,7 @@ ipcMain.handle('get-system-info', async () => {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
     agentVersion = pkg.version || '1.0.0';
-  } catch (e) {}
+  } catch (e) { }
 
   const info = {
     hostname: os.hostname(),
@@ -733,7 +754,7 @@ ipcMain.handle('get-system-info', async () => {
 ipcMain.handle('get-full-system-diagnostics', async () => {
   const os = require('os');
   const publicIp = await getPublicIp();
-  
+
   return new Promise((resolve) => {
     const psScript = `
 $ErrorActionPreference = 'SilentlyContinue'
@@ -1056,16 +1077,27 @@ function collectLiveMetrics() {
   let ipAddress = '127.0.0.1';
   try {
     const interfaces = os.networkInterfaces();
+    let preferredIp = null;
     for (const devName in interfaces) {
       const iface = interfaces[devName];
       for (let i = 0; i < iface.length; i++) {
-        if (iface[i].family === 'IPv4' && !iface[i].internal) {
-          ipAddress = iface[i].address;
-          break;
+        const alias = iface[i];
+        if (alias.family === 'IPv4' && !alias.internal && alias.address && !alias.address.startsWith('127.')) {
+          const name = devName.toLowerCase();
+          if (name.includes('wi-fi') || name.includes('ethernet') || name.includes('wlan') || name.includes('lan')) {
+            preferredIp = alias.address;
+            break;
+          } else if (!preferredIp) {
+            preferredIp = alias.address;
+          }
         }
       }
+      if (preferredIp && (devName.toLowerCase().includes('wi-fi') || devName.toLowerCase().includes('ethernet'))) {
+        break;
+      }
     }
-  } catch (e) {}
+    if (preferredIp) ipAddress = preferredIp;
+  } catch (e) { }
 
   const cpus = os.cpus();
   const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Standard CPU';
@@ -1088,7 +1120,7 @@ function collectLiveMetrics() {
 
   if (Date.now() - lastPublicIpFetch > 600000 || cachedPublicIp === 'N/A') {
     lastPublicIpFetch = Date.now();
-    getPublicIp().then(ip => { cachedPublicIp = ip; }).catch(() => {});
+    getPublicIp().then(ip => { cachedPublicIp = ip; }).catch(() => { });
   }
 
   return {
@@ -1166,7 +1198,10 @@ ipcMain.on('control-event', (event, data) => {
         sendInputHelperCommand(`click ${button || 'left'}`);
       }
     } else if (type === 'wheel') {
-      const { deltaY } = data;
+      const { deltaY, ctrlKey } = data;
+      if (!ctrlKey) {
+        sendInputHelperCommand('releaseallmodifiers');
+      }
       if (deltaY) {
         sendInputHelperCommand(`scroll ${Math.round(deltaY)}`);
       }
@@ -1177,6 +1212,20 @@ ipcMain.on('control-event', (event, data) => {
     } else if (type === 'keyup') {
       if (keyCode) {
         sendInputHelperCommand(`keyup ${keyCode}`);
+      }
+    } else if (type === 'releaseallmodifiers' || type === 'resetkeys') {
+      sendInputHelperCommand('releaseallmodifiers');
+    } else if (type === 'shortcut') {
+      const shortcut = data.shortcut || '';
+      console.log(`[Main Process]: Executing native key shortcut: ${shortcut}`);
+      if (shortcut) {
+        sendInputHelperCommand(`shortcut ${shortcut}`);
+      }
+    } else if (type === 'combo') {
+      const keys = Array.isArray(data.keys) ? data.keys.join(' ') : (data.keys || '');
+      console.log(`[Main Process]: Executing native key combo: ${keys}`);
+      if (keys) {
+        sendInputHelperCommand(`combo ${keys}`);
       }
     }
   } catch (err) {
@@ -1246,6 +1295,26 @@ function getOrInitHostRoomId() {
 
 function getOrInitCompanyGroup() {
   try {
+    // 1. Check command line arguments (e.g. UnioTechIT.exe --company=G-TECH)
+    const argMatch = process.argv.find(arg => arg.startsWith('--company='));
+    if (argMatch) {
+      const groupFromArg = argMatch.split('=')[1]?.trim();
+      if (groupFromArg) {
+        const groupFile = path.join(app.getPath('userData'), 'company_group.txt');
+        try { fs.writeFileSync(groupFile, groupFromArg.toUpperCase(), 'utf8'); } catch (e) { }
+        return groupFromArg.toUpperCase();
+      }
+    }
+
+    // 2. Check local company.txt in the same directory as exe
+    const exeDir = path.dirname(process.execPath);
+    const localCompanyFile = path.join(exeDir, 'company.txt');
+    if (fs.existsSync(localCompanyFile)) {
+      const group = fs.readFileSync(localCompanyFile, 'utf8').trim();
+      if (group) return group.toUpperCase();
+    }
+
+    // 3. Check persistent userData company_group.txt
     const groupFile = path.join(app.getPath('userData'), 'company_group.txt');
     if (fs.existsSync(groupFile)) {
       const group = fs.readFileSync(groupFile, 'utf8').trim();
@@ -1272,7 +1341,7 @@ ipcMain.handle('set-permanent-code', (event, newCode) => {
     try {
       const codeFile = path.join(app.getPath('userData'), 'permanent_access_code.txt');
       fs.writeFileSync(codeFile, hostRoomId, 'utf8');
-    } catch(e) {}
+    } catch (e) { }
     sendHttpHeartbeat();
   }
   return hostRoomId;
@@ -1288,7 +1357,7 @@ ipcMain.handle('set-company-group', (event, newGroup) => {
     try {
       const groupFile = path.join(app.getPath('userData'), 'company_group.txt');
       fs.writeFileSync(groupFile, hostCompanyGroup, 'utf8');
-    } catch(e) {}
+    } catch (e) { }
     sendHttpHeartbeat();
   }
   return hostCompanyGroup;
@@ -1298,22 +1367,36 @@ ipcMain.handle('set-company-group', (event, newGroup) => {
 function sendHttpHeartbeat() {
   if (!hostRoomId) return;
   const https = require('https');
+  let metrics = null;
+  try {
+    metrics = collectLiveMetrics();
+  } catch (e) { }
+
+  const sysInfo = {
+    hostname: metrics?.hostname || os.hostname(),
+    companyGroup: hostCompanyGroup,
+    platform: metrics?.platform || `${os.type()} ${os.arch()}`,
+    ip: metrics?.ip || '127.0.0.1',
+    publicIp: metrics?.publicIp || cachedPublicIp || 'N/A',
+    loggedUser: metrics?.loggedUser || 'Admin',
+    cpu: metrics?.cpuModel || 'Standard CPU',
+    ram: metrics?.ramTotalGb ? `${metrics.ramTotalGb} GB` : '8 GB',
+    lastReboot: metrics?.lastReboot || 'N/A'
+  };
+
   const payload = JSON.stringify({
     roomId: hostRoomId,
     companyGroup: hostCompanyGroup,
-    systemInfo: {
-      hostname: os.hostname(),
-      companyGroup: hostCompanyGroup,
-      platform: `${os.type()} ${os.arch()}`,
-      ip: '127.0.0.1'
-    }
+    systemInfo: sysInfo,
+    liveMetrics: metrics
   });
 
   const req = https.request({
-    hostname: 'remote-project.onrender.com',
+    hostname: 'remote.uniotechit.com',
     port: 443,
     path: '/api/register-host',
     method: 'POST',
+    rejectUnauthorized: false,
     headers: {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(payload)
@@ -1323,16 +1406,16 @@ function sendHttpHeartbeat() {
     // Heartbeat received
   });
 
-  req.on('error', () => {});
+  req.on('error', () => { });
   req.on('timeout', () => req.destroy());
   req.write(payload);
   req.end();
 }
 
-// Immediately register on startup and send periodic heartbeat every 5 seconds
+// Immediately register on startup and send periodic heartbeat every 3 seconds
 app.whenReady().then(() => {
   sendHttpHeartbeat();
-  setInterval(sendHttpHeartbeat, 5000);
+  setInterval(sendHttpHeartbeat, 3000);
 });
 
 

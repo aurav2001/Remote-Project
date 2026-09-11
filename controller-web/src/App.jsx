@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { exportHostDiagnosticsToExcel, exportRegisteredClientsToExcel } from './utils/excelExport';
 
-const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://')) 
-  ? window.location.origin 
+const SIGNALING_SERVER = (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('file://'))
+  ? window.location.origin
   : 'https://remoteg-all-in-one-production-6122.up.railway.app';
 
 const rtcConfig = {
@@ -15,30 +15,57 @@ const rtcConfig = {
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.nextcloud.com:443' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:stun.services.mozilla.com:3478' },
+    { urls: 'stun:stun.twilio.com:3478' },
     { urls: 'stun:relay.metered.ca:80' },
     {
-      urls: 'turn:openrelay.metered.ca:80',
+      urls: 'turn:relay.metered.ca:80',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
+      urls: 'turn:relay.metered.ca:443',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+      urls: 'turn:relay.metered.ca:443?transport=tcp',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     }
-  ]
+  ],
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all',
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require'
 };
+
+function optimizeSdp(sdp) {
+  if (!sdp) return sdp;
+  try {
+    let lines = sdp.split('\r\n');
+    let mLineIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('m=video')) {
+        mLineIndex = i;
+        break;
+      }
+    }
+    if (mLineIndex !== -1) {
+      lines.splice(mLineIndex + 1, 0, 'b=AS:4500', 'b=TIAS:4500000');
+    }
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('a=fmtp:')) {
+        if (!lines[i].includes('x-google-min-bitrate')) {
+          lines[i] += ';x-google-min-bitrate=1200;x-google-max-bitrate=4500;x-google-start-bitrate=2500';
+        }
+      }
+    }
+    return lines.join('\r\n');
+  } catch (e) {
+    return sdp;
+  }
+}
 
 function App() {
   const [roomId, setRoomId] = useState('');
@@ -51,6 +78,15 @@ function App() {
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
   const [socketFrame, setSocketFrame] = useState(null);
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
+  const isWebRtcActiveRef = useRef(false);
+
+  const setWebRtcActiveState = (active) => {
+    isWebRtcActiveRef.current = active;
+    setIsWebRtcActive(active);
+    if (active) {
+      setSocketFrame(null);
+    }
+  };
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
@@ -77,7 +113,7 @@ function App() {
     try {
       const saved = localStorage.getItem('unio_custom_workspaces');
       return saved ? JSON.parse(saved) : ['USPL'];
-    } catch(e) {
+    } catch (e) {
       return ['USPL'];
     }
   });
@@ -85,7 +121,7 @@ function App() {
     try {
       const saved = localStorage.getItem('unio_saved_device_groups');
       return saved ? JSON.parse(saved) : {};
-    } catch(e) {
+    } catch (e) {
       return {};
     }
   });
@@ -93,7 +129,7 @@ function App() {
   const [myLocalHostCode, setMyLocalHostCode] = useState(() => {
     try {
       return localStorage.getItem('remoteg_permanent_access_code') || localStorage.getItem('unio_my_host_code') || '';
-    } catch(e) {
+    } catch (e) {
       return '';
     }
   });
@@ -133,7 +169,10 @@ function App() {
   const [showLandingView, setShowLandingView] = useState(false);
 
   // Registration Form States
-  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authMode, setAuthMode] = useState('login'); // 'login', 'register', or 'mfa'
+  const [mfaSessionToken, setMfaSessionToken] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [isVerifyingMfa, setIsVerifyingMfa] = useState(false);
   const [regName, setRegName] = useState('');
   const [regCompany, setRegCompany] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -156,8 +195,23 @@ function App() {
   const [changePassSuccess, setChangePassSuccess] = useState('');
   const [isChangingPass, setIsChangingPass] = useState(false);
 
+  // 2FA / MFA Management Modal States
+  const [showMfaModal, setShowMfaModal] = useState(false);
+  const [isMfaActive, setIsMfaActive] = useState(false);
+  const [mfaModalStep, setMfaModalStep] = useState('status'); // 'status' | 'setup' | 'disable'
+  const [mfaQrCode, setMfaQrCode] = useState('');
+  const [mfaSecret, setMfaSecret] = useState('');
+  const [mfaConfirmCode, setMfaConfirmCode] = useState('');
+  const [mfaDisablePassword, setMfaDisablePassword] = useState('');
+  const [mfaDisableCode, setMfaDisableCode] = useState('');
+  const [mfaModalLoading, setMfaModalLoading] = useState(false);
+  const [mfaModalError, setMfaModalError] = useState('');
+  const [mfaModalSuccess, setMfaModalSuccess] = useState('');
+  const [mfaCopied, setMfaCopied] = useState(false);
+
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const [showKeysDropdown, setShowKeysDropdown] = useState(false);
   const [clipboardToast, setClipboardToast] = useState(null);
   const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
@@ -240,6 +294,19 @@ function App() {
       isSelf: true
     });
     setTimeout(() => setClipboardToast(null), 3000);
+  };
+
+  const handleSendShortcut = (shortcut, label) => {
+    sendControlData({
+      type: 'shortcut',
+      shortcut
+    });
+
+    setClipboardToast({
+      text: `⌨️ Sent ${label || shortcut} to Remote PC`,
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 2000);
   };
 
   // Remote Reboot & Auto-Reconnect States
@@ -628,8 +695,8 @@ function App() {
     const pct = Math.min(100, Math.round((stateObj.receivedBytes / total) * 100));
     const elapsedSec = (Date.now() - stateObj.startTime) / 1000 || 0.1;
     const speedBytes = stateObj.receivedBytes / elapsedSec;
-    const speedStr = speedBytes > 1024 * 1024 
-      ? `${(speedBytes / (1024 * 1024)).toFixed(1)} MB/s` 
+    const speedStr = speedBytes > 1024 * 1024
+      ? `${(speedBytes / (1024 * 1024)).toFixed(1)} MB/s`
       : `${Math.round(speedBytes / 1024)} KB/s`;
 
     setActiveDownloadTransfer({
@@ -674,7 +741,7 @@ function App() {
 
   // Single-instance download protection to avoid duplicate downloads
   const [isDownloading, setIsDownloading] = useState(false);
-  const GITHUB_DOWNLOAD_URL = 'https://github.com/aurav2001/Remote-Project/raw/main/client-electron/UnioTechIT-Setup.zip';
+  const GITHUB_DOWNLOAD_URL = '/UnioTechIT-Setup.exe';
 
   const handleDownloadSetup = () => {
     if (isDownloading) return;
@@ -682,7 +749,7 @@ function App() {
 
     const tempLink = document.createElement('a');
     tempLink.href = GITHUB_DOWNLOAD_URL;
-    tempLink.setAttribute('download', 'UnioTechIT-Setup.zip');
+    tempLink.setAttribute('download', 'UnioTechIT-Setup.exe');
     tempLink.style.display = 'none';
     document.body.appendChild(tempLink);
     tempLink.click();
@@ -757,6 +824,9 @@ function App() {
         setIsAuthenticated(true);
         setShowAuthModal(false);
         setShowLandingView(false);
+        setMfaCode('');
+        setMfaSessionToken('');
+        setAuthMode('login');
         if (rememberMe) {
           localStorage.setItem('unio_auth_token', data.token);
           localStorage.setItem('unio_current_user', JSON.stringify(data.user));
@@ -764,6 +834,12 @@ function App() {
           sessionStorage.setItem('unio_auth_token', data.token);
           sessionStorage.setItem('unio_current_user', JSON.stringify(data.user));
         }
+      } else if (res.ok && data.requireMfa && data.mfaSessionToken) {
+        // Transition to 2FA / TOTP Code verification screen
+        setMfaSessionToken(data.mfaSessionToken);
+        setAuthMode('mfa');
+        setLoginError('');
+        setMfaCode('');
       } else {
         setLoginError(data.error || 'Invalid credentials. Please verify your login info.');
         triggerLoginShake();
@@ -784,6 +860,57 @@ function App() {
       }
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  // 2FA / TOTP 6-Digit Code Verification Handler
+  const handleVerifyMfa = async (e) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+    const cleanCode = mfaCode.trim().replace(/\s+/g, '');
+    if (!cleanCode || cleanCode.length !== 6) {
+      setLoginError('Please enter the 6-digit Authenticator code.');
+      triggerLoginShake();
+      return;
+    }
+
+    setIsVerifyingMfa(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/mfa/verify-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mfaSessionToken,
+          code: cleanCode,
+          clientTime: Date.now()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.token) {
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        setShowAuthModal(false);
+        setShowLandingView(false);
+        setMfaCode('');
+        setMfaSessionToken('');
+        setAuthMode('login');
+        if (rememberMe) {
+          localStorage.setItem('unio_auth_token', data.token);
+          localStorage.setItem('unio_current_user', JSON.stringify(data.user));
+        } else {
+          sessionStorage.setItem('unio_auth_token', data.token);
+          sessionStorage.setItem('unio_current_user', JSON.stringify(data.user));
+        }
+      } else {
+        setLoginError(data.error || 'Invalid 6-digit Authenticator code. Please check your phone.');
+        triggerLoginShake();
+      }
+    } catch (err) {
+      setLoginError('Authentication server connection error during 2FA verification.');
+      triggerLoginShake();
+    } finally {
+      setIsVerifyingMfa(false);
     }
   };
 
@@ -900,7 +1027,7 @@ function App() {
           method: 'POST',
           headers: { Authorization: `Bearer ${authToken}` }
         });
-      } catch (e) {}
+      } catch (e) { }
     }
     localStorage.removeItem('unio_auth_token');
     localStorage.removeItem('unio_current_user');
@@ -964,6 +1091,158 @@ function App() {
     }
   };
 
+  // 2FA / MFA Management Handlers
+  const fetchMfaStatus = async () => {
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/mfa/status`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsMfaActive(Boolean(data.mfaEnabled));
+        return data.mfaEnabled;
+      }
+    } catch (e) { }
+    return false;
+  };
+
+  const handleOpenMfaModal = async () => {
+    setMfaModalError('');
+    setMfaModalSuccess('');
+    setMfaConfirmCode('');
+    setMfaDisablePassword('');
+    setMfaDisableCode('');
+    setShowMfaModal(true);
+    setMfaModalLoading(true);
+
+    try {
+      const isEnabled = await fetchMfaStatus();
+      if (isEnabled) {
+        setMfaModalStep('status');
+      } else {
+        await handleInitMfaSetup();
+      }
+    } catch (e) {
+      setMfaModalError('Failed checking 2FA status.');
+    } finally {
+      setMfaModalLoading(false);
+    }
+  };
+
+  const handleInitMfaSetup = async () => {
+    setMfaModalError('');
+    setMfaModalSuccess('');
+    setMfaModalLoading(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/mfa/setup-init`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMfaQrCode(data.qrCodeDataUrl);
+        setMfaSecret(data.secret);
+        setMfaModalStep('setup');
+      } else {
+        setMfaModalError(data.error || 'Failed generating 2FA QR code.');
+      }
+    } catch (e) {
+      setMfaModalError('Network error initializing 2FA setup.');
+    } finally {
+      setMfaModalLoading(false);
+    }
+  };
+
+  const handleConfirmMfaSetup = async (e) => {
+    if (e) e.preventDefault();
+    setMfaModalError('');
+    setMfaModalSuccess('');
+    const cleanCode = mfaConfirmCode.trim().replace(/\s+/g, '');
+    if (!cleanCode || cleanCode.length !== 6) {
+      setMfaModalError('Please enter the 6-digit code from your Authenticator app.');
+      return;
+    }
+
+    setMfaModalLoading(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/mfa/setup-confirm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          secret: mfaSecret,
+          code: cleanCode,
+          clientTime: Date.now()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsMfaActive(true);
+        setCurrentUser(prev => prev ? { ...prev, mfaEnabled: true } : prev);
+        setMfaModalSuccess('Two-Factor Authentication (2FA) successfully activated!');
+        setMfaConfirmCode('');
+        setTimeout(() => {
+          setMfaModalStep('status');
+          setMfaModalSuccess('');
+        }, 1800);
+      } else {
+        setMfaModalError(data.error || 'Incorrect 6-digit code. Please verify in Google/Microsoft Authenticator.');
+      }
+    } catch (e) {
+      setMfaModalError('Network error confirming 2FA setup.');
+    } finally {
+      setMfaModalLoading(false);
+    }
+  };
+
+  const handleDisableMfa = async (e) => {
+    if (e) e.preventDefault();
+    setMfaModalError('');
+    setMfaModalSuccess('');
+    if (!mfaDisablePassword) {
+      setMfaModalError('Current password is required to disable 2FA.');
+      return;
+    }
+
+    setMfaModalLoading(true);
+    try {
+      const res = await fetch(`${SIGNALING_SERVER}/api/auth/mfa/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          password: mfaDisablePassword,
+          code: mfaDisableCode.trim() || undefined
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsMfaActive(false);
+        setCurrentUser(prev => prev ? { ...prev, mfaEnabled: false } : prev);
+        setMfaModalSuccess('Two-Factor Authentication (2FA) disabled.');
+        setMfaDisablePassword('');
+        setMfaDisableCode('');
+        setTimeout(() => {
+          setShowMfaModal(false);
+          setMfaModalSuccess('');
+        }, 1500);
+      } else {
+        setMfaModalError(data.error || 'Failed to disable 2FA. Verify password.');
+      }
+    } catch (e) {
+      setMfaModalError('Network error disabling 2FA.');
+    } finally {
+      setMfaModalLoading(false);
+    }
+  };
+
   // High-performance unified host synchronization engine
   useEffect(() => {
     let isMounted = true;
@@ -973,7 +1252,7 @@ function App() {
         setActiveHosts(data);
         try {
           localStorage.setItem('unio_cached_active_hosts', JSON.stringify(data));
-        } catch (e) {}
+        } catch (e) { }
       }
     };
 
@@ -1002,8 +1281,8 @@ function App() {
       pingInterval: 10000,
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      transports: ['websocket', 'polling']
+      reconnectionDelay: 2000,
+      transports: ['polling', 'websocket']
     });
 
     globalSocket.on('connect', () => {
@@ -1061,33 +1340,20 @@ function App() {
     };
   }, []);
 
-  // Guarantee that whenever status becomes 'connected', the video tag receives the stream and plays
+  // Ensure video element plays live WebRTC stream cleanly
   useEffect(() => {
     if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
       if (videoRef.current.srcObject !== remoteStreamRef.current) {
-        console.log('Binding remote stream to video element srcObject and invoking play()');
+        console.log('Binding remote stream to video element srcObject');
         videoRef.current.srcObject = remoteStreamRef.current;
       }
       if (videoRef.current.paused) {
-        videoRef.current.play().catch(err => console.warn('Video autoplay warning:', err));
+        videoRef.current.play().catch(err => {
+          if (err && err.name !== 'AbortError') console.warn('Video autoplay warning:', err);
+        });
       }
     }
-  }, [status]);
-
-  // Low-latency video buffer sync: prevents video drift behind real-time
-  useEffect(() => {
-    if (status !== 'connected' || !videoRef.current) return;
-    const v = videoRef.current;
-    const syncInterval = setInterval(() => {
-      if (v && v.buffered && v.buffered.length > 0) {
-        const liveEdge = v.buffered.end(v.buffered.length - 1);
-        if (liveEdge - v.currentTime > 0.10) {
-          v.currentTime = liveEdge;
-        }
-      }
-    }, 400);
-    return () => clearInterval(syncInterval);
-  }, [status]);
+  }, [status, isWebRtcActive]);
 
   // Check URL query parameters (?code=123456 or ?id=123456) for instant auto-connect
   useEffect(() => {
@@ -1103,11 +1369,11 @@ function App() {
   const handleReceiveRemoteClipboard = (text) => {
     if (!text || typeof text !== 'string' || !text.trim()) return;
     console.log('[Controller]: Received Remote Host Clipboard Sync:', text.substring(0, 30));
-    
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).catch(err => console.warn('Browser clipboard write warning:', err));
     }
-    
+
     setClipboardToast({
       text,
       timestamp: new Date().toLocaleTimeString()
@@ -1408,7 +1674,7 @@ function App() {
       if (video && video.readyState >= 2) {
         try {
           ctx.drawImage(video, 0, 0, w, h);
-        } catch(e) {}
+        } catch (e) { }
       }
 
       ctx.drawImage(canvas, 0, 0, w, h);
@@ -1423,29 +1689,22 @@ function App() {
     }
   };
 
-  // Close tools dropdown when clicking outside
+  // Close tools & keys dropdown when clicking outside
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (showToolsDropdown && !e.target.closest('.tools-dropdown-wrapper')) {
         setShowToolsDropdown(false);
       }
+      if (showKeysDropdown && !e.target.closest('.keys-dropdown-wrapper')) {
+        setShowKeysDropdown(false);
+      }
+      if (showScreenDropdown && !e.target.closest('.screens-dropdown-wrapper')) {
+        setShowScreenDropdown(false);
+      }
     };
     document.addEventListener('click', handleOutsideClick);
     return () => document.removeEventListener('click', handleOutsideClick);
-  }, [showToolsDropdown]);
-
-  // Ensure video element plays live stream cleanly without flickering interval
-  useEffect(() => {
-    if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
-      const el = videoRef.current;
-      el.muted = true;
-      el.defaultMuted = true;
-      if (el.srcObject !== remoteStreamRef.current) {
-        el.srcObject = remoteStreamRef.current;
-      }
-      el.play().catch(e => console.warn('Video play warning:', e));
-    }
-  }, [status]);
+  }, [showToolsDropdown, showKeysDropdown, showScreenDropdown]);
 
   // Global Keyboard Listener for Arrow Keys & controls across viewer
   useEffect(() => {
@@ -1454,14 +1713,16 @@ function App() {
     const handleGlobalKeyDown = (e) => {
       // Ignore inputs if typing inside drawers, inputs, or textareas
       const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable)) {
         return;
       }
+
+      if (e.repeat) return; // Prevent repeated keydown storm
 
       let vk = e.keyCode || e.which;
       if (!vk) return;
 
-      // Prevent default browser scroll for arrow keys (37-40), Space (32), Tab (9), Backspace (8)
+      // Prevent default browser scroll for arrow keys, Space, Tab, Backspace, Delete
       if ([37, 38, 39, 40, 32, 33, 34, 35, 36, 8, 9, 13, 46].includes(vk)) {
         e.preventDefault();
       }
@@ -1475,7 +1736,7 @@ function App() {
 
     const handleGlobalKeyUp = (e) => {
       const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable)) {
         return;
       }
 
@@ -1493,18 +1754,27 @@ function App() {
       });
     };
 
+    const handleWindowBlur = () => {
+      sendControlData({
+        type: 'releaseallmodifiers'
+      });
+    };
+
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     window.addEventListener('keyup', handleGlobalKeyUp, { capture: true });
+    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
       window.removeEventListener('keyup', handleGlobalKeyUp, { capture: true });
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [status]);
 
   const cleanup = () => {
     remoteStreamRef.current = null;
     pendingCandidatesRef.current = [];
+    setWebRtcActiveState(false);
     setLiveMetrics(null);
     setTerminalLogs([]);
     if (dataChannelRef.current) {
@@ -1572,7 +1842,11 @@ function App() {
     // Connect to Signaling Server
     const socket = io(SIGNALING_SERVER, {
       pingTimeout: 60000,
-      pingInterval: 25000
+      pingInterval: 25000,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      transports: ['polling', 'websocket']
     });
     socketRef.current = socket;
 
@@ -1594,9 +1868,9 @@ function App() {
       }
     });
 
-    // Receive Hybrid Canvas JPEG Frame Stream Fallback
+    // Receive Hybrid Canvas JPEG Frame Stream Fallback (only used when WebRTC P2P is inactive)
     socket.on('screen-frame', ({ frame }) => {
-      if (frame) {
+      if (frame && !isWebRtcActiveRef.current) {
         setSocketFrame(frame);
         setStatus('connected');
       }
@@ -1663,7 +1937,9 @@ function App() {
       if (systemInfo) {
         setHostSystemInfo(systemInfo);
       }
-      setStatus('ready');
+      if (status !== 'connected' && !isWebRtcActiveRef.current) {
+        setStatus('ready');
+      }
     });
 
     // Receive WebRTC offer from Host
@@ -1756,9 +2032,10 @@ function App() {
       console.log('WebRTC State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
+        setWebRtcActiveState(true);
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         console.warn('WebRTC state disconnected or failed. Keeping session active on hybrid frame fallback...');
-        setIsWebRtcActive(false);
+        setWebRtcActiveState(false);
         if (pc.restartIce) {
           pc.restartIce();
         }
@@ -1769,32 +2046,59 @@ function App() {
     pc.oniceconnectionstatechange = () => {
       console.log('ICE State Change:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        setIsWebRtcActive(true);
+        setWebRtcActiveState(true);
       } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
         console.warn('WebRTC ICE failed. Seamless fallback to hybrid frame stream active.');
-        setIsWebRtcActive(false);
+        setWebRtcActiveState(false);
       }
     };
 
     // Receive screen track
     pc.ontrack = (event) => {
       console.log('[Controller]: Received remote video track! Opening full-screen stream.', event);
-      const stream = (event.streams && event.streams[0])
-        ? event.streams[0]
-        : new MediaStream([event.track]);
+      if (!event.track) return;
+      event.track.enabled = true;
+
+      // Force zero buffer delay for instant 60FPS real-time interaction (no latency lag)
+      if (event.receiver) {
+        try {
+          if ('playoutDelayHint' in event.receiver) {
+            event.receiver.playoutDelayHint = 0;
+          }
+          if ('jitterBufferTarget' in event.receiver) {
+            event.receiver.jitterBufferTarget = 0;
+          }
+        } catch (e) { }
+      }
+
+      let stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
+      if (!stream) {
+        if (remoteStreamRef.current && remoteStreamRef.current.active) {
+          stream = remoteStreamRef.current;
+          if (!stream.getTracks().some(t => t.id === event.track.id)) {
+            stream.addTrack(event.track);
+          }
+        } else {
+          stream = new MediaStream([event.track]);
+        }
+      }
 
       remoteStreamRef.current = stream;
-
-      if (event.track) {
-        event.track.enabled = true;
-      }
 
       if (videoRef.current) {
         if (videoRef.current.srcObject !== stream) {
           videoRef.current.srcObject = stream;
         }
-        videoRef.current.play().catch(e => console.warn('Video play warning:', e));
+        const p = videoRef.current.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(e => {
+            if (e && e.name !== 'AbortError') {
+              console.warn('Video play warning:', e);
+            }
+          });
+        }
       }
+      setWebRtcActiveState(true);
       setStatus('connected');
     };
 
@@ -1855,7 +2159,7 @@ function App() {
           } else if (data.type === 'system-diagnostics-response') {
             handleReceiveDiagnosticsReport(data);
           }
-        } catch (err) {}
+        } catch (err) { }
       };
       dataChannel.onclose = () => {
         console.log('[Controller]: WebRTC DataChannel closed.');
@@ -1881,17 +2185,30 @@ function App() {
       }
     }
 
-    // Create SDP Answer
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    // Create SDP Answer with Low-Latency & High-Bitrate settings
+    const rawAnswer = await pc.createAnswer();
+    const optimizedAnswerSdp = optimizeSdp(rawAnswer.sdp);
+    const finalAnswer = {
+      type: rawAnswer.type || 'answer',
+      sdp: optimizedAnswerSdp
+    };
+    await pc.setLocalDescription(finalAnswer);
+
+    // Request 0 buffering / immediate frame presentation on video receivers
+    try {
+      const receivers = pc.getReceivers();
+      receivers.forEach(r => {
+        if (r.track && r.track.kind === 'video') {
+          if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
+          if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
+        }
+      });
+    } catch (e) { }
 
     // Send SDP Answer to Host
     socketRef.current.emit('webrtc-answer', {
       roomId: activeRoomIdRef.current || targetRoomId.trim(),
-      answer: {
-        type: answer.type || 'answer',
-        sdp: answer.sdp
-      }
+      answer: finalAnswer
     });
   };
 
@@ -2050,8 +2367,8 @@ function App() {
 
         const elapsedSec = (Date.now() - startTime) / 1000 || 0.1;
         const currentSpeedBytes = offset / elapsedSec;
-        const speedStr = currentSpeedBytes > 1024 * 1024 
-          ? `${(currentSpeedBytes / (1024 * 1024)).toFixed(1)} MB/s` 
+        const speedStr = currentSpeedBytes > 1024 * 1024
+          ? `${(currentSpeedBytes / (1024 * 1024)).toFixed(1)} MB/s`
           : `${Math.round(currentSpeedBytes / 1024)} KB/s`;
 
         const progress = Math.min(100, Math.round((offset / file.size) * 100));
@@ -2164,7 +2481,9 @@ function App() {
   const handleMouseMove = (e) => {
     updateLocalCursor(e, true, false);
     const now = performance.now();
-    if (now - lastMoveTimeRef.current >= 12) {
+    const isP2P = dataChannelRef.current && dataChannelRef.current.readyState === 'open';
+    const throttleMs = isP2P ? 16 : 35; // 60Hz over direct P2P DataChannel, 28Hz over socket fallback to prevent queue congestion
+    if (now - lastMoveTimeRef.current >= throttleMs) {
       lastMoveTimeRef.current = now;
       sendMouseEvent('mousemove', e);
     }
@@ -2183,26 +2502,27 @@ function App() {
     }
   };
   const handleDoubleClick = (e) => sendMouseEvent('doubleclick', e);
-  
+
   const handleContextMenu = (e) => {
     e.preventDefault(); // Prevent browser right-click context menu (mousedown/mouseup handles native right click)
   };
 
   const handleWheel = (e) => {
     if (status !== 'connected') return;
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     sendMouseEvent('mousemove', e);
     sendControlData({
       type: 'wheel',
       deltaY: e.deltaY,
-      deltaX: e.deltaX
+      deltaX: e.deltaX,
+      ctrlKey: Boolean(e.ctrlKey)
     });
   };
 
   // Keyboard events helper - emits virtual key codes
   const handleKeyDown = (e) => {
     if (status !== 'connected') return;
-    
+
     // Prevent default browser scrolling/navigation for key events when controlling
     e.preventDefault();
 
@@ -2244,7 +2564,7 @@ function App() {
     setSelectedWorkspace(ws);
     try {
       localStorage.setItem('unio_selected_workspace', ws);
-    } catch(e) {}
+    } catch (e) { }
   };
 
   const handleAddWorkspace = () => {
@@ -2254,7 +2574,7 @@ function App() {
       if (!customWorkspaces.includes(clean)) {
         const updated = [...customWorkspaces, clean];
         setCustomWorkspaces(updated);
-        try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch(e) {}
+        try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch (e) { }
       }
       handleSelectWorkspace(clean);
     }
@@ -2268,13 +2588,13 @@ function App() {
       // Update local storage and state immediately for instant responsive UI
       setSavedDeviceGroups(prev => {
         const updated = { ...prev, [roomId]: clean };
-        try { localStorage.setItem('unio_saved_device_groups', JSON.stringify(updated)); } catch(e) {}
+        try { localStorage.setItem('unio_saved_device_groups', JSON.stringify(updated)); } catch (e) { }
         return updated;
       });
       if (!customWorkspaces.includes(clean)) {
         const updated = [...customWorkspaces, clean];
         setCustomWorkspaces(updated);
-        try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch(e) {}
+        try { localStorage.setItem('unio_custom_workspaces', JSON.stringify(updated)); } catch (e) { }
       }
       try {
         await fetch(`${SIGNALING_SERVER}/api/set-company-group`, {
@@ -2341,11 +2661,11 @@ function App() {
   const totalCount = workspaceDevices.length;
   const onlineCount = workspaceDevices.filter(d => d.isOnline).length;
   const onlineWithMetrics = workspaceDevices.filter(d => d.isOnline && d.liveMetrics);
-  const avgCpu = onlineWithMetrics.length > 0 
-    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.cpuPercent || 0), 0) / onlineWithMetrics.length) 
+  const avgCpu = onlineWithMetrics.length > 0
+    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.cpuPercent || 0), 0) / onlineWithMetrics.length)
     : 0;
-  const avgRam = onlineWithMetrics.length > 0 
-    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.ramPercent || 0), 0) / onlineWithMetrics.length) 
+  const avgRam = onlineWithMetrics.length > 0
+    ? Math.round(onlineWithMetrics.reduce((acc, curr) => acc + (curr.liveMetrics.ramPercent || 0), 0) / onlineWithMetrics.length)
     : 0;
 
   if ((!isAuthenticated || showLandingView) && status !== 'connected') {
@@ -2378,14 +2698,14 @@ function App() {
               </div>
 
               {isAuthenticated ? (
-                <button 
+                <button
                   className="landing-login-btn glowing-btn"
                   onClick={() => setShowLandingView(false)}
                 >
                   🖥️ Open Dashboard
                 </button>
               ) : (
-                <button 
+                <button
                   className="landing-login-btn glowing-btn"
                   onClick={() => { setLoginError(''); setShowAuthModal(true); }}
                 >
@@ -2415,7 +2735,7 @@ function App() {
 
             <div className="landing-hero-cta-group">
               {isAuthenticated ? (
-                <button 
+                <button
                   className="hero-primary-btn"
                   onClick={() => setShowLandingView(false)}
                 >
@@ -2426,7 +2746,7 @@ function App() {
                   </svg>
                 </button>
               ) : (
-                <button 
+                <button
                   className="hero-primary-btn"
                   onClick={() => { setLoginError(''); setShowAuthModal(true); }}
                 >
@@ -2438,8 +2758,8 @@ function App() {
                 </button>
               )}
 
-              <button 
-                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')} 
+              <button
+                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')}
                 className="hero-secondary-btn"
                 style={{ cursor: 'pointer', border: 'none' }}
               >
@@ -2451,9 +2771,9 @@ function App() {
             {/* Hero Visual Preview with Floating Badges */}
             <div className="landing-hero-preview-wrapper">
               <div className="hero-preview-glass-frame">
-                <img 
-                  src="/hero_banner.jpg" 
-                  alt="UnioTechIT Remote Desktop Hologram Dashboard" 
+                <img
+                  src="/hero_banner.jpg"
+                  alt="UnioTechIT Remote Desktop Hologram Dashboard"
                   className="hero-preview-img"
                 />
                 <div className="hero-preview-overlay-gradient"></div>
@@ -2625,10 +2945,10 @@ function App() {
           <div className="download-box-glass">
             <h2 className="download-title">Download UnioTechIT Windows Agent</h2>
             <p className="download-desc">Supported on Windows 10, Windows 11, and Windows Server (64-bit). Registration required for fleet deployment.</p>
-            
+
             <div className="download-buttons-group">
-              <button 
-                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')} 
+              <button
+                onClick={(e) => handleProtectedDownload(e, '/UnioTechIT-Setup.exe', 'UnioTechIT-Setup.exe')}
                 className="download-action-card"
                 style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', width: '100%', font: 'inherit' }}
               >
@@ -2640,8 +2960,8 @@ function App() {
                 <span className="dl-arrow">{isAuthenticated ? '⬇️' : '🔐'}</span>
               </button>
 
-              <button 
-                onClick={(e) => handleProtectedDownload(e, '/download', 'UnioTechIT-Setup.zip')} 
+              <button
+                onClick={(e) => handleProtectedDownload(e, '/download', 'UnioTechIT-Setup.zip')}
                 className="download-action-card"
                 style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', width: '100%', font: 'inherit' }}
               >
@@ -2666,7 +2986,7 @@ function App() {
             <div className="footer-links">
               <a href="https://github.com/aurav2001/Remote-Project" target="_blank" rel="noreferrer">GitHub Repository</a>
               <a href="https://remoteg-all-in-one-production-6122.up.railway.app/download">Download Host Agent</a>
-              <button 
+              <button
                 className="footer-login-link"
                 onClick={() => { setLoginError(''); setShowAuthModal(true); }}
               >
@@ -2684,65 +3004,73 @@ function App() {
           <div className="auth-modal-overlay" onClick={() => setShowAuthModal(false)}>
             <div className={`auth-card-glass ${loginShake ? 'shake-anim' : ''}`} style={{ maxWidth: authMode === 'register' ? '520px' : '440px' }} onClick={e => e.stopPropagation()}>
               <button className="auth-modal-close-btn" onClick={() => setShowAuthModal(false)} title="Close">✕</button>
-              
+
               {/* Brand & Security Header */}
               <div className="auth-header" style={{ marginBottom: '16px' }}>
                 <div className="auth-logo-badge">
                   <img src="/logo.png" alt="UnioTechIT Logo" className="auth-logo-img" />
                   <div className="auth-security-icon-glow">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                      <path d="M9 12l2 2 4-4"/>
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="M9 12l2 2 4-4" />
                     </svg>
                   </div>
                 </div>
-                <h1 className="auth-title">{authMode === 'register' ? 'Register & Download Agent' : 'Remote Console Sign In'}</h1>
+                <h1 className="auth-title">
+                  {authMode === 'register'
+                    ? 'Register & Download Agent'
+                    : (authMode === 'mfa' ? 'Two-Factor Authentication (2FA)' : 'Remote Console Sign In')}
+                </h1>
                 <p className="auth-subtitle">
-                  {authMode === 'register' 
-                    ? 'Register your company details to download the Windows Host Agent' 
-                    : 'Sign in to access your remote fleet & active sessions'}
+                  {authMode === 'register'
+                    ? 'Register your company details to download the Windows Host Agent'
+                    : (authMode === 'mfa'
+                      ? 'Enter the 6-digit security code from your Google / Microsoft Authenticator app'
+                      : 'Sign in to access your remote fleet & active sessions')}
                 </p>
               </div>
 
-              {/* Mode Switcher Tabs */}
-              <div className="auth-tab-switch" style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', marginBottom: '18px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <button
-                  type="button"
-                  onClick={() => { setAuthMode('login'); setLoginError(''); }}
-                  style={{
-                    flex: 1,
-                    padding: '8px 14px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    background: authMode === 'login' ? 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)' : 'transparent',
-                    color: authMode === 'login' ? '#ffffff' : '#94a3b8',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  🔐 Sign In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setAuthMode('register'); setLoginError(''); }}
-                  style={{
-                    flex: 1,
-                    padding: '8px 14px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    background: authMode === 'register' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
-                    color: authMode === 'register' ? '#ffffff' : '#94a3b8',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  📝 Register & Download
-                </button>
-              </div>
+              {/* Mode Switcher Tabs (Only shown when not in MFA verification) */}
+              {authMode !== 'mfa' && (
+                <div className="auth-tab-switch" style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', marginBottom: '18px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMode('login'); setLoginError(''); }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      background: authMode === 'login' ? 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)' : 'transparent',
+                      color: authMode === 'login' ? '#ffffff' : '#94a3b8',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    🔐 Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMode('register'); setLoginError(''); }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      background: authMode === 'register' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
+                      color: authMode === 'register' ? '#ffffff' : '#94a3b8',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    📝 Register & Download
+                  </button>
+                </div>
+              )}
 
               {/* Error Notification */}
               {loginError && (
@@ -2859,6 +3187,91 @@ function App() {
                       <code>admin / admin123</code>
                     </div>
                   </div>
+                </form>
+              ) : authMode === 'mfa' ? (
+                /* Tab 3: 2FA / TOTP Authenticator Code Form */
+                <form onSubmit={handleVerifyMfa} className="auth-form">
+                  <div style={{ textAlign: 'center', padding: '6px 0 16px' }}>
+                    <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', marginBottom: '10px' }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                        <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                      </svg>
+                    </div>
+                    <div style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 600 }}>
+                      Google / Microsoft Authenticator Code
+                    </div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '4px' }}>
+                      Enter the live 6-digit code for <b>{loginUsername}</b> from your phone app.
+                    </div>
+                  </div>
+
+                  <div className="auth-field-group">
+                    <div className="auth-input-wrapper">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        className="auth-input"
+                        placeholder="000000"
+                        value={mfaCode}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+                          setMfaCode(val);
+                        }}
+                        style={{
+                          textAlign: 'center',
+                          fontSize: '1.5rem',
+                          letterSpacing: '8px',
+                          fontWeight: 700,
+                          color: '#38bdf8'
+                        }}
+                        autoFocus
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="auth-submit-btn"
+                    disabled={isVerifyingMfa || mfaCode.length < 6}
+                    style={{ marginTop: '8px' }}
+                  >
+                    {isVerifyingMfa ? (
+                      <span className="auth-loading-state">
+                        <span className="auth-spinner"></span>
+                        <span>Verifying Security Code...</span>
+                      </span>
+                    ) : (
+                      <span className="auth-btn-content">
+                        <span>🛡️ Verify Code & Enter Console</span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                          <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMode('login'); setLoginError(''); setMfaCode(''); }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      marginTop: '12px',
+                      textAlign: 'center',
+                      width: '100%',
+                      padding: '6px'
+                    }}
+                  >
+                    ← Back to Password Sign In
+                  </button>
                 </form>
               ) : (
                 /* Tab 2: Client Registration Form */
@@ -2982,351 +3395,355 @@ function App() {
 
   return (
     <div className="app-container">
-      <div className="dashboard-root" style={{ display: status === 'connected' ? 'none' : 'block' }}>
-          {/* Top Navbar Header */}
-          <div className="dashboard-nav">
-            <div className="dashboard-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <img src="/logo.png" alt="UnioTechIT Logo" style={{ height: '38px', maxWidth: '160px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(56, 189, 248, 0.4))' }} />
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.2rem', background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UnioTechIT Central Portal</h2>
+      <div className="dashboard-root" style={{ display: (status === 'connected' || status === 'connecting' || status === 'ready') ? 'none' : 'block' }}>
+        {/* Top Navbar Header */}
+        <div className="dashboard-nav">
+          <div className="dashboard-brand">
+            <img src="/logo.png" alt="UnioTechIT Logo" className="brand-logo-img" />
+            <div className="brand-text-col">
+              <div className="brand-title-row">
+                <span className="brand-main-title">UnioTechIT</span>
+                <span className="brand-edition-pill">PORTAL</span>
               </div>
-            </div>
-
-            <div className="nav-tabs">
-              <button 
-                className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-                onClick={() => setActiveTab('dashboard')}
-              >
-                🖥️ Devices Dashboard
-                <span style={{ 
-                  background: activeHosts.length > 0 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.1)',
-                  color: activeHosts.length > 0 ? '#34d399' : '#94a3b8',
-                  padding: '2px 8px',
-                  borderRadius: '100px',
-                  fontSize: '0.75rem',
-                  fontWeight: 700
-                }}>
-                  {activeHosts.length} Live
-                </span>
-              </button>
-
-              <button 
-                className={`tab-btn ${activeTab === 'connect' ? 'active' : ''}`}
-                onClick={() => setActiveTab('connect')}
-              >
-                ⚡ Code Connect
-              </button>
-
-              {currentUser?.role === 'Administrator' && (
-                <button 
-                  className={`tab-btn ${activeTab === 'clients' ? 'active' : ''}`}
-                  onClick={() => { setActiveTab('clients'); fetchRegisteredClients(); }}
-                >
-                  👥 Registered Clients
-                  {registeredClients.length > 0 && (
-                    <span style={{ 
-                      background: 'rgba(56, 189, 248, 0.25)',
-                      color: '#38bdf8',
-                      padding: '2px 8px',
-                      borderRadius: '100px',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      marginLeft: '6px'
-                    }}>
-                      {registeredClients.length}
-                    </span>
-                  )}
-                </button>
-              )}
-            </div>
-
-            <div className="dashboard-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: isServerConnected ? '#34d399' : '#f87171' }}>
-                <span className={`status-dot ${isServerConnected ? 'ready' : ''}`} style={{ width: '8px', height: '8px' }}></span>
-                <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
-              </div>
-
-              {/* Logged-in Admin Badge & User Actions */}
-              <div className="admin-nav-profile-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  className="tab-btn"
-                  style={{ padding: '5px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '5px' }}
-                  onClick={() => setShowLandingView(true)}
-                  title="View Public Landing Website"
-                >
-                  <span>🌐</span>
-                  <span>Landing Page</span>
-                </button>
-
-                <button
-                  className="admin-badge-pill-btn"
-                  onClick={() => {
-                    setChangePassError('');
-                    setChangePassSuccess('');
-                    setCurrentPassInput('');
-                    setNewPassInput('');
-                    setConfirmPassInput('');
-                    setShowChangePassModal(true);
-                  }}
-                  title="Click to Change Admin Password"
-                >
-                  <span className="admin-avatar-icon">🛡️</span>
-                  <span className="admin-username-label">{currentUser?.username || 'admin'}</span>
-                  <span className="admin-tag-badge">Admin</span>
-                </button>
-
-                <button
-                  className="admin-logout-nav-btn"
-                  onClick={() => handleLogout(true)}
-                  title="Sign Out of Admin Console"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                    <polyline points="16 17 21 12 16 7"></polyline>
-                    <line x1="21" y1="12" x2="9" y2="12"></line>
-                  </svg>
-                  <span>Logout</span>
-                </button>
-              </div>
+              <span className="brand-sub-title">Remote Central Hub</span>
             </div>
           </div>
 
-          {/* Main View Area */}
-          {activeTab === 'dashboard' ? (
-            <div className="dashboard-content">
+          <div className="nav-tabs-segmented">
+            <button
+              className={`nav-tab-pill ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dashboard')}
+            >
+              <span className="nav-pill-icon">🖥️</span>
+              <span>Devices Dashboard</span>
+              <span className={`nav-pill-live-badge ${activeHosts.length > 0 ? 'online' : 'empty'}`}>
+                {activeHosts.length} Live
+              </span>
+            </button>
 
-              {/* Company / Organization Workspace Ribbon */}
-              <div className="workspace-selector-ribbon">
-                <div className="workspace-ribbon-header">
-                  <span className="workspace-ribbon-title">🏢 Company Workspace Filter:</span>
-                  <span className="workspace-ribbon-subtitle">
-                    {selectedWorkspace === 'ALL'
-                      ? 'Viewing all connected companies (Admin Mode)'
-                      : `Active Isolated Workspace: ${selectedWorkspace}`}
+            <button
+              className={`nav-tab-pill ${activeTab === 'connect' ? 'active' : ''}`}
+              onClick={() => setActiveTab('connect')}
+            >
+              <span className="nav-pill-icon">⚡</span>
+              <span>Code Connect</span>
+            </button>
+
+            {currentUser?.role === 'Administrator' && (
+              <button
+                className={`nav-tab-pill ${activeTab === 'clients' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('clients'); fetchRegisteredClients(); }}
+              >
+                <span className="nav-pill-icon">👥</span>
+                <span>Registered Clients</span>
+                {registeredClients.length > 0 && (
+                  <span className="nav-pill-count-badge">
+                    {registeredClients.length}
                   </span>
+                )}
+              </button>
+            )}
+          </div>
+
+          <div className="dashboard-nav-right">
+            <div className={`cloud-status-chip ${isServerConnected ? 'online' : 'offline'}`}>
+              <span className="cloud-pulse-dot"></span>
+              <span>{isServerConnected ? 'Cloud Online' : 'Connecting...'}</span>
+            </div>
+
+            {/* Logged-in Admin Badge & User Actions */}
+            <div className="admin-nav-profile-group">
+              <button
+                className="nav-action-btn"
+                onClick={() => setShowLandingView(true)}
+                title="View Public Landing Website"
+              >
+                <span>🌐</span>
+                <span>Landing Page</span>
+              </button>
+
+              <button
+                className={`nav-action-btn ${isMfaActive ? 'mfa-active-btn' : 'mfa-setup-btn'}`}
+                onClick={handleOpenMfaModal}
+                title="Configure & Setup Two-Factor Authentication (2FA)"
+              >
+                <span>🛡️</span>
+                <span>{isMfaActive ? '2FA Active' : '2FA Setup'}</span>
+                {isMfaActive && (
+                  <span className="mfa-on-badge">ON</span>
+                )}
+              </button>
+
+              <button
+                className="admin-badge-pill-btn"
+                onClick={() => {
+                  setChangePassError('');
+                  setChangePassSuccess('');
+                  setCurrentPassInput('');
+                  setNewPassInput('');
+                  setConfirmPassInput('');
+                  setShowChangePassModal(true);
+                }}
+                title="Click to Change Admin Password"
+              >
+                <span className="admin-avatar-icon">🛡️</span>
+                <span className="admin-username-label">{currentUser?.username || 'admin'}</span>
+                <span className="admin-tag-badge">Admin</span>
+              </button>
+
+              <button
+                className="admin-logout-nav-btn"
+                onClick={() => handleLogout(true)}
+                title="Sign Out of Admin Console"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                <span>Logout</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Main View Area */}
+        {activeTab === 'dashboard' ? (
+          <div className="dashboard-content">
+
+            {/* Company / Organization Workspace Ribbon */}
+            <div className="workspace-selector-ribbon">
+              <div className="workspace-ribbon-header">
+                <span className="workspace-ribbon-title">🏢 Company Workspace Filter:</span>
+                <span className="workspace-ribbon-subtitle">
+                  {selectedWorkspace === 'ALL'
+                    ? 'Viewing all connected companies (Admin Mode)'
+                    : `Active Isolated Workspace: ${selectedWorkspace}`}
+                </span>
+              </div>
+
+              <div className="workspace-pills-list">
+                {allDetectedWorkspaces.map(ws => {
+                  const isSelected = selectedWorkspace === ws;
+                  const count = ws === 'ALL'
+                    ? allTrackedDevices.length
+                    : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws).length;
+                  const onlineWs = ws === 'ALL'
+                    ? allTrackedDevices.filter(d => d.isOnline).length
+                    : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws && d.isOnline).length;
+
+                  return (
+                    <button
+                      key={ws}
+                      className={`workspace-pill-btn ${isSelected ? 'active' : ''}`}
+                      onClick={() => handleSelectWorkspace(ws)}
+                    >
+                      <span className="ws-pill-name">{ws === 'ALL' ? '🌐 All Companies' : `🏢 ${ws}`}</span>
+                      <span className="ws-counter-badge" style={{
+                        background: onlineWs > 0 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
+                        color: onlineWs > 0 ? '#34d399' : '#94a3b8'
+                      }}>
+                        {onlineWs > 0 ? `${onlineWs} Live` : `${count}`}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                <button
+                  className="workspace-add-btn"
+                  onClick={handleAddWorkspace}
+                  title="Filter or register another Company Workspace Code"
+                >
+                  ➕ Add / Switch Group
+                </button>
+              </div>
+            </div>
+
+            {/* Summary Stats Row */}
+            <div className="dashboard-stats-grid">
+              <div className="rmm-stat-card">
+                <div className="stat-info">
+                  <h4>Total Managed Nodes</h4>
+                  <span>{totalCount}</span>
                 </div>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(129, 140, 248, 0.15)', color: '#818cf8' }}>🖥️</div>
+              </div>
 
-                <div className="workspace-pills-list">
-                  {allDetectedWorkspaces.map(ws => {
-                    const isSelected = selectedWorkspace === ws;
-                    const count = ws === 'ALL' 
-                      ? allTrackedDevices.length 
-                      : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws).length;
-                    const onlineWs = ws === 'ALL'
-                      ? allTrackedDevices.filter(d => d.isOnline).length
-                      : allTrackedDevices.filter(d => (d.companyGroup || 'USPL').toUpperCase() === ws && d.isOnline).length;
-                    
-                    return (
-                      <button
-                        key={ws}
-                        className={`workspace-pill-btn ${isSelected ? 'active' : ''}`}
-                        onClick={() => handleSelectWorkspace(ws)}
-                      >
-                        <span className="ws-pill-name">{ws === 'ALL' ? '🌐 All Companies' : `🏢 ${ws}`}</span>
-                        <span className="ws-counter-badge" style={{
-                          background: onlineWs > 0 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
-                          color: onlineWs > 0 ? '#34d399' : '#94a3b8'
-                        }}>
-                          {onlineWs > 0 ? `${onlineWs} Live` : `${count}`}
-                        </span>
-                      </button>
-                    );
-                  })}
+              <div className="rmm-stat-card">
+                <div className="stat-info">
+                  <h4>Online Streaming</h4>
+                  <span style={{ color: '#34d399' }}>{onlineCount}</span>
+                </div>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}>🟢</div>
+              </div>
 
+              <div className="rmm-stat-card">
+                <div className="stat-info">
+                  <h4>Avg CPU Utilization</h4>
+                  <span style={{ color: '#38bdf8' }}>{avgCpu}%</span>
+                </div>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>⚡</div>
+              </div>
+
+              <div className="rmm-stat-card">
+                <div className="stat-info">
+                  <h4>Avg Memory Usage</h4>
+                  <span style={{ color: '#a5b4fc' }}>{avgRam}%</span>
+                </div>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(165, 180, 252, 0.15)', color: '#a5b4fc' }}>📊</div>
+              </div>
+            </div>
+
+            {/* Toolbar & Search Header */}
+            <div className="rmm-toolbar">
+              <div className="search-box-wrapper">
+                <span className="search-icon">🔍</span>
+                <input
+                  type="text"
+                  placeholder="Search machines by Hostname, ID, Company, or OS..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Workspace Dropdown for compact filtering */}
+                <select
+                  value={selectedWorkspace}
+                  onChange={(e) => handleSelectWorkspace(e.target.value)}
+                  className="filter-select workspace-select"
+                >
+                  {allDetectedWorkspaces.map(ws => (
+                    <option key={ws} value={ws}>
+                      {ws === 'ALL' ? '🌐 All Companies' : `🏢 Company: ${ws}`}
+                    </option>
+                  ))}
+                </select>
+
+                {myLocalHostCode ? (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#94a3b8', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <input
+                      type="checkbox"
+                      checked={hideSelfDevice}
+                      onChange={(e) => setHideSelfDevice(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>Hide My PC ({myLocalHostCode})</span>
+                  </label>
+                ) : (
                   <button
-                    className="workspace-add-btn"
-                    onClick={handleAddWorkspace}
-                    title="Filter or register another Company Workspace Code"
+                    onClick={() => {
+                      const code = prompt('Enter your 6-digit Host PC Access Code to exclude this machine from remote control list:');
+                      if (code && code.trim().length === 6) {
+                        const cleanCode = code.trim();
+                        setMyLocalHostCode(cleanCode);
+                        try { localStorage.setItem('unio_my_host_code', cleanCode); } catch (e) { }
+                      }
+                    }}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#94a3b8', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}
+                    title="Set your local Host Code so you don't connect to your own machine"
                   >
-                    ➕ Add / Switch Group
+                    🛡️ Set My PC ID
+                  </button>
+                )}
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="filter-select"
+                >
+                  <option value="all">All Status ({totalCount})</option>
+                  <option value="online">Online Only ({onlineCount})</option>
+                  <option value="offline">Offline Only ({totalCount - onlineCount})</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Devices Card Grid */}
+            <div className="devices-card-grid">
+              {filteredDevices.length === 0 ? (
+                <div style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '16px', color: '#94a3b8' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🏢</div>
+                  <h3 style={{ margin: '0 0 6px 0', color: '#f8fafc' }}>No PC nodes found in "{selectedWorkspace}" workspace</h3>
+                  <p style={{ margin: '0 0 16px 0', fontSize: '0.85rem' }}>Switch workspace above or set your Host Agent to group code "{selectedWorkspace}"</p>
+                  <button
+                    onClick={() => handleSelectWorkspace('ALL')}
+                    style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '100px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    🌐 Show All Workspaces
                   </button>
                 </div>
-              </div>
+              ) : filteredDevices.map(device => (
+                <div key={device.roomId} className="device-node-card">
+                  <div>
+                    {/* Company Workspace Tag & Self indicator Bar */}
+                    <div className="node-company-row">
+                      <div
+                        onClick={(e) => handleReassignGroup(e, device.roomId, device.companyGroup)}
+                        className="node-company-tag"
+                        title="Click to edit or reassign company group"
+                      >
+                        <span className="company-tag-icon">🏢</span>
+                        <span className="company-tag-label">{device.companyGroup || 'USPL'}</span>
+                        <span className="company-tag-edit">✏️ Edit</span>
+                      </div>
 
-              {/* Summary Stats Row */}
-              <div className="dashboard-stats-grid">
-                <div className="rmm-stat-card">
-                  <div className="stat-info">
-                    <h4>Total Managed Nodes</h4>
-                    <span>{totalCount}</span>
-                  </div>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(129, 140, 248, 0.15)', color: '#818cf8' }}>🖥️</div>
-                </div>
+                      {device.isSelf && (
+                        <span className="node-self-badge">
+                          🛡️ This Machine
+                        </span>
+                      )}
+                    </div>
 
-                <div className="rmm-stat-card">
-                  <div className="stat-info">
-                    <h4>Online Streaming</h4>
-                    <span style={{ color: '#34d399' }}>{onlineCount}</span>
-                  </div>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}>🟢</div>
-                </div>
+                    <div className="node-card-header">
+                      <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                        <span className="node-icon">💻</span>
+                        <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                          <h3 className="node-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.hostname}</h3>
+                          <span className="node-code">ID: {device.roomId}</span>
+                        </div>
+                      </div>
 
-                <div className="rmm-stat-card">
-                  <div className="stat-info">
-                    <h4>Avg CPU Utilization</h4>
-                    <span style={{ color: '#38bdf8' }}>{avgCpu}%</span>
-                  </div>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>⚡</div>
-                </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <span className="stream-badge" style={{
+                          background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
+                          borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
+                          color: device.isOnline ? '#34d399' : '#94a3b8'
+                        }}>
+                          {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
+                        </span>
 
-                <div className="rmm-stat-card">
-                  <div className="stat-info">
-                    <h4>Avg Memory Usage</h4>
-                    <span style={{ color: '#a5b4fc' }}>{avgRam}%</span>
-                  </div>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(165, 180, 252, 0.15)', color: '#a5b4fc' }}>📊</div>
-                </div>
-              </div>
-
-              {/* Toolbar & Search Header */}
-              <div className="rmm-toolbar">
-                <div className="search-box-wrapper">
-                  <span className="search-icon">🔍</span>
-                  <input
-                    type="text"
-                    placeholder="Search machines by Hostname, ID, Company, or OS..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {/* Workspace Dropdown for compact filtering */}
-                  <select
-                    value={selectedWorkspace}
-                    onChange={(e) => handleSelectWorkspace(e.target.value)}
-                    className="filter-select workspace-select"
-                  >
-                    {allDetectedWorkspaces.map(ws => (
-                      <option key={ws} value={ws}>
-                        {ws === 'ALL' ? '🌐 All Companies' : `🏢 Company: ${ws}`}
-                      </option>
-                    ))}
-                  </select>
-
-                  {myLocalHostCode ? (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#94a3b8', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={hideSelfDevice} 
-                        onChange={(e) => setHideSelfDevice(e.target.checked)} 
-                        style={{ cursor: 'pointer' }}
-                      />
-                      <span>Hide My PC ({myLocalHostCode})</span>
-                    </label>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        const code = prompt('Enter your 6-digit Host PC Access Code to exclude this machine from remote control list:');
-                        if (code && code.trim().length === 6) {
-                          const cleanCode = code.trim();
-                          setMyLocalHostCode(cleanCode);
-                          try { localStorage.setItem('unio_my_host_code', cleanCode); } catch(e) {}
-                        }
-                      }}
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#94a3b8', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}
-                      title="Set your local Host Code so you don't connect to your own machine"
-                    >
-                      🛡️ Set My PC ID
-                    </button>
-                  )}
-
-                  <select 
-                    value={statusFilter} 
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="filter-select"
-                  >
-                    <option value="all">All Status ({totalCount})</option>
-                    <option value="online">Online Only ({onlineCount})</option>
-                    <option value="offline">Offline Only ({totalCount - onlineCount})</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Devices Card Grid */}
-              <div className="devices-card-grid">
-                {filteredDevices.length === 0 ? (
-                  <div style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '16px', color: '#94a3b8' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🏢</div>
-                    <h3 style={{ margin: '0 0 6px 0', color: '#f8fafc' }}>No PC nodes found in "{selectedWorkspace}" workspace</h3>
-                    <p style={{ margin: '0 0 16px 0', fontSize: '0.85rem' }}>Switch workspace above or set your Host Agent to group code "{selectedWorkspace}"</p>
-                    <button
-                      onClick={() => handleSelectWorkspace('ALL')}
-                      style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '100px', fontWeight: 600, cursor: 'pointer' }}
-                    >
-                      🌐 Show All Workspaces
-                    </button>
-                  </div>
-                ) : filteredDevices.map(device => (
-                  <div key={device.roomId} className="device-node-card">
-                    <div>
-                      {/* Company Workspace Tag & Self indicator Bar */}
-                      <div className="node-company-row">
-                        <div
-                          onClick={(e) => handleReassignGroup(e, device.roomId, device.companyGroup)}
-                          className="node-company-tag"
-                          title="Click to edit or reassign company group"
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Remove host "${device.hostname}" (${device.roomId}) from dashboard?`)) {
+                              removeDevice(device.roomId);
+                            }
+                          }}
+                          className="btn-remove-device"
+                          title="Remove Host PC from Dashboard"
                         >
-                          <span className="company-tag-icon">🏢</span>
-                          <span className="company-tag-label">{device.companyGroup || 'USPL'}</span>
-                          <span className="company-tag-edit">✏️ Edit</span>
-                        </div>
-
-                        {device.isSelf && (
-                          <span className="node-self-badge">
-                            🛡️ This Machine
-                          </span>
-                        )}
+                          🗑️
+                        </button>
                       </div>
+                    </div>
 
-                      <div className="node-card-header">
-                        <div className="node-title-group" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
-                          <span className="node-icon">💻</span>
-                          <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                            <h3 className="node-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.hostname}</h3>
-                            <span className="node-code">ID: {device.roomId}</span>
-                          </div>
+                    {/* OS info */}
+                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <div>🖥️ {device.systemInfo ? `${device.systemInfo.platform || 'Windows'}` : 'Windows Remote Machine'}</div>
+                      {(device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser) && (
+                        <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
+                      )}
+                      {(device.systemInfo?.publicIp || device.liveMetrics?.publicIp) && (
+                        <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
+                          🌐 WAN: <span style={{ color: '#34d399' }}>{device.systemInfo?.publicIp || device.liveMetrics?.publicIp}</span> • LAN: {device.systemInfo?.ip || device.liveMetrics?.ip || '127.0.0.1'}
                         </div>
+                      )}
+                    </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <span className="stream-badge" style={{
-                            background: device.isOnline ? 'rgba(52, 211, 153, 0.18)' : 'rgba(148, 163, 184, 0.15)',
-                            borderColor: device.isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(148, 163, 184, 0.3)',
-                            color: device.isOnline ? '#34d399' : '#94a3b8'
-                          }}>
-                            {device.isOnline ? '🟢 LIVE ONLINE' : '🔴 OFFLINE'}
-                          </span>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm(`Remove host "${device.hostname}" (${device.roomId}) from dashboard?`)) {
-                                removeDevice(device.roomId);
-                              }
-                            }}
-                            className="btn-remove-device"
-                            title="Remove Host PC from Dashboard"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* OS info */}
-                      <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                        <div>🖥️ {device.systemInfo ? `${device.systemInfo.platform || 'Windows'}` : 'Windows Remote Machine'}</div>
-                        {(device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser) && (
-                          <div style={{ color: '#38bdf8', fontWeight: 600 }}>👤 {device.systemInfo?.loggedUser || device.liveMetrics?.loggedUser}</div>
-                        )}
-                        {(device.systemInfo?.publicIp || device.liveMetrics?.publicIp) && (
-                          <div style={{ color: '#a5b4fc', fontSize: '0.74rem' }}>
-                            🌐 WAN: <span style={{ color: '#34d399' }}>{device.systemInfo?.publicIp || device.liveMetrics?.publicIp}</span> • LAN: {device.systemInfo?.ip || device.liveMetrics?.ip || '127.0.0.1'}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Live Telemetry Gauges */}
-                      {device.isOnline && device.liveMetrics ? (
+                    {/* Live Telemetry Gauges */}
+                    {device.isOnline ? (
+                      device.liveMetrics ? (
                         <div className="node-metrics-list">
                           <div className="metric-bar-group">
                             <div className="metric-bar-header">
@@ -3334,9 +3751,9 @@ function App() {
                               <span style={{ color: '#38bdf8' }}>{device.liveMetrics.cpuPercent}%</span>
                             </div>
                             <div className="metric-progress-track">
-                              <div 
-                                className="metric-progress-fill" 
-                                style={{ 
+                              <div
+                                className="metric-progress-fill"
+                                style={{
                                   width: `${device.liveMetrics.cpuPercent}%`,
                                   background: 'linear-gradient(90deg, #38bdf8, #818cf8)'
                                 }}
@@ -3350,9 +3767,9 @@ function App() {
                               <span style={{ color: '#a5b4fc' }}>{device.liveMetrics.ramPercent}%</span>
                             </div>
                             <div className="metric-progress-track">
-                              <div 
-                                className="metric-progress-fill" 
-                                style={{ 
+                              <div
+                                className="metric-progress-fill"
+                                style={{
                                   width: `${device.liveMetrics.ramPercent}%`,
                                   background: 'linear-gradient(90deg, #818cf8, #c084fc)'
                                 }}
@@ -3366,1541 +3783,1665 @@ function App() {
                           </div>
                         </div>
                       ) : (
-                        <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', fontSize: '0.8rem', color: '#64748b' }}>
-                          Machine offline. Launch setup client on target PC to stream live RMM metrics.
+                        <div style={{ padding: '14px', background: 'rgba(56, 189, 248, 0.06)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '12px', fontSize: '0.8rem', color: '#cbd5e1' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#34d399', boxShadow: '0 0 8px #34d399' }}></span>
+                            <strong style={{ color: '#38bdf8' }}>Node Online & Ready</strong>
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                            {device.systemInfo?.cpu ? `CPU: ${device.systemInfo.cpu}` : 'System Agent Connected'}
+                            {device.systemInfo?.ram ? ` • ${device.systemInfo.ram} RAM` : ''}
+                          </div>
                         </div>
-                      )}
-                    </div>
+                      )
+                    ) : (
+                      <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', fontSize: '0.8rem', color: '#64748b' }}>
+                        🔴 Machine offline. Launch setup client on target PC to reconnect.
+                      </div>
+                    )}
+                  </div>
 
-                    {/* Card Action Buttons */}
-                    <div className="node-card-footer">
+                  {/* Card Action Buttons */}
+                  <div className="node-card-footer">
+                    <button
+                      onClick={() => handleConnect(null, device.roomId)}
+                      disabled={!device.isOnline || status === 'connecting'}
+                      className="btn-card-action"
+                      style={{
+                        background: device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
+                        color: device.isOnline ? '#fff' : '#64748b',
+                        boxShadow: device.isOnline ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none'
+                      }}
+                    >
+                      {device.isSelf
+                        ? '⚡ Connect (This PC)'
+                        : '⚡ 1-Click Connect'}
+                    </button>
+
+                    {device.systemInfo && (
                       <button
-                        onClick={() => handleConnect(null, device.roomId)}
-                        disabled={!device.isOnline || status === 'connecting'}
+                        onClick={() => {
+                          setHostSystemInfo(device.systemInfo);
+                          setShowSpecsModal(true);
+                        }}
                         className="btn-card-action"
                         style={{
-                          background: device.isOnline ? 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)' : 'rgba(255,255,255,0.05)',
-                          color: device.isOnline ? '#fff' : '#64748b',
-                          boxShadow: device.isOnline ? '0 4px 12px rgba(129, 140, 248, 0.3)' : 'none'
-                        }}
-                      >
-                        {device.isSelf
-                          ? '⚡ Connect (This PC)'
-                          : '⚡ 1-Click Connect'}
-                      </button>
-
-                      {device.systemInfo && (
-                        <button
-                          onClick={() => {
-                            setHostSystemInfo(device.systemInfo);
-                            setShowSpecsModal(true);
-                          }}
-                          className="btn-card-action"
-                          style={{
-                            background: 'rgba(255,255,255,0.08)',
-                            color: '#a5b4fc',
-                            flex: '0 0 auto'
-                          }}
-                          title="View Hardware Specifications"
-                        >
-                          💻 Specs
-                        </button>
-                      )}
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleExportSystemReport(device.roomId);
-                        }}
-                        disabled={!device.isOnline || isExportingExcel}
-                        className="btn-card-action"
-                        style={{
-                          background: 'rgba(16, 185, 129, 0.15)',
-                          color: '#34d399',
-                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          background: 'rgba(255,255,255,0.08)',
+                          color: '#a5b4fc',
                           flex: '0 0 auto'
                         }}
-                        title="Export Target PC Disks, Processes & Telemetry to Excel (.xlsx)"
+                        title="View Hardware Specifications"
                       >
-                        {isExportingExcel ? '⏳ Exporting...' : '📊 Excel'}
+                        💻 Specs
                       </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : activeTab === 'clients' ? (
-            <div className="dashboard-content" style={{ padding: '24px' }}>
-              <div style={{
-                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
-                backdropFilter: 'blur(16px)',
-                borderRadius: '16px',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                padding: '24px',
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
-              }}>
-                {/* Header & Actions */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '18px' }}>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
-                      <span>👥</span>
-                      <span>Registered Client Inquiries & Host Downloads</span>
-                    </h2>
-                    <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '0.85rem' }}>
-                      Real-time records of registered users, company scale, contact details, and host installer leads.
-                    </p>
-                  </div>
-                  
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <button
-                      onClick={() => fetchRegisteredClients()}
-                      className="tab-btn"
-                      style={{ padding: '8px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                      title="Reload latest registrations"
-                    >
-                      <span>🔄</span>
-                      <span>Refresh</span>
-                    </button>
+                    )}
 
                     <button
-                      onClick={() => exportRegisteredClientsToExcel(registeredClients)}
-                      disabled={!registeredClients || registeredClients.length === 0}
-                      style={{
-                        padding: '8px 18px',
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '8px',
-                        fontWeight: 600,
-                        fontSize: '0.85rem',
-                        cursor: (!registeredClients || registeredClients.length === 0) ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                        opacity: (!registeredClients || registeredClients.length === 0) ? 0.6 : 1
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleExportSystemReport(device.roomId);
                       }}
-                      title="Download full client directory into structured Microsoft Excel Workbook"
+                      disabled={!device.isOnline || isExportingExcel}
+                      className="btn-card-action"
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#34d399',
+                        border: '1px solid rgba(52, 211, 153, 0.3)',
+                        flex: '0 0 auto'
+                      }}
+                      title="Export Target PC Disks, Processes & Telemetry to Excel (.xlsx)"
                     >
-                      <span>📥</span>
-                      <span>Export All Leads (.xlsx)</span>
+                      {isExportingExcel ? '⏳ Exporting...' : '📊 Excel'}
                     </button>
                   </div>
                 </div>
-
-                {/* Table or Empty State */}
-                {(!registeredClients || registeredClients.length === 0) ? (
-                  <div style={{ textAlign: 'center', padding: '48px 16px', color: '#94a3b8' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📋</div>
-                    <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0' }}>No Client Registrations Yet</h3>
-                    <p style={{ margin: 0, fontSize: '0.9rem' }}>
-                      When visitors register on the landing page to download the host installer, their company details and requirements will appear here.
-                    </p>
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)', color: '#94a3b8', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>
-                          <th style={{ padding: '12px 14px' }}>#</th>
-                          <th style={{ padding: '12px 14px' }}>Client / Contact</th>
-                          <th style={{ padding: '12px 14px' }}>Company / Organization</th>
-                          <th style={{ padding: '12px 14px' }}>Phone / WhatsApp</th>
-                          <th style={{ padding: '12px 14px' }}>Email Address</th>
-                          <th style={{ padding: '12px 14px' }}>Desktops Required</th>
-                          <th style={{ padding: '12px 14px' }}>Registration Date</th>
-                          <th style={{ padding: '12px 14px' }}>Role / Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {registeredClients.map((client, idx) => (
-                          <tr 
-                            key={client.id || idx}
-                            style={{ 
-                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                              transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <td style={{ padding: '14px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
-                            <td style={{ padding: '14px', color: '#f8fafc', fontWeight: 600 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>
-                                  {(client.name || 'U').charAt(0).toUpperCase()}
-                                </div>
-                                <div>
-                                  <div>{client.name || 'Anonymous User'}</div>
-                                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 400 }}>@{client.username}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td style={{ padding: '14px', color: '#e2e8f0' }}>
-                              <span style={{ 
-                                display: 'inline-block',
-                                background: 'rgba(56, 189, 248, 0.1)',
-                                color: '#38bdf8',
-                                border: '1px solid rgba(56, 189, 248, 0.25)',
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                fontWeight: 600
-                              }}>
-                                🏢 {client.companyName || 'Not Specified'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '14px', color: '#38bdf8' }}>
-                              {client.phone ? (
-                                <a 
-                                  href={`tel:${client.phone}`}
-                                  style={{ color: '#34d399', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                                >
-                                  📞 {client.phone}
-                                </a>
-                              ) : (
-                                <span style={{ color: '#64748b' }}>-</span>
-                              )}
-                            </td>
-                            <td style={{ padding: '14px', color: '#94a3b8' }}>
-                              {client.email ? (
-                                <a 
-                                  href={`mailto:${client.email}`}
-                                  style={{ color: '#818cf8', textDecoration: 'none' }}
-                                >
-                                  📧 {client.email}
-                                </a>
-                              ) : (
-                                <span style={{ color: '#64748b' }}>-</span>
-                              )}
-                            </td>
-                            <td style={{ padding: '14px' }}>
-                              <span style={{
-                                display: 'inline-block',
-                                background: 'rgba(168, 85, 247, 0.15)',
-                                color: '#c084fc',
-                                border: '1px solid rgba(168, 85, 247, 0.3)',
-                                padding: '3px 10px',
-                                borderRadius: '100px',
-                                fontWeight: 700,
-                                fontSize: '0.8rem'
-                              }}>
-                                🖥️ {client.desktopCount || '1'} {client.desktopCount === '100+' ? 'PCs' : 'Desktops'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '14px', color: '#94a3b8', fontSize: '0.8rem' }}>
-                              {client.createdAt ? new Date(client.createdAt).toLocaleString() : 'Recent'}
-                            </td>
-                            <td style={{ padding: '14px' }}>
-                              <span style={{
-                                background: client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                                color: client.role === 'Administrator' ? '#f87171' : '#34d399',
-                                border: `1px solid ${client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-                                padding: '2px 8px',
-                                borderRadius: '100px',
-                                fontSize: '0.72rem',
-                                fontWeight: 600
-                              }}>
-                                {client.role || 'Client'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              ))}
             </div>
-          ) : (
-            <div className="login-wrapper">
-              <div className="glow-sphere sphere-1"></div>
-              <div className="glow-sphere sphere-2"></div>
-              
-              <div className="login-card">
-                <div className="card-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                  <img src="/logo.png" alt="UnioTechIT Logo" style={{ height: '65px', maxWidth: '240px', objectFit: 'contain', filter: 'drop-shadow(0 4px 16px rgba(56, 189, 248, 0.4))', marginBottom: '4px' }} />
-                  <h1 style={{ margin: 0, background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UnioTechIT Control</h1>
-                  <p style={{ margin: 0 }}>Connect to a Remote System Node</p>
+          </div>
+        ) : activeTab === 'clients' ? (
+          <div className="dashboard-content" style={{ padding: '24px' }}>
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+              backdropFilter: 'blur(16px)',
+              borderRadius: '16px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '24px',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+            }}>
+              {/* Header & Actions */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '18px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
+                    <span>👥</span>
+                    <span>Registered Client Inquiries & Host Downloads</span>
+                  </h2>
+                  <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+                    Real-time records of registered users, company scale, contact details, and host installer leads.
+                  </p>
                 </div>
 
-                <form onSubmit={handleConnect} className="login-form">
-                  <div className="input-group">
-                    <label htmlFor="roomId">Target Access Code (Host ID)</label>
-                    <input
-                      id="roomId"
-                      type="text"
-                      placeholder="Enter 6-digit code"
-                      value={targetRoomId}
-                      onChange={(e) => setTargetRoomId(e.target.value)}
-                      maxLength={6}
-                      disabled={status === 'connecting'}
-                    />
-                  </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <button
+                    onClick={() => fetchRegisteredClients()}
+                    className="tab-btn"
+                    style={{ padding: '8px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    title="Reload latest registrations"
+                  >
+                    <span>🔄</span>
+                    <span>Refresh</span>
+                  </button>
 
                   <button
-                    type="submit"
-                    className="btn-connect"
-                    disabled={status === 'connecting' || !targetRoomId.trim()}
+                    onClick={() => exportRegisteredClientsToExcel(registeredClients)}
+                    disabled={!registeredClients || registeredClients.length === 0}
+                    style={{
+                      padding: '8px 18px',
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 600,
+                      fontSize: '0.85rem',
+                      cursor: (!registeredClients || registeredClients.length === 0) ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                      opacity: (!registeredClients || registeredClients.length === 0) ? 0.6 : 1
+                    }}
+                    title="Download full client directory into structured Microsoft Excel Workbook"
                   >
-                    {status === 'connecting' ? 'Establishing Handshake...' : 'Establish Session'}
+                    <span>📥</span>
+                    <span>Export All Leads (.xlsx)</span>
                   </button>
-                </form>
+                </div>
+              </div>
 
-                {recentDevices.length > 0 && (
-                  <div style={{ marginTop: '20px', textAlign: 'left' }}>
-                    <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
-                      ⚡ Quick Connect (Recent Devices):
-                    </span>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {recentDevices.map(code => (
-                        <div
-                          key={code}
+              {/* Table or Empty State */}
+              {(!registeredClients || registeredClients.length === 0) ? (
+                <div style={{ textAlign: 'center', padding: '48px 16px', color: '#94a3b8' }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📋</div>
+                  <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0' }}>No Client Registrations Yet</h3>
+                  <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                    When visitors register on the landing page to download the host installer, their company details and requirements will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)', color: '#94a3b8', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>
+                        <th style={{ padding: '12px 14px' }}>#</th>
+                        <th style={{ padding: '12px 14px' }}>Client / Contact</th>
+                        <th style={{ padding: '12px 14px' }}>Company / Organization</th>
+                        <th style={{ padding: '12px 14px' }}>Phone / WhatsApp</th>
+                        <th style={{ padding: '12px 14px' }}>Email Address</th>
+                        <th style={{ padding: '12px 14px' }}>Desktops Required</th>
+                        <th style={{ padding: '12px 14px' }}>Registration Date</th>
+                        <th style={{ padding: '12px 14px' }}>Role / Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {registeredClients.map((client, idx) => (
+                        <tr
+                          key={client.id || idx}
                           style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.15)',
-                            borderRadius: '100px',
-                            padding: '3px 6px 3px 12px'
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                            transition: 'background 0.2s',
                           }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                         >
-                          <button
-                            onClick={() => handleConnect(null, code)}
-                            disabled={status === 'connecting'}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#818cf8',
-                              fontSize: '0.85rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              padding: 0
-                            }}
-                            title={`Connect to ${code}`}
-                          >
-                            {code}
-                          </button>
-                          <button
-                            onClick={() => removeDevice(code)}
-                            title={`Remove ${code}`}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#94a3b8',
-                              fontSize: '0.75rem',
-                              cursor: 'pointer',
-                              padding: '2px 4px',
-                              borderRadius: '50%',
-                              lineHeight: 1
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </div>
+                          <td style={{ padding: '14px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                          <td style={{ padding: '14px', color: '#f8fafc', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>
+                                {(client.name || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div>{client.name || 'Anonymous User'}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 400 }}>@{client.username}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '14px', color: '#e2e8f0' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              background: 'rgba(56, 189, 248, 0.1)',
+                              color: '#38bdf8',
+                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              fontWeight: 600
+                            }}>
+                              🏢 {client.companyName || 'Not Specified'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px', color: '#38bdf8' }}>
+                            {client.phone ? (
+                              <a
+                                href={`tel:${client.phone}`}
+                                style={{ color: '#34d399', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                📞 {client.phone}
+                              </a>
+                            ) : (
+                              <span style={{ color: '#64748b' }}>-</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px', color: '#94a3b8' }}>
+                            {client.email ? (
+                              <a
+                                href={`mailto:${client.email}`}
+                                style={{ color: '#818cf8', textDecoration: 'none' }}
+                              >
+                                📧 {client.email}
+                              </a>
+                            ) : (
+                              <span style={{ color: '#64748b' }}>-</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              background: 'rgba(168, 85, 247, 0.15)',
+                              color: '#c084fc',
+                              border: '1px solid rgba(168, 85, 247, 0.3)',
+                              padding: '3px 10px',
+                              borderRadius: '100px',
+                              fontWeight: 700,
+                              fontSize: '0.8rem'
+                            }}>
+                              🖥️ {client.desktopCount || '1'} {client.desktopCount === '100+' ? 'PCs' : 'Desktops'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px', color: '#94a3b8', fontSize: '0.8rem' }}>
+                            {client.createdAt ? new Date(client.createdAt).toLocaleString() : 'Recent'}
+                          </td>
+                          <td style={{ padding: '14px' }}>
+                            <span style={{
+                              background: client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                              color: client.role === 'Administrator' ? '#f87171' : '#34d399',
+                              border: `1px solid ${client.role === 'Administrator' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                              padding: '2px 8px',
+                              borderRadius: '100px',
+                              fontSize: '0.72rem',
+                              fontWeight: 600
+                            }}>
+                              {client.role || 'Client'}
+                            </span>
+                          </td>
+                        </tr>
                       ))}
-                    </div>
-                  </div>
-                )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="login-wrapper">
+            <div className="glow-sphere sphere-1"></div>
+            <div className="glow-sphere sphere-2"></div>
 
-                <div className="status-indicator" style={{ marginBottom: '20px' }}>
-                  <span className={`status-dot ${status}`}></span>
-                  <span className="status-text">
-                    {status === 'disconnected' && 'Ready for Connection'}
-                    {status === 'connecting' && 'Connecting to Signaling Server...'}
-                    {status === 'ready' && 'Signaled Host. Establishing WebRTC stream...'}
-                  </span>
+            <div className="login-card">
+              <div className="card-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                <img src="/logo.png" alt="UnioTechIT Logo" style={{ height: '65px', maxWidth: '240px', objectFit: 'contain', filter: 'drop-shadow(0 4px 16px rgba(56, 189, 248, 0.4))', marginBottom: '4px' }} />
+                <h1 style={{ margin: 0, background: 'linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UnioTechIT Control</h1>
+                <p style={{ margin: 0 }}>Connect to a Remote System Node</p>
+              </div>
+
+              <form onSubmit={handleConnect} className="login-form">
+                <div className="input-group">
+                  <label htmlFor="roomId">Target Access Code (Host ID)</label>
+                  <input
+                    id="roomId"
+                    type="text"
+                    placeholder="Enter 6-digit code"
+                    value={targetRoomId}
+                    onChange={(e) => setTargetRoomId(e.target.value)}
+                    maxLength={6}
+                    disabled={status === 'connecting'}
+                  />
                 </div>
 
-                <div style={{ 
-                  background: 'rgba(255, 255, 255, 0.04)', 
-                  border: '1px solid rgba(255, 255, 255, 0.1)', 
-                  borderRadius: '16px', 
-                  padding: '16px',
-                  textAlign: 'center'
-                }}>
-                  <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
-                    💻 Need to control a new PC?
+                <button
+                  type="submit"
+                  className="btn-connect"
+                  disabled={status === 'connecting' || !targetRoomId.trim()}
+                >
+                  {status === 'connecting' ? 'Establishing Handshake...' : 'Establish Session'}
+                </button>
+              </form>
+
+              {recentDevices.length > 0 && (
+                <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                    ⚡ Quick Connect (Recent Devices):
                   </span>
-                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {recentDevices.map(code => (
+                      <div
+                        key={code}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          background: 'rgba(255,255,255,0.08)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '100px',
+                          padding: '3px 6px 3px 12px'
+                        }}
+                      >
+                        <button
+                          onClick={() => handleConnect(null, code)}
+                          disabled={status === 'connecting'}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#818cf8',
+                            fontSize: '0.85rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            padding: 0
+                          }}
+                          title={`Connect to ${code}`}
+                        >
+                          {code}
+                        </button>
+                        <button
+                          onClick={() => removeDevice(code)}
+                          title={`Remove ${code}`}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#94a3b8',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            padding: '2px 4px',
+                            borderRadius: '50%',
+                            lineHeight: 1
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="status-indicator" style={{ marginBottom: '20px' }}>
+                <span className={`status-dot ${status}`}></span>
+                <span className="status-text">
+                  {status === 'disconnected' && 'Ready for Connection'}
+                  {status === 'connecting' && 'Connecting to Signaling Server...'}
+                  {status === 'ready' && 'Signaled Host. Establishing WebRTC stream...'}
+                </span>
+              </div>
+
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '16px',
+                padding: '16px',
+                textAlign: 'center'
+              }}>
+                <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
+                  💻 Need to control a new PC?
+                </span>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleDownloadSetup}
+                    disabled={isDownloading}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: isDownloading
+                        ? 'rgba(16, 185, 129, 0.4)'
+                        : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      color: '#fff',
+                      padding: '8px 16px',
+                      borderRadius: '100px',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      border: 'none',
+                      cursor: isDownloading ? 'not-allowed' : 'pointer',
+                      boxShadow: isDownloading ? 'none' : '0 4px 12px rgba(16, 185, 129, 0.3)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {isDownloading ? '⏳ Starting Download...' : '📥 Download Windows Host (.exe)'}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const downloadUrl = (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '') + GITHUB_DOWNLOAD_URL;
+                      navigator.clipboard.writeText(downloadUrl);
+                      alert(`Direct Setup Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#38bdf8',
+                      padding: '8px 14px',
+                      borderRadius: '100px',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                    title="Copy Direct Download Link"
+                  >
+                    💬 Copy Direct Link
+                  </button>
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '0.76rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.03)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  💡 <b>Tip:</b> Run <b>UnioTechIT-Setup.exe</b> on any Windows PC to connect and view live remote screen instantly.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="viewer-layout" style={{ display: (status === 'connected' || status === 'connecting' || status === 'ready') ? 'flex' : 'none' }}>
+        <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
+          <div className="control-bar-header">
+            {!isNavCollapsed && (
+              <div className="session-info-pill">
+                <span className="session-tag">🟢 Node: {roomId}</span>
+                <span className="stream-badge">LIVE</span>
+              </div>
+            )}
+            <button
+              onClick={() => setIsNavCollapsed(prev => !prev)}
+              className="btn-collapse-toggle"
+              title={isNavCollapsed ? "Expand Navigation Toolbar" : "Collapse Navigation Toolbar"}
+            >
+              {isNavCollapsed ? '▶' : '◀'}
+            </button>
+          </div>
+
+          {!isNavCollapsed && (
+            <div className="control-bar-left">
+              {/* Compact Quick Action Buttons */}
+              <button
+                onClick={() => setShowHealthDrawer(prev => !prev)}
+                className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
+                title="View Live CPU, RAM, Disk, and Network Health"
+              >
+                📊 Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
+              </button>
+
+              <button
+                onClick={() => setShowTerminalDrawer(prev => !prev)}
+                className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
+                title="Open Remote PowerShell & CMD Terminal"
+              >
+                💻 Terminal
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowFileExplorerDrawer(prev => {
+                    const next = !prev;
+                    if (next && (!remoteFiles || remoteFiles.length === 0)) {
+                      requestRemoteDirectory('', true);
+                    }
+                    return next;
+                  });
+                }}
+                className={`control-btn btn-files ${showFileExplorerDrawer ? 'active' : ''}`}
+                title="Browse & Download Files from Target PC (Remote File Explorer)"
+              >
+                📁 Files {activeDownloadTransfer ? '⬇️' : ''}
+              </button>
+
+              <button
+                onClick={() => setIsAnnotating(prev => !prev)}
+                className={`control-btn btn-annotate ${isAnnotating ? 'active' : ''}`}
+                title="Toggle Screen Annotation & Laser Pointer Tool"
+              >
+                ✏️ Annotate
+              </button>
+
+              <button
+                onClick={() => handleExportSystemReport()}
+                disabled={isExportingExcel}
+                className="control-btn btn-excel-toolbar"
+                title="Export Target PC Disk Space, Running Processes & Specs to Excel (.xlsx)"
+              >
+                {isExportingExcel ? '⏳ Exporting...' : '📑 Excel'}
+              </button>
+
+              {/* 1-Click Quick Ctrl + Del Button */}
+              <button
+                onClick={() => handleSendShortcut('ctrl-del', 'Ctrl + Del')}
+                className="control-btn btn-ctrldel"
+                title="Send Ctrl + Del key combination to remote machine"
+              >
+                ⌨️ Ctrl+Del
+              </button>
+
+              {/* Remote Key Shortcuts Dropdown */}
+              <div className="keys-dropdown-wrapper">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowKeysDropdown(prev => !prev);
+                  }}
+                  className={`control-btn btn-keys ${showKeysDropdown ? 'active' : ''}`}
+                  title="Send Special Key Combinations to Remote PC"
+                >
+                  ⌨️ Keys <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 2 }}>▼</span>
+                </button>
+
+                {showKeysDropdown && (
+                  <div className="keys-dropdown-menu">
+                    <div className="keys-dropdown-header">
+                      <span>REMOTE KEY SHORTCUTS</span>
+                    </div>
+
                     <button
-                      onClick={handleDownloadSetup}
-                      disabled={isDownloading}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: isDownloading
-                          ? 'rgba(16, 185, 129, 0.4)'
-                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                        color: '#fff',
-                        padding: '8px 16px',
-                        borderRadius: '100px',
-                        fontSize: '0.85rem',
-                        fontWeight: 600,
-                        border: 'none',
-                        cursor: isDownloading ? 'not-allowed' : 'pointer',
-                        boxShadow: isDownloading ? 'none' : '0 4px 12px rgba(16, 185, 129, 0.3)',
-                        transition: 'all 0.2s ease'
+                      onClick={() => {
+                        handleSendShortcut('ctrl-del', 'Ctrl + Del');
+                        setShowKeysDropdown(false);
                       }}
+                      className="key-dropdown-item"
+                      title="Send Ctrl + Delete (Delete word / quick delete)"
                     >
-                      {isDownloading ? '⏳ Starting Download...' : '📥 Download Setup (72 MB .zip)'}
+                      <div className="key-badge">Ctrl + Del</div>
+                      <div className="key-info">
+                        <strong>Delete Word</strong>
+                        <small>Fast remote text deletion</small>
+                      </div>
                     </button>
 
                     <button
                       onClick={() => {
-                        const downloadUrl = GITHUB_DOWNLOAD_URL;
-                        navigator.clipboard.writeText(downloadUrl);
-                        alert(`WhatsApp Direct Download Link copied to clipboard:\n${downloadUrl}\n\nAap is link ko WhatsApp par kisi ko bhi bhej sakte hain!`);
+                        handleSendShortcut('ctrl-alt-del', 'Ctrl + Alt + Del / Task Manager');
+                        setShowKeysDropdown(false);
                       }}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.2)',
-                        color: '#38bdf8',
-                        padding: '8px 14px',
-                        borderRadius: '100px',
-                        fontSize: '0.85rem',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                      title="Copy WhatsApp Direct Download Link"
+                      className="key-dropdown-item"
+                      title="Send Ctrl + Alt + Del / Task Manager"
                     >
-                      💬 Copy WhatsApp Link
+                      <div className="key-badge highlight">Ctrl+Alt+Del</div>
+                      <div className="key-info">
+                        <strong>Ctrl + Alt + Del</strong>
+                        <small>Security & Task Manager</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('ctrl-shift-esc', 'Task Manager (Ctrl+Shift+Esc)');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Open Remote Windows Task Manager"
+                    >
+                      <div className="key-badge">Ctrl+Shift+Esc</div>
+                      <div className="key-info">
+                        <strong>Task Manager</strong>
+                        <small>Open Process Manager</small>
+                      </div>
+                    </button>
+
+                    <div className="dropdown-divider" style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }}></div>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('win-d', 'Win + D (Show Desktop)');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Show / Hide Desktop"
+                    >
+                      <div className="key-badge">Win + D</div>
+                      <div className="key-info">
+                        <strong>Show Desktop</strong>
+                        <small>Minimize all windows</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('win-l', 'Win + L (Lock PC)');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Lock Target PC Screen immediately"
+                    >
+                      <div className="key-badge">Win + L</div>
+                      <div className="key-info">
+                        <strong>Lock Workstation</strong>
+                        <small>Secure remote session</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('win-r', 'Win + R (Run Dialog)');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Open Remote Windows Run dialog"
+                    >
+                      <div className="key-badge">Win + R</div>
+                      <div className="key-info">
+                        <strong>Run Dialog</strong>
+                        <small>Execute run command</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('win-e', 'Win + E (Explorer)');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Open Remote Windows File Explorer"
+                    >
+                      <div className="key-badge">Win + E</div>
+                      <div className="key-info">
+                        <strong>File Explorer</strong>
+                        <small>Open This PC / Explorer</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleSendShortcut('alt-f4', 'Alt + F4');
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Close currently focused active window"
+                    >
+                      <div className="key-badge danger">Alt + F4</div>
+                      <div className="key-info">
+                        <strong>Close Active App</strong>
+                        <small>Close focused window</small>
+                      </div>
                     </button>
                   </div>
-                  <div style={{ marginTop: '10px', fontSize: '0.76rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.03)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                    💡 <b>Tip:</b> Agar Chrome <i>"Not commonly downloaded"</i> warning dikhaye, toh <b>📦 Download (.zip)</b> button use kijiye ya Chrome downloads me <b>Keep anyway</b> par click kijiye.
-                  </div>
-                </div>
+                )}
               </div>
+
+              {/* Multi-Monitor Dual/Triple Display Switcher */}
+              <div className="screens-dropdown-wrapper">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowScreenDropdown(prev => !prev);
+                  }}
+                  className={`control-btn btn-screen-switch ${showScreenDropdown ? 'active' : ''}`}
+                  title="View and Switch Connected Displays (Multi-Monitor)"
+                >
+                  🖥️ {availableScreens.length > 1 ? `Displays (${availableScreens.length})` : 'Display (1)'}
+                  <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 4 }}>▼</span>
+                </button>
+
+                {showScreenDropdown && (
+                  <div className="screens-dropdown-menu">
+                    <div className="screens-dropdown-header">
+                      <span>CONNECTED MONITORS ({availableScreens.length || 1})</span>
+                    </div>
+                    {(availableScreens.length > 0 ? availableScreens : [{ id: 'screen:0:0', label: 'Monitor 1 (Primary)', name: 'Main Display', isPrimary: true, bounds: { width: 1920, height: 1080 } }]).map(scr => {
+                      const isSelected = scr.id === currentScreenId || availableScreens.length <= 1;
+                      return (
+                        <button
+                          key={scr.id}
+                          onClick={() => handleSwitchScreen(scr.id)}
+                          className={`screen-dropdown-item ${isSelected ? 'active' : ''}`}
+                        >
+                          <div className="screen-item-icon">
+                            🖥️
+                          </div>
+                          <div className="screen-item-info">
+                            <span className="screen-item-title">
+                              {scr.label || scr.name}
+                            </span>
+                            <span className="screen-item-res">
+                              {scr.bounds ? `${scr.bounds.width}×${scr.bounds.height}` : '1920×1080'}
+                              {scr.isPrimary ? ' • Main Display' : ''}
+                            </span>
+                          </div>
+                          {isSelected && <span className="screen-selected-badge">✓ Active</span>}
+                        </button>
+                      );
+                    })}
+
+                    {availableScreens.length <= 1 && (
+                      <div style={{
+                        padding: '8px 10px',
+                        fontSize: '0.72rem',
+                        color: '#94a3b8',
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        borderRadius: '8px',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        lineHeight: 1.4
+                      }}>
+                        💡 <strong style={{ color: '#38bdf8' }}>Dual Screen Ready:</strong> When target PC connects a 2nd monitor or HDMI, it will appear here for instant 1-click switching.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Sleek Compact Action Menu Dropdown */}
+              <div className="tools-dropdown-wrapper">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowToolsDropdown(prev => !prev);
+                  }}
+                  className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
+                  title="Open Actions & Utilities Menu"
+                >
+                  ⚡ Actions <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>▼</span>
+                </button>
+
+                {showToolsDropdown && (
+                  <div className="tools-dropdown-menu">
+                    {hostSystemInfo && (
+                      <button
+                        onClick={() => { setShowSpecsModal(true); setShowToolsDropdown(false); }}
+                        className="dropdown-item"
+                      >
+                        <span className="dropdown-icon">💻</span>
+                        <div>
+                          <strong>Hardware Specs</strong>
+                          <small>{hostSystemInfo.hostname || 'Device Specs'}</small>
+                        </div>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        sendControlData({ type: 'minimize-host' });
+                        setShowToolsDropdown(false);
+                      }}
+                      className="dropdown-item"
+                      title="Force-minimize the Host Agent window on the remote machine"
+                    >
+                      <span className="dropdown-icon">🗕</span>
+                      <div>
+                        <strong>Minimize Host Window</strong>
+                        <small>Hide Agent to Taskbar</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }}
+                      className="dropdown-item"
+                    >
+                      <span className="dropdown-icon">📋</span>
+                      <div>
+                        <strong>Sync Clipboard</strong>
+                        <small>Push local text to Remote PC</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (fileInputRef.current) fileInputRef.current.click();
+                        setShowToolsDropdown(false);
+                      }}
+                      className="dropdown-item"
+                    >
+                      <span className="dropdown-icon">📁</span>
+                      <div>
+                        <strong>Transfer File</strong>
+                        <small>Upload file to remote Downloads</small>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const directUrl = `${window.location.origin}/?code=${roomId}`;
+                        navigator.clipboard.writeText(directUrl);
+                        alert(`Direct Access Link copied to clipboard:\n${directUrl}`);
+                        setShowToolsDropdown(false);
+                      }}
+                      className="dropdown-item"
+                    >
+                      <span className="dropdown-icon">🔗</span>
+                      <div>
+                        <strong>Copy Direct Link</strong>
+                        <small>1-Click bookmark link</small>
+                      </div>
+                    </button>
+
+                    <div className="dropdown-divider" style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }}></div>
+
+                    <button
+                      onClick={() => {
+                        setShowToolsDropdown(false);
+                        setShowRebootModal(true);
+                      }}
+                      className="dropdown-item reboot-action-item"
+                      style={{ color: '#f87171' }}
+                      title="Safely restart the remote machine and auto-reconnect on boot"
+                    >
+                      <span className="dropdown-icon">🔄</span>
+                      <div>
+                        <strong style={{ color: '#fca5a5' }}>Remote Reboot PC</strong>
+                        <small style={{ color: '#f87171' }}>Restart & Auto-Reconnect</small>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button className="btn-disconnect" onClick={cleanup}>
+                Terminate Session
+              </button>
             </div>
           )}
-      </div>
+        </div>
 
-      <div className="viewer-layout" style={{ display: (status === 'connected' || status === 'ready') ? 'flex' : 'none' }}>
-          <div className={`control-bar ${isNavCollapsed ? 'collapsed' : ''}`}>
-            <div className="control-bar-header">
-              {!isNavCollapsed && (
-                <div className="session-info-pill">
-                  <span className="session-tag">🟢 Node: {roomId}</span>
-                  <span className="stream-badge">LIVE</span>
-                </div>
-              )}
-              <button 
-                onClick={() => setIsNavCollapsed(prev => !prev)} 
-                className="btn-collapse-toggle"
-                title={isNavCollapsed ? "Expand Navigation Toolbar" : "Collapse Navigation Toolbar"}
-              >
-                {isNavCollapsed ? '▶' : '◀'}
+        {/* Silent Remote Terminal Drawer */}
+        {showTerminalDrawer && (
+          <div className="terminal-drawer">
+            <div className="drawer-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  💻 Silent Remote Shell
+                </h3>
+                <select
+                  value={shellType}
+                  onChange={(e) => setShellType(e.target.value)}
+                  className="shell-selector"
+                >
+                  <option value="powershell">PowerShell</option>
+                  <option value="cmd">CMD Prompt</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setTerminalLogs([])} className="btn-clear-logs" title="Clear Console History">
+                  🧹 Clear
+                </button>
+                <button onClick={() => setShowTerminalDrawer(false)} className="drawer-close-btn">✕</button>
+              </div>
+            </div>
+
+            {/* Quick Script Presets */}
+            <div className="preset-commands-bar">
+              <span className="preset-label">⚡ Quick Presets:</span>
+              <button onClick={() => handleExecuteTerminalCommand('ipconfig /all')} className="preset-btn">
+                Network (`ipconfig`)
+              </button>
+              <button onClick={() => handleExecuteTerminalCommand('systeminfo')} className="preset-btn">
+                System Info
+              </button>
+              <button onClick={() => handleExecuteTerminalCommand(shellType === 'powershell' ? 'Get-Process | Select-Object -First 20 Name, CPU, WorkingSet64' : 'tasklist')} className="preset-btn">
+                Running Tasks
+              </button>
+              <button onClick={() => handleExecuteTerminalCommand('ping 8.8.8.8 -n 4')} className="preset-btn">
+                Ping Test
+              </button>
+              <button onClick={() => handleExecuteTerminalCommand('ipconfig /flushdns')} className="preset-btn">
+                Flush DNS
               </button>
             </div>
 
-            {!isNavCollapsed && (
-              <div className="control-bar-left">
-                {/* Compact Quick Action Buttons */}
-                <button
-                  onClick={() => setShowHealthDrawer(prev => !prev)}
-                  className={`control-btn btn-health ${showHealthDrawer ? 'active' : ''}`}
-                  title="View Live CPU, RAM, Disk, and Network Health"
-                >
-                  📊 Health {liveMetrics ? `(${liveMetrics.cpuPercent}%)` : ''}
-                </button>
-
-                <button
-                  onClick={() => setShowTerminalDrawer(prev => !prev)}
-                  className={`control-btn btn-terminal ${showTerminalDrawer ? 'active' : ''}`}
-                  title="Open Remote PowerShell & CMD Terminal"
-                >
-                  💻 Terminal
-                </button>
-
-                <button
-                  onClick={() => {
-                    setShowFileExplorerDrawer(prev => {
-                      const next = !prev;
-                      if (next && (!remoteFiles || remoteFiles.length === 0)) {
-                        requestRemoteDirectory('', true);
-                      }
-                      return next;
-                    });
-                  }}
-                  className={`control-btn btn-files ${showFileExplorerDrawer ? 'active' : ''}`}
-                  title="Browse & Download Files from Target PC (Remote File Explorer)"
-                >
-                  📁 Files {activeDownloadTransfer ? '⬇️' : ''}
-                </button>
-
-                <button
-                  onClick={() => setIsAnnotating(prev => !prev)}
-                  className={`control-btn btn-annotate ${isAnnotating ? 'active' : ''}`}
-                  title="Toggle Screen Annotation & Laser Pointer Tool"
-                >
-                  ✏️ Annotate
-                </button>
-
-                <button
-                  onClick={() => handleExportSystemReport()}
-                  disabled={isExportingExcel}
-                  className="control-btn btn-excel-toolbar"
-                  title="Export Target PC Disk Space, Running Processes & Specs to Excel (.xlsx)"
-                >
-                  {isExportingExcel ? '⏳ Exporting...' : '📑 Excel'}
-                </button>
-
-                {/* Multi-Monitor Dual/Triple Display Switcher */}
-                <div className="screens-dropdown-wrapper">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowScreenDropdown(prev => !prev);
-                    }}
-                    className={`control-btn btn-screen-switch ${showScreenDropdown ? 'active' : ''}`}
-                    title="View and Switch Connected Displays (Multi-Monitor)"
-                  >
-                    🖥️ {availableScreens.length > 1 ? `Displays (${availableScreens.length})` : 'Display (1)'}
-                    <span style={{ fontSize: '0.65rem', opacity: 0.85, marginLeft: 4 }}>▼</span>
-                  </button>
-
-                  {showScreenDropdown && (
-                    <div className="screens-dropdown-menu">
-                      <div className="screens-dropdown-header">
-                        <span>CONNECTED MONITORS ({availableScreens.length || 1})</span>
-                      </div>
-                      {(availableScreens.length > 0 ? availableScreens : [{ id: 'screen:0:0', label: 'Monitor 1 (Primary)', name: 'Main Display', isPrimary: true, bounds: { width: 1920, height: 1080 } }]).map(scr => {
-                        const isSelected = scr.id === currentScreenId || availableScreens.length <= 1;
-                        return (
-                          <button
-                            key={scr.id}
-                            onClick={() => handleSwitchScreen(scr.id)}
-                            className={`screen-dropdown-item ${isSelected ? 'active' : ''}`}
-                          >
-                            <div className="screen-item-icon">
-                              🖥️
-                            </div>
-                            <div className="screen-item-info">
-                              <span className="screen-item-title">
-                                {scr.label || scr.name}
-                              </span>
-                              <span className="screen-item-res">
-                                {scr.bounds ? `${scr.bounds.width}×${scr.bounds.height}` : '1920×1080'}
-                                {scr.isPrimary ? ' • Main Display' : ''}
-                              </span>
-                            </div>
-                            {isSelected && <span className="screen-selected-badge">✓ Active</span>}
-                          </button>
-                        );
-                      })}
-
-                      {availableScreens.length <= 1 && (
-                        <div style={{
-                          padding: '8px 10px',
-                          fontSize: '0.72rem',
-                          color: '#94a3b8',
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          borderRadius: '8px',
-                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                          lineHeight: 1.4
-                        }}>
-                          💡 <strong style={{ color: '#38bdf8' }}>Dual Screen Ready:</strong> When target PC connects a 2nd monitor or HDMI, it will appear here for instant 1-click switching.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Sleek Compact Action Menu Dropdown */}
-                <div className="tools-dropdown-wrapper">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowToolsDropdown(prev => !prev);
-                    }}
-                    className={`control-btn btn-tools ${showToolsDropdown ? 'active' : ''}`}
-                    title="Open Actions & Utilities Menu"
-                  >
-                    ⚡ Actions <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>▼</span>
-                  </button>
-
-                  {showToolsDropdown && (
-                    <div className="tools-dropdown-menu">
-                      {hostSystemInfo && (
-                        <button 
-                          onClick={() => { setShowSpecsModal(true); setShowToolsDropdown(false); }} 
-                          className="dropdown-item"
-                        >
-                          <span className="dropdown-icon">💻</span>
-                          <div>
-                            <strong>Hardware Specs</strong>
-                            <small>{hostSystemInfo.hostname || 'Device Specs'}</small>
-                          </div>
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={() => {
-                          sendControlData({ type: 'minimize-host' });
-                          setShowToolsDropdown(false);
-                        }} 
-                        className="dropdown-item"
-                        title="Force-minimize the Host Agent window on the remote machine"
-                      >
-                        <span className="dropdown-icon">🗕</span>
-                        <div>
-                          <strong>Minimize Host Window</strong>
-                          <small>Hide Agent to Taskbar</small>
-                        </div>
-                      </button>
-
-                      <button 
-                        onClick={() => { syncLocalClipboardToRemote(); setShowToolsDropdown(false); }} 
-                        className="dropdown-item"
-                      >
-                        <span className="dropdown-icon">📋</span>
-                        <div>
-                          <strong>Sync Clipboard</strong>
-                          <small>Push local text to Remote PC</small>
-                        </div>
-                      </button>
-
-                      <button 
-                        onClick={() => { 
-                          if (fileInputRef.current) fileInputRef.current.click();
-                          setShowToolsDropdown(false); 
-                        }} 
-                        className="dropdown-item"
-                      >
-                        <span className="dropdown-icon">📁</span>
-                        <div>
-                          <strong>Transfer File</strong>
-                          <small>Upload file to remote Downloads</small>
-                        </div>
-                      </button>
-
-                      <button 
-                        onClick={() => {
-                          const directUrl = `${window.location.origin}/?code=${roomId}`;
-                          navigator.clipboard.writeText(directUrl);
-                          alert(`Direct Access Link copied to clipboard:\n${directUrl}`);
-                          setShowToolsDropdown(false);
-                        }} 
-                        className="dropdown-item"
-                      >
-                        <span className="dropdown-icon">🔗</span>
-                        <div>
-                          <strong>Copy Direct Link</strong>
-                          <small>1-Click bookmark link</small>
-                        </div>
-                      </button>
-
-                      <div className="dropdown-divider" style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }}></div>
-
-                      <button 
-                        onClick={() => {
-                          setShowToolsDropdown(false);
-                          setShowRebootModal(true);
-                        }} 
-                        className="dropdown-item reboot-action-item"
-                        style={{ color: '#f87171' }}
-                        title="Safely restart the remote machine and auto-reconnect on boot"
-                      >
-                        <span className="dropdown-icon">🔄</span>
-                        <div>
-                          <strong style={{ color: '#fca5a5' }}>Remote Reboot PC</strong>
-                          <small style={{ color: '#f87171' }}>Restart & Auto-Reconnect</small>
-                        </div>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <button className="btn-disconnect" onClick={cleanup}>
-                  Terminate Session
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Silent Remote Terminal Drawer */}
-          {showTerminalDrawer && (
-            <div className="terminal-drawer">
-              <div className="drawer-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    💻 Silent Remote Shell
-                  </h3>
-                  <select 
-                    value={shellType}
-                    onChange={(e) => setShellType(e.target.value)}
-                    className="shell-selector"
-                  >
-                    <option value="powershell">PowerShell</option>
-                    <option value="cmd">CMD Prompt</option>
-                  </select>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => setTerminalLogs([])} className="btn-clear-logs" title="Clear Console History">
-                    🧹 Clear
-                  </button>
-                  <button onClick={() => setShowTerminalDrawer(false)} className="drawer-close-btn">✕</button>
-                </div>
+            {/* Console Output Window */}
+            <div className="terminal-output" ref={terminalLogsRef}>
+              <div className="terminal-welcome">
+                UnioTechIT Silent Background Shell [{shellType.toUpperCase()}] connected.<br />
+                Commands run silently on host machine without displaying any windows on the target PC screen.
               </div>
 
-              {/* Quick Script Presets */}
-              <div className="preset-commands-bar">
-                <span className="preset-label">⚡ Quick Presets:</span>
-                <button onClick={() => handleExecuteTerminalCommand('ipconfig /all')} className="preset-btn">
-                  Network (`ipconfig`)
-                </button>
-                <button onClick={() => handleExecuteTerminalCommand('systeminfo')} className="preset-btn">
-                  System Info
-                </button>
-                <button onClick={() => handleExecuteTerminalCommand(shellType === 'powershell' ? 'Get-Process | Select-Object -First 20 Name, CPU, WorkingSet64' : 'tasklist')} className="preset-btn">
-                  Running Tasks
-                </button>
-                <button onClick={() => handleExecuteTerminalCommand('ping 8.8.8.8 -n 4')} className="preset-btn">
-                  Ping Test
-                </button>
-                <button onClick={() => handleExecuteTerminalCommand('ipconfig /flushdns')} className="preset-btn">
-                  Flush DNS
-                </button>
-              </div>
-
-              {/* Console Output Window */}
-              <div className="terminal-output" ref={terminalLogsRef}>
-                <div className="terminal-welcome">
-                  UnioTechIT Silent Background Shell [{shellType.toUpperCase()}] connected.<br />
-                  Commands run silently on host machine without displaying any windows on the target PC screen.
-                </div>
-
-                {terminalLogs.map((log) => (
-                  <div key={log.id} className="terminal-log-entry">
-                    <div className="terminal-prompt">
-                      <span className="prompt-symbol">PS {hostSystemInfo?.hostname || 'HOST'}&gt;</span>
-                      <span className="prompt-command">{log.command}</span>
-                      <span className="prompt-time">[{log.timestamp}]</span>
-                    </div>
-
-                    {log.pending ? (
-                      <div className="terminal-pending">
-                        <span className="spinner-sm"></span> Executing command silently on remote PC...
-                      </div>
-                    ) : (
-                      <pre className={`terminal-result-text ${log.isError ? 'error' : ''}`}>
-                        {log.output}
-                      </pre>
-                    )}
+              {terminalLogs.map((log) => (
+                <div key={log.id} className="terminal-log-entry">
+                  <div className="terminal-prompt">
+                    <span className="prompt-symbol">PS {hostSystemInfo?.hostname || 'HOST'}&gt;</span>
+                    <span className="prompt-command">{log.command}</span>
+                    <span className="prompt-time">[{log.timestamp}]</span>
                   </div>
-                ))}
+
+                  {log.pending ? (
+                    <div className="terminal-pending">
+                      <span className="spinner-sm"></span> Executing command silently on remote PC...
+                    </div>
+                  ) : (
+                    <pre className={`terminal-result-text ${log.isError ? 'error' : ''}`}>
+                      {log.output}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="terminal-input-bar">
+              <span className="input-prompt-symbol">{shellType === 'powershell' ? 'PS>' : 'CMD>'}</span>
+              <input
+                type="text"
+                placeholder={`Type ${shellType} command and press Enter (Use ↑/↓ for history)...`}
+                value={terminalInput}
+                onChange={(e) => setTerminalInput(e.target.value)}
+                onKeyDown={handleTerminalInputKeyDown}
+                disabled={isExecutingCmd}
+                autoFocus
+              />
+              <button
+                onClick={() => handleExecuteTerminalCommand()}
+                disabled={isExecutingCmd || !terminalInput.trim()}
+                className="btn-send-cmd"
+              >
+                {isExecutingCmd ? 'Executing...' : 'Run ▶'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Remote File Explorer & 1-Click Downloader Drawer */}
+        {showFileExplorerDrawer && (
+          <div className="file-explorer-drawer">
+            {/* Drawer Header */}
+            <div className="drawer-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '1.25rem' }}>📁</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Remote File Explorer
+                  </h3>
+                  <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
+                    Target: <strong style={{ color: '#f8fafc' }}>{hostSystemInfo?.hostname || 'Host PC'}</strong> • Browse files & 1-Click Download to your PC
+                  </span>
+                </div>
               </div>
-              <div className="terminal-input-bar">
-                <span className="input-prompt-symbol">{shellType === 'powershell' ? 'PS>' : 'CMD>'}</span>
-                <input
-                  type="text"
-                  placeholder={`Type ${shellType} command and press Enter (Use ↑/↓ for history)...`}
-                  value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
-                  onKeyDown={handleTerminalInputKeyDown}
-                  disabled={isExecutingCmd}
-                  autoFocus
-                />
-                <button 
-                  onClick={() => handleExecuteTerminalCommand()}
-                  disabled={isExecutingCmd || !terminalInput.trim()}
-                  className="btn-send-cmd"
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={() => requestRemoteDirectory(remoteCurrentPath, true)}
+                  className="btn-clear-logs"
+                  title="Refresh Current Folder"
+                  disabled={isLoadingRemoteFiles}
                 >
-                  {isExecutingCmd ? 'Executing...' : 'Run ▶'}
+                  🔄 Refresh
                 </button>
+                <button
+                  onClick={() => explorerFileInputRef.current?.click()}
+                  className="btn-upload-folder"
+                  title="Upload File into Current Folder"
+                >
+                  ⬆️ Upload Here
+                </button>
+                <input
+                  type="file"
+                  ref={explorerFileInputRef}
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      sendFile(e.target.files[0], remoteCurrentPath);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <button onClick={() => setShowFileExplorerDrawer(false)} className="drawer-close-btn">✕</button>
               </div>
             </div>
-          )}
 
-          {/* Remote File Explorer & 1-Click Downloader Drawer */}
-          {showFileExplorerDrawer && (
-            <div className="file-explorer-drawer">
-              {/* Drawer Header */}
-              <div className="drawer-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '1.25rem' }}>📁</span>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      Remote File Explorer
-                    </h3>
-                    <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
-                      Target: <strong style={{ color: '#f8fafc' }}>{hostSystemInfo?.hostname || 'Host PC'}</strong> • Browse files & 1-Click Download to your PC
-                    </span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button 
-                    onClick={() => requestRemoteDirectory(remoteCurrentPath, true)} 
-                    className="btn-clear-logs" 
-                    title="Refresh Current Folder"
-                    disabled={isLoadingRemoteFiles}
-                  >
-                    🔄 Refresh
-                  </button>
-                  <button 
-                    onClick={() => explorerFileInputRef.current?.click()} 
-                    className="btn-upload-folder" 
-                    title="Upload File into Current Folder"
-                  >
-                    ⬆️ Upload Here
-                  </button>
-                  <input
-                    type="file"
-                    ref={explorerFileInputRef}
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        sendFile(e.target.files[0], remoteCurrentPath);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
-                  <button onClick={() => setShowFileExplorerDrawer(false)} className="drawer-close-btn">✕</button>
-                </div>
-              </div>
-
-              {/* Quick Access Drives & Common Folders */}
-              <div className="explorer-quick-bar">
-                <span className="explorer-quick-label">💽 Drives:</span>
-                <div className="explorer-drives-list">
-                  {remoteDrives.map(d => (
-                    <button
-                      key={d}
-                      onClick={() => requestRemoteDirectory(d)}
-                      className={`drive-chip-btn ${remoteCurrentPath.startsWith(d) ? 'active' : ''}`}
-                      title={`Open Drive ${d}`}
-                    >
-                      💽 {d}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="explorer-quick-divider" />
-
-                <span className="explorer-quick-label">⚡ Shortcuts:</span>
-                <div className="explorer-shortcuts-list">
-                  {remoteQuickPaths.map(q => (
-                    <button
-                      key={q.label}
-                      onClick={() => requestRemoteDirectory(q.path)}
-                      className={`shortcut-chip-btn ${remoteCurrentPath === q.path ? 'active' : ''}`}
-                      title={`Go to ${q.label}`}
-                    >
-                      {q.icon} {q.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Path & Search Navigation Bar */}
-              <div className="explorer-nav-bar">
-                <button
-                  onClick={() => remoteParentPath && requestRemoteDirectory(remoteParentPath)}
-                  disabled={!remoteParentPath || isLoadingRemoteFiles}
-                  className="btn-nav-up"
-                  title="Go to Parent Directory (Up 1 Level)"
-                >
-                  ⬆️ Up
-                </button>
-
-                <div className="explorer-path-input-group">
-                  <span className="path-icon">📂</span>
-                  <input
-                    type="text"
-                    value={pathInputValue}
-                    onChange={(e) => setPathInputValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && pathInputValue.trim()) {
-                        requestRemoteDirectory(pathInputValue.trim());
-                      }
-                    }}
-                    placeholder="Enter absolute directory path (e.g. C:\Users\Admin\Desktop)..."
-                    className="explorer-path-input"
-                  />
+            {/* Quick Access Drives & Common Folders */}
+            <div className="explorer-quick-bar">
+              <span className="explorer-quick-label">💽 Drives:</span>
+              <div className="explorer-drives-list">
+                {remoteDrives.map(d => (
                   <button
-                    onClick={() => pathInputValue.trim() && requestRemoteDirectory(pathInputValue.trim())}
-                    className="btn-path-go"
-                    title="Navigate to Path"
+                    key={d}
+                    onClick={() => requestRemoteDirectory(d)}
+                    className={`drive-chip-btn ${remoteCurrentPath.startsWith(d) ? 'active' : ''}`}
+                    title={`Open Drive ${d}`}
                   >
-                    Go ➔
+                    💽 {d}
                   </button>
-                </div>
-
-                <div className="explorer-search-group">
-                  <span className="search-icon">🔍</span>
-                  <input
-                    type="text"
-                    value={fileSearchQuery}
-                    onChange={(e) => setFileSearchQuery(e.target.value)}
-                    placeholder="Search in this folder..."
-                    className="explorer-search-input"
-                  />
-                  {fileSearchQuery && (
-                    <button onClick={() => setFileSearchQuery('')} className="btn-search-clear">✕</button>
-                  )}
-                </div>
+                ))}
               </div>
 
-              {/* Active Download Progress Banner */}
-              {activeDownloadTransfer && (
-                <div className="explorer-download-banner">
-                  <div className="download-banner-info">
-                    <span className="download-banner-title">
-                      ⬇️ Downloading: <strong>{activeDownloadTransfer.fileName}</strong>
-                    </span>
-                    <span className="download-banner-stats">
-                      {activeDownloadTransfer.receivedFormatted} / {activeDownloadTransfer.totalFormatted} ({activeDownloadTransfer.speed}) • {activeDownloadTransfer.progress}%
-                    </span>
-                  </div>
-                  <div className="download-banner-progress-track">
-                    <div
-                      className="download-banner-progress-fill"
-                      style={{ width: `${activeDownloadTransfer.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="explorer-quick-divider" />
 
-              {/* File List Content Table */}
-              <div 
-                className="explorer-files-container"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    sendFile(e.dataTransfer.files[0], remoteCurrentPath);
-                  }
-                }}
+              <span className="explorer-quick-label">⚡ Shortcuts:</span>
+              <div className="explorer-shortcuts-list">
+                {remoteQuickPaths.map(q => (
+                  <button
+                    key={q.label}
+                    onClick={() => requestRemoteDirectory(q.path)}
+                    className={`shortcut-chip-btn ${remoteCurrentPath === q.path ? 'active' : ''}`}
+                    title={`Go to ${q.label}`}
+                  >
+                    {q.icon} {q.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Path & Search Navigation Bar */}
+            <div className="explorer-nav-bar">
+              <button
+                onClick={() => remoteParentPath && requestRemoteDirectory(remoteParentPath)}
+                disabled={!remoteParentPath || isLoadingRemoteFiles}
+                className="btn-nav-up"
+                title="Go to Parent Directory (Up 1 Level)"
               >
-                {isLoadingRemoteFiles ? (
-                  <div className="explorer-loading-state">
-                    <div className="spinner"></div>
-                    <p>Fetching remote directory contents...</p>
-                  </div>
-                ) : (
-                  <table className="explorer-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '45%' }}>Name</th>
-                        <th style={{ width: '15%' }}>Size</th>
-                        <th style={{ width: '25%' }}>Modified Date</th>
-                        <th style={{ width: '15%', textAlign: 'right' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {remoteFiles
-                        .filter(f => !fileSearchQuery || f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
-                        .map(item => {
-                          const ext = (item.ext || '').toLowerCase();
-                          let icon = '📄';
-                          if (item.isDirectory) icon = '📁';
-                          else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'].includes(ext)) icon = '🖼️';
-                          else if (['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv'].includes(ext)) icon = '🎬';
-                          else if (['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)) icon = '🎵';
-                          else if (['.pdf'].includes(ext)) icon = '📕';
-                          else if (['.zip', '.rar', '.7z', '.tar', '.gz', '.iso'].includes(ext)) icon = '📦';
-                          else if (['.exe', '.msi', '.bat', '.cmd', '.ps1'].includes(ext)) icon = '⚙️';
-                          else if (['.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.json', '.py', '.c', '.cpp', '.cs', '.java', '.php'].includes(ext)) icon = '💻';
-                          else if (['.doc', '.docx'].includes(ext)) icon = '📘';
-                          else if (['.xls', '.xlsx', '.csv'].includes(ext)) icon = '📊';
-                          else if (['.ppt', '.pptx'].includes(ext)) icon = '📙';
-                          else if (['.txt', '.log', '.md', '.ini', '.cfg'].includes(ext)) icon = '📄';
+                ⬆️ Up
+              </button>
 
-                          const isDownloadingThis = activeDownloadTransfer && activeDownloadTransfer.fileName === item.name && !activeDownloadTransfer.isComplete;
+              <div className="explorer-path-input-group">
+                <span className="path-icon">📂</span>
+                <input
+                  type="text"
+                  value={pathInputValue}
+                  onChange={(e) => setPathInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && pathInputValue.trim()) {
+                      requestRemoteDirectory(pathInputValue.trim());
+                    }
+                  }}
+                  placeholder="Enter absolute directory path (e.g. C:\Users\Admin\Desktop)..."
+                  className="explorer-path-input"
+                />
+                <button
+                  onClick={() => pathInputValue.trim() && requestRemoteDirectory(pathInputValue.trim())}
+                  className="btn-path-go"
+                  title="Navigate to Path"
+                >
+                  Go ➔
+                </button>
+              </div>
 
-                          return (
-                            <tr 
-                              key={item.path} 
-                              className={`explorer-row ${item.isDirectory ? 'is-dir' : 'is-file'}`}
-                              onDoubleClick={() => {
-                                if (item.isDirectory) requestRemoteDirectory(item.path);
-                                else requestDownloadRemoteFile(item.path, item.name);
-                              }}
-                            >
-                              <td className="explorer-cell-name">
-                                <span className="item-icon">{icon}</span>
-                                <span 
-                                  className="item-label" 
-                                  onClick={() => item.isDirectory && requestRemoteDirectory(item.path)}
-                                  title={item.name}
-                                >
-                                  {item.name}
-                                </span>
-                              </td>
-                              <td className="explorer-cell-size">{item.sizeFormatted}</td>
-                              <td className="explorer-cell-date">
-                                {item.mtime ? new Date(item.mtime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '--'}
-                              </td>
-                              <td className="explorer-cell-actions">
-                                {item.isDirectory ? (
-                                  <button
-                                    onClick={() => requestRemoteDirectory(item.path)}
-                                    className="btn-item-open"
-                                    title="Open Folder"
-                                  >
-                                    Open ➔
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => requestDownloadRemoteFile(item.path, item.name)}
-                                    disabled={Boolean(isDownloadingThis)}
-                                    className="btn-item-download"
-                                    title="Download this file to your Admin PC"
-                                  >
-                                    {isDownloadingThis ? (
-                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                        <span className="spinner-sm"></span> {activeDownloadTransfer.progress}%
-                                      </span>
-                                    ) : (
-                                      '⬇️ Download'
-                                    )}
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-
-                      {remoteFiles.length === 0 && !isLoadingRemoteFiles && (
-                        <tr>
-                          <td colSpan={4} style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-                            <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📂</div>
-                            <p style={{ margin: 0, fontSize: '0.9rem' }}>This directory is empty or inaccessible.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+              <div className="explorer-search-group">
+                <span className="search-icon">🔍</span>
+                <input
+                  type="text"
+                  value={fileSearchQuery}
+                  onChange={(e) => setFileSearchQuery(e.target.value)}
+                  placeholder="Search in this folder..."
+                  className="explorer-search-input"
+                />
+                {fileSearchQuery && (
+                  <button onClick={() => setFileSearchQuery('')} className="btn-search-clear">✕</button>
                 )}
               </div>
             </div>
-          )}
 
-          {/* Live System Health Drawer */}
-          {showHealthDrawer && (
-            <div className="health-drawer">
-              <div className="drawer-header">
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    📊 Live System Health & Telemetry
-                  </h3>
-                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                    {liveMetrics?.hostname || 'Host Machine'} • IP: {liveMetrics?.ip || '127.0.0.1'}
+            {/* Active Download Progress Banner */}
+            {activeDownloadTransfer && (
+              <div className="explorer-download-banner">
+                <div className="download-banner-info">
+                  <span className="download-banner-title">
+                    ⬇️ Downloading: <strong>{activeDownloadTransfer.fileName}</strong>
+                  </span>
+                  <span className="download-banner-stats">
+                    {activeDownloadTransfer.receivedFormatted} / {activeDownloadTransfer.totalFormatted} ({activeDownloadTransfer.speed}) • {activeDownloadTransfer.progress}%
                   </span>
                 </div>
-                <button onClick={() => setShowHealthDrawer(false)} className="drawer-close-btn">✕</button>
-              </div>
-
-              {liveMetrics ? (
-                <div className="drawer-body">
-                  {/* CPU Card */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">⚡ Processor (CPU)</span>
-                      <span className="metric-value">{liveMetrics.cpuPercent}%</span>
-                    </div>
-                    <div className="metric-subtext" title={liveMetrics.cpuModel}>{liveMetrics.cpuModel}</div>
-                    <div className="progress-bar-track">
-                      <div 
-                        className="progress-bar-fill" 
-                        style={{ 
-                          width: `${liveMetrics.cpuPercent}%`,
-                          background: liveMetrics.cpuPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : liveMetrics.cpuPercent > 60 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* RAM Card */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">💾 RAM Memory</span>
-                      <span className="metric-value">{liveMetrics.ramPercent}%</span>
-                    </div>
-                    <div className="metric-subtext">{liveMetrics.ramUsedGb} GB used of {liveMetrics.ramTotalGb} GB</div>
-                    <div className="progress-bar-track">
-                      <div 
-                        className="progress-bar-fill" 
-                        style={{ 
-                          width: `${liveMetrics.ramPercent}%`,
-                          background: liveMetrics.ramPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #6366f1, #818cf8)'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Disk Card */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">💽 Disk Space (C:)</span>
-                      <span className="metric-value">{liveMetrics.diskPercent}%</span>
-                    </div>
-                    <div className="metric-subtext">{liveMetrics.diskFreeGb} GB free of {liveMetrics.diskTotalGb} GB</div>
-                    <div className="progress-bar-track">
-                      <div 
-                        className="progress-bar-fill" 
-                        style={{ 
-                          width: `${liveMetrics.diskPercent}%`,
-                          background: liveMetrics.diskPercent > 90 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #0ea5e9, #38bdf8)'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Network Speed Card */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">🌐 Network Traffic</span>
-                    </div>
-                    <div className="network-speed-grid">
-                      <div className="speed-box download">
-                        <span className="speed-label">↓ Download</span>
-                        <span className="speed-val">{liveMetrics.downloadSpeed}</span>
-                      </div>
-                      <div className="speed-box upload">
-                        <span className="speed-label">↑ Upload</span>
-                        <span className="speed-val">{liveMetrics.uploadSpeed}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Battery & System Info */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">🔋 Power & System Status</span>
-                    </div>
-                    <div className="info-rows">
-                      <div className="info-row">
-                        <span>Battery:</span>
-                        <strong>
-                          {liveMetrics.batteryPercent !== null && liveMetrics.batteryPercent !== undefined
-                            ? `${liveMetrics.batteryPercent}% ${liveMetrics.isCharging ? '⚡ (Charging)' : '🔋'}`
-                            : '🔌 Desktop AC Power'}
-                        </strong>
-                      </div>
-                      <div className="info-row">
-                        <span>System Uptime:</span>
-                        <strong>⏱️ {liveMetrics.uptime}</strong>
-                      </div>
-                      {liveMetrics.lastReboot && (
-                        <div className="info-row">
-                          <span>Last Reboot:</span>
-                          <strong style={{ fontSize: '0.78rem' }}>📅 {liveMetrics.lastReboot}</strong>
-                        </div>
-                      )}
-                      <div className="info-row">
-                        <span>OS Platform:</span>
-                        <strong>{liveMetrics.platform}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Identity & Network Card */}
-                  <div className="metric-card">
-                    <div className="metric-header">
-                      <span className="metric-title">👤 Identity & Network Details</span>
-                    </div>
-                    <div className="info-rows">
-                      <div className="info-row">
-                        <span>Domain User:</span>
-                        <strong style={{ color: '#38bdf8' }}>{liveMetrics.loggedUser || 'N/A'}</strong>
-                      </div>
-                      <div className="info-row">
-                        <span>Domain / Host:</span>
-                        <strong>{liveMetrics.domain || 'WORKGROUP'}</strong>
-                      </div>
-                      <div className="info-row">
-                        <span>Public IP (WAN):</span>
-                        <strong style={{ color: '#34d399' }}>🌐 {liveMetrics.publicIp || 'N/A'}</strong>
-                      </div>
-                      <div className="info-row">
-                        <span>Private IP (LAN):</span>
-                        <strong style={{ color: '#a5b4fc' }}>🔌 {liveMetrics.ip || 'N/A'}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 1-Click Excel Diagnostic Export Button */}
-                  <div style={{ marginTop: '14px', padding: '6px 0' }}>
-                    <button
-                      onClick={() => handleExportSystemReport()}
-                      disabled={isExportingExcel}
-                      className="btn-export-excel-action"
-                    >
-                      {isExportingExcel ? '⏳ Harvesting Telemetry & Exporting Excel...' : '📊 Export Full Diagnostic Report (.xlsx)'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="drawer-loading">
-                  <div className="spinner"></div>
-                  <p>Connecting to Host Telemetry Stream...</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* System Specs Popup Modal */}
-          {showSpecsModal && hostSystemInfo && (
-            <div style={{
-              position: 'absolute',
-              top: '75px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'rgba(15, 23, 42, 0.95)',
-              border: '1px solid rgba(129, 140, 248, 0.3)',
-              borderRadius: '16px',
-              padding: '20px 24px',
-              backdropFilter: 'blur(20px)',
-              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-              zIndex: 300,
-              minWidth: '340px',
-              color: '#fff',
-              textAlign: 'left'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#818cf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  🖥️ Host Device Specifications
-                </h3>
-                <button 
-                  onClick={() => setShowSpecsModal(false)}
-                  style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>🖥️ PC Hostname:</span>
-                  <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.hostname || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>👤 Logged-in User:</span>
-                  <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.loggedUser || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>🌐 Public IP (WAN):</span>
-                  <strong style={{ color: '#34d399' }}>{hostSystemInfo.publicIp || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>🔌 Private IP (LAN):</span>
-                  <strong style={{ color: '#a5b4fc' }}>{hostSystemInfo.ip || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>⚡ Processor (CPU):</span>
-                  <strong style={{ color: '#f8fafc', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hostSystemInfo.cpu}>
-                    {hostSystemInfo.cpu || 'N/A'}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>💾 RAM Memory:</span>
-                  <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.ram || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>📅 Last Reboot:</span>
-                  <strong style={{ color: '#f8fafc', fontSize: '0.8rem' }}>{hostSystemInfo.lastReboot || 'N/A'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
-                  <span style={{ color: '#94a3b8' }}>📦 Agent Version:</span>
-                  <strong style={{ color: '#818cf8' }}>v{hostSystemInfo.agentVersion || '1.0.0'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>💻 OS Platform:</span>
-                  <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.platform || 'N/A'}</strong>
-                </div>
-
-                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                  <button
-                    onClick={() => handleExportSystemReport(hostSystemInfo.roomId || targetRoomId || roomId)}
-                    disabled={isExportingExcel}
-                    className="btn-export-excel-action"
-                    style={{ width: '100%', fontSize: '0.82rem', padding: '9px 12px' }}
-                  >
-                    {isExportingExcel ? '⏳ Generating Excel Report...' : '📊 Export Full System Report (.xlsx)'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Hidden File Input for Actions Menu Upload */}
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            style={{ display: 'none' }} 
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) {
-                sendFile(e.target.files[0]);
-                e.target.value = '';
-              }
-            }} 
-          />
-
-          {/* Floating Glassmorphic Annotation Toolbar */}
-          {isAnnotating && (
-            <div className="annotation-toolbar">
-              <div className="annotation-toolbar-group">
-                <button
-                  onClick={() => setAnnotationTool('laser')}
-                  className={`annotate-tool-btn ${annotationTool === 'laser' ? 'active' : ''}`}
-                  title="Laser Pointer (Smooth glowing pointer with no permanent mark)"
-                >
-                  🔴 Laser
-                </button>
-                <button
-                  onClick={() => setAnnotationTool('pen')}
-                  className={`annotate-tool-btn ${annotationTool === 'pen' ? 'active' : ''}`}
-                  title="Pen (Freehand Drawing)"
-                >
-                  ✏️ Pen
-                </button>
-                <button
-                  onClick={() => setAnnotationTool('arrow')}
-                  className={`annotate-tool-btn ${annotationTool === 'arrow' ? 'active' : ''}`}
-                  title="Arrow Pointer (Point to specific buttons or areas)"
-                >
-                  ↗️ Arrow
-                </button>
-                <button
-                  onClick={() => setAnnotationTool('rect')}
-                  className={`annotate-tool-btn ${annotationTool === 'rect' ? 'active' : ''}`}
-                  title="Rectangle Box (Highlight sections)"
-                >
-                  🔲 Box
-                </button>
-                <button
-                  onClick={() => setAnnotationTool('highlighter')}
-                  className={`annotate-tool-btn ${annotationTool === 'highlighter' ? 'active' : ''}`}
-                  title="Translucent Highlighter"
-                >
-                  🖍️ Highlight
-                </button>
-              </div>
-
-              <div className="annotation-divider" />
-
-              {/* Color Palette */}
-              <div className="annotation-toolbar-group color-swatch-list">
-                {['#ef4444', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#ffffff'].map(c => (
-                  <button
-                    key={c}
-                    className={`color-swatch ${annotationColor === c ? 'active' : ''}`}
-                    style={{ background: c }}
-                    onClick={() => setAnnotationColor(c)}
-                    title={`Color: ${c}`}
+                <div className="download-banner-progress-track">
+                  <div
+                    className="download-banner-progress-fill"
+                    style={{ width: `${activeDownloadTransfer.progress}%` }}
                   />
-                ))}
-              </div>
-
-              <div className="annotation-divider" />
-
-              {/* Stroke Sizes */}
-              <div className="annotation-toolbar-group">
-                {[2, 4, 8].map(s => (
-                  <button
-                    key={s}
-                    className={`size-select-btn ${annotationSize === s ? 'active' : ''}`}
-                    onClick={() => setAnnotationSize(s)}
-                    title={`Stroke: ${s}px`}
-                  >
-                    {s === 2 ? 'Thin' : s === 4 ? 'Med' : 'Thick'}
-                  </button>
-                ))}
-              </div>
-
-              <div className="annotation-divider" />
-
-              {/* Actions: Undo, Clear, Screenshot, Close */}
-              <div className="annotation-toolbar-group">
-                <button
-                  onClick={() => setAnnotations(prev => prev.slice(0, -1))}
-                  className="btn-annotate-action"
-                  disabled={annotations.length === 0}
-                  title="Undo last drawing"
-                >
-                  ↩️ Undo
-                </button>
-                <button
-                  onClick={() => {
-                    setAnnotations([]);
-                    sendControlData({
-                      type: 'annotation-event',
-                      payload: { type: 'clear' }
-                    });
-                  }}
-                  className="btn-annotate-action danger"
-                  disabled={annotations.length === 0}
-                  title="Clear all drawings"
-                >
-                  🧹 Clear
-                </button>
-                <button
-                  onClick={handleCaptureScreenshot}
-                  className="btn-annotate-action"
-                  title="Download Screenshot with Drawings"
-                >
-                  📸 Save
-                </button>
-                <button
-                  onClick={() => setIsAnnotating(false)}
-                  className="btn-annotate-close"
-                  title="Exit Annotation Mode"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div 
-            ref={containerRef}
-            className="video-container"
-            tabIndex={0} // Makes container focusable to receive keyboard events
-            onClick={focusControl}
-            onWheel={handleWheel}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onMouseLeave={handleMouseLeave}
-          >
-            {/* Interactive Transparent Annotation & Laser Pointer Canvas */}
-            <canvas
-              ref={annotationCanvasRef}
-              className={`annotation-canvas ${annotationTool === 'laser' && isAnnotating ? 'laser-mode' : ''}`}
-              style={{
-                display: (isAnnotating || annotations.length > 0) ? 'block' : 'none',
-                pointerEvents: isAnnotating ? 'auto' : 'none'
-              }}
-              onMouseDown={handleAnnotationMouseDown}
-              onMouseMove={handleAnnotationMouseMove}
-              onMouseUp={handleAnnotationMouseUp}
-              onMouseLeave={handleAnnotationMouseLeave}
-            />
-
-            {/* Drag & Drop Visual Glow Overlay */}
-            {isDraggingOver && (
-              <div className="file-drop-overlay">
-                <div className="file-drop-card">
-                  <div className="file-drop-icon">📥</div>
-                  <h3>Drop File to Upload</h3>
-                  <p>Streaming directly to remote PC's <strong>Downloads</strong> folder</p>
                 </div>
               </div>
             )}
 
-            {/* Zero-Latency Local Virtual Cursor Dot & Pointer */}
+            {/* File List Content Table */}
             <div
-              ref={localCursorRef}
-              className="remote-virtual-cursor"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                pointerEvents: 'none',
-                opacity: 0,
-                zIndex: 20,
-                willChange: 'transform'
+              className="explorer-files-container"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
               }}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.85))' }}>
-                <path d="M4 3L11.5 21L14.5 13.5L22 10.5L4 3Z" fill="#3b82f6" stroke="#ffffff" strokeWidth="1.5" strokeLinejoin="round" />
-              </svg>
-              <div className="cursor-pulse-ring" />
-            </div>
-
-            {/* Connecting Stream Loading Overlay */}
-            {(!isWebRtcActive && !socketFrame) && (
-              <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'radial-gradient(ellipse at center, #111827 0%, #030712 100%)',
-                zIndex: 5
-              }}>
-                <div style={{
-                  width: '56px',
-                  height: '56px',
-                  border: '4px solid rgba(129, 140, 248, 0.2)',
-                  borderTopColor: '#818cf8',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite',
-                  marginBottom: '20px'
-                }}></div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#f8fafc', marginBottom: '8px' }}>
-                  Receiving Live Remote Desktop...
-                </h3>
-                <p style={{ color: '#94a3b8', fontSize: '0.85rem', maxWidth: '380px', textAlign: 'center' }}>
-                  Establishing 60 FPS ultra-low latency WebRTC P2P Video Stream with Host ({roomId})
-                </p>
-              </div>
-            )}
-            <video
-              ref={(el) => {
-                videoRef.current = el;
-                if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) {
-                  el.srcObject = remoteStreamRef.current;
-                  el.play().catch(e => {});
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  sendFile(e.dataTransfer.files[0], remoteCurrentPath);
                 }
               }}
-              autoPlay
-              playsInline
-              muted
-              onPlaying={() => setIsWebRtcActive(true)}
-              onPause={() => setIsWebRtcActive(false)}
-              onError={() => setIsWebRtcActive(false)}
+            >
+              {isLoadingRemoteFiles ? (
+                <div className="explorer-loading-state">
+                  <div className="spinner"></div>
+                  <p>Fetching remote directory contents...</p>
+                </div>
+              ) : (
+                <table className="explorer-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '45%' }}>Name</th>
+                      <th style={{ width: '15%' }}>Size</th>
+                      <th style={{ width: '25%' }}>Modified Date</th>
+                      <th style={{ width: '15%', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {remoteFiles
+                      .filter(f => !fileSearchQuery || f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+                      .map(item => {
+                        const ext = (item.ext || '').toLowerCase();
+                        let icon = '📄';
+                        if (item.isDirectory) icon = '📁';
+                        else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'].includes(ext)) icon = '🖼️';
+                        else if (['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv'].includes(ext)) icon = '🎬';
+                        else if (['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)) icon = '🎵';
+                        else if (['.pdf'].includes(ext)) icon = '📕';
+                        else if (['.zip', '.rar', '.7z', '.tar', '.gz', '.iso'].includes(ext)) icon = '📦';
+                        else if (['.exe', '.msi', '.bat', '.cmd', '.ps1'].includes(ext)) icon = '⚙️';
+                        else if (['.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.json', '.py', '.c', '.cpp', '.cs', '.java', '.php'].includes(ext)) icon = '💻';
+                        else if (['.doc', '.docx'].includes(ext)) icon = '📘';
+                        else if (['.xls', '.xlsx', '.csv'].includes(ext)) icon = '📊';
+                        else if (['.ppt', '.pptx'].includes(ext)) icon = '📙';
+                        else if (['.txt', '.log', '.md', '.ini', '.cfg'].includes(ext)) icon = '📄';
+
+                        const isDownloadingThis = activeDownloadTransfer && activeDownloadTransfer.fileName === item.name && !activeDownloadTransfer.isComplete;
+
+                        return (
+                          <tr
+                            key={item.path}
+                            className={`explorer-row ${item.isDirectory ? 'is-dir' : 'is-file'}`}
+                            onDoubleClick={() => {
+                              if (item.isDirectory) requestRemoteDirectory(item.path);
+                              else requestDownloadRemoteFile(item.path, item.name);
+                            }}
+                          >
+                            <td className="explorer-cell-name">
+                              <span className="item-icon">{icon}</span>
+                              <span
+                                className="item-label"
+                                onClick={() => item.isDirectory && requestRemoteDirectory(item.path)}
+                                title={item.name}
+                              >
+                                {item.name}
+                              </span>
+                            </td>
+                            <td className="explorer-cell-size">{item.sizeFormatted}</td>
+                            <td className="explorer-cell-date">
+                              {item.mtime ? new Date(item.mtime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '--'}
+                            </td>
+                            <td className="explorer-cell-actions">
+                              {item.isDirectory ? (
+                                <button
+                                  onClick={() => requestRemoteDirectory(item.path)}
+                                  className="btn-item-open"
+                                  title="Open Folder"
+                                >
+                                  Open ➔
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => requestDownloadRemoteFile(item.path, item.name)}
+                                  disabled={Boolean(isDownloadingThis)}
+                                  className="btn-item-download"
+                                  title="Download this file to your Admin PC"
+                                >
+                                  {isDownloadingThis ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      <span className="spinner-sm"></span> {activeDownloadTransfer.progress}%
+                                    </span>
+                                  ) : (
+                                    '⬇️ Download'
+                                  )}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                    {remoteFiles.length === 0 && !isLoadingRemoteFiles && (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                          <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📂</div>
+                          <p style={{ margin: 0, fontSize: '0.9rem' }}>This directory is empty or inaccessible.</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Live System Health Drawer */}
+        {showHealthDrawer && (
+          <div className="health-drawer">
+            <div className="drawer-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  📊 Live System Health & Telemetry
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                  {liveMetrics?.hostname || 'Host Machine'} • IP: {liveMetrics?.ip || '127.0.0.1'}
+                </span>
+              </div>
+              <button onClick={() => setShowHealthDrawer(false)} className="drawer-close-btn">✕</button>
+            </div>
+
+            {liveMetrics ? (
+              <div className="drawer-body">
+                {/* CPU Card */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">⚡ Processor (CPU)</span>
+                    <span className="metric-value">{liveMetrics.cpuPercent}%</span>
+                  </div>
+                  <div className="metric-subtext" title={liveMetrics.cpuModel}>{liveMetrics.cpuModel}</div>
+                  <div className="progress-bar-track">
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${liveMetrics.cpuPercent}%`,
+                        background: liveMetrics.cpuPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : liveMetrics.cpuPercent > 60 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* RAM Card */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">💾 RAM Memory</span>
+                    <span className="metric-value">{liveMetrics.ramPercent}%</span>
+                  </div>
+                  <div className="metric-subtext">{liveMetrics.ramUsedGb} GB used of {liveMetrics.ramTotalGb} GB</div>
+                  <div className="progress-bar-track">
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${liveMetrics.ramPercent}%`,
+                        background: liveMetrics.ramPercent > 85 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #6366f1, #818cf8)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Disk Card */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">💽 Disk Space (C:)</span>
+                    <span className="metric-value">{liveMetrics.diskPercent}%</span>
+                  </div>
+                  <div className="metric-subtext">{liveMetrics.diskFreeGb} GB free of {liveMetrics.diskTotalGb} GB</div>
+                  <div className="progress-bar-track">
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${liveMetrics.diskPercent}%`,
+                        background: liveMetrics.diskPercent > 90 ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #0ea5e9, #38bdf8)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Network Speed Card */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">🌐 Network Traffic</span>
+                  </div>
+                  <div className="network-speed-grid">
+                    <div className="speed-box download">
+                      <span className="speed-label">↓ Download</span>
+                      <span className="speed-val">{liveMetrics.downloadSpeed}</span>
+                    </div>
+                    <div className="speed-box upload">
+                      <span className="speed-label">↑ Upload</span>
+                      <span className="speed-val">{liveMetrics.uploadSpeed}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Battery & System Info */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">🔋 Power & System Status</span>
+                  </div>
+                  <div className="info-rows">
+                    <div className="info-row">
+                      <span>Battery:</span>
+                      <strong>
+                        {liveMetrics.batteryPercent !== null && liveMetrics.batteryPercent !== undefined
+                          ? `${liveMetrics.batteryPercent}% ${liveMetrics.isCharging ? '⚡ (Charging)' : '🔋'}`
+                          : '🔌 Desktop AC Power'}
+                      </strong>
+                    </div>
+                    <div className="info-row">
+                      <span>System Uptime:</span>
+                      <strong>⏱️ {liveMetrics.uptime}</strong>
+                    </div>
+                    {liveMetrics.lastReboot && (
+                      <div className="info-row">
+                        <span>Last Reboot:</span>
+                        <strong style={{ fontSize: '0.78rem' }}>📅 {liveMetrics.lastReboot}</strong>
+                      </div>
+                    )}
+                    <div className="info-row">
+                      <span>OS Platform:</span>
+                      <strong>{liveMetrics.platform}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Identity & Network Card */}
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">👤 Identity & Network Details</span>
+                  </div>
+                  <div className="info-rows">
+                    <div className="info-row">
+                      <span>Domain User:</span>
+                      <strong style={{ color: '#38bdf8' }}>{liveMetrics.loggedUser || 'N/A'}</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>Domain / Host:</span>
+                      <strong>{liveMetrics.domain || 'WORKGROUP'}</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>Public IP (WAN):</span>
+                      <strong style={{ color: '#34d399' }}>🌐 {liveMetrics.publicIp || 'N/A'}</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>Private IP (LAN):</span>
+                      <strong style={{ color: '#a5b4fc' }}>🔌 {liveMetrics.ip || 'N/A'}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1-Click Excel Diagnostic Export Button */}
+                <div style={{ marginTop: '14px', padding: '6px 0' }}>
+                  <button
+                    onClick={() => handleExportSystemReport()}
+                    disabled={isExportingExcel}
+                    className="btn-export-excel-action"
+                  >
+                    {isExportingExcel ? '⏳ Harvesting Telemetry & Exporting Excel...' : '📊 Export Full Diagnostic Report (.xlsx)'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="drawer-loading">
+                <div className="spinner"></div>
+                <p>Connecting to Host Telemetry Stream...</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* System Specs Popup Modal */}
+        {showSpecsModal && hostSystemInfo && (
+          <div style={{
+            position: 'absolute',
+            top: '75px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(129, 140, 248, 0.3)',
+            borderRadius: '16px',
+            padding: '20px 24px',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+            zIndex: 300,
+            minWidth: '340px',
+            color: '#fff',
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#818cf8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🖥️ Host Device Specifications
+              </h3>
+              <button
+                onClick={() => setShowSpecsModal(false)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>🖥️ PC Hostname:</span>
+                <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.hostname || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>👤 Logged-in User:</span>
+                <strong style={{ color: '#38bdf8' }}>{hostSystemInfo.loggedUser || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>🌐 Public IP (WAN):</span>
+                <strong style={{ color: '#34d399' }}>{hostSystemInfo.publicIp || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>🔌 Private IP (LAN):</span>
+                <strong style={{ color: '#a5b4fc' }}>{hostSystemInfo.ip || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>⚡ Processor (CPU):</span>
+                <strong style={{ color: '#f8fafc', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hostSystemInfo.cpu}>
+                  {hostSystemInfo.cpu || 'N/A'}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>💾 RAM Memory:</span>
+                <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.ram || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>📅 Last Reboot:</span>
+                <strong style={{ color: '#f8fafc', fontSize: '0.8rem' }}>{hostSystemInfo.lastReboot || 'N/A'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                <span style={{ color: '#94a3b8' }}>📦 Agent Version:</span>
+                <strong style={{ color: '#818cf8' }}>v{hostSystemInfo.agentVersion || '1.0.0'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>💻 OS Platform:</span>
+                <strong style={{ color: '#f8fafc' }}>{hostSystemInfo.platform || 'N/A'}</strong>
+              </div>
+
+              <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <button
+                  onClick={() => handleExportSystemReport(hostSystemInfo.roomId || targetRoomId || roomId)}
+                  disabled={isExportingExcel}
+                  className="btn-export-excel-action"
+                  style={{ width: '100%', fontSize: '0.82rem', padding: '9px 12px' }}
+                >
+                  {isExportingExcel ? '⏳ Generating Excel Report...' : '📊 Export Full System Report (.xlsx)'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hidden File Input for Actions Menu Upload */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              sendFile(e.target.files[0]);
+              e.target.value = '';
+            }
+          }}
+        />
+
+        {/* Floating Glassmorphic Annotation Toolbar */}
+        {isAnnotating && (
+          <div className="annotation-toolbar">
+            <div className="annotation-toolbar-group">
+              <button
+                onClick={() => setAnnotationTool('laser')}
+                className={`annotate-tool-btn ${annotationTool === 'laser' ? 'active' : ''}`}
+                title="Laser Pointer (Smooth glowing pointer with no permanent mark)"
+              >
+                🔴 Laser
+              </button>
+              <button
+                onClick={() => setAnnotationTool('pen')}
+                className={`annotate-tool-btn ${annotationTool === 'pen' ? 'active' : ''}`}
+                title="Pen (Freehand Drawing)"
+              >
+                ✏️ Pen
+              </button>
+              <button
+                onClick={() => setAnnotationTool('arrow')}
+                className={`annotate-tool-btn ${annotationTool === 'arrow' ? 'active' : ''}`}
+                title="Arrow Pointer (Point to specific buttons or areas)"
+              >
+                ↗️ Arrow
+              </button>
+              <button
+                onClick={() => setAnnotationTool('rect')}
+                className={`annotate-tool-btn ${annotationTool === 'rect' ? 'active' : ''}`}
+                title="Rectangle Box (Highlight sections)"
+              >
+                🔲 Box
+              </button>
+              <button
+                onClick={() => setAnnotationTool('highlighter')}
+                className={`annotate-tool-btn ${annotationTool === 'highlighter' ? 'active' : ''}`}
+                title="Translucent Highlighter"
+              >
+                🖍️ Highlight
+              </button>
+            </div>
+
+            <div className="annotation-divider" />
+
+            {/* Color Palette */}
+            <div className="annotation-toolbar-group color-swatch-list">
+              {['#ef4444', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#ffffff'].map(c => (
+                <button
+                  key={c}
+                  className={`color-swatch ${annotationColor === c ? 'active' : ''}`}
+                  style={{ background: c }}
+                  onClick={() => setAnnotationColor(c)}
+                  title={`Color: ${c}`}
+                />
+              ))}
+            </div>
+
+            <div className="annotation-divider" />
+
+            {/* Stroke Sizes */}
+            <div className="annotation-toolbar-group">
+              {[2, 4, 8].map(s => (
+                <button
+                  key={s}
+                  className={`size-select-btn ${annotationSize === s ? 'active' : ''}`}
+                  onClick={() => setAnnotationSize(s)}
+                  title={`Stroke: ${s}px`}
+                >
+                  {s === 2 ? 'Thin' : s === 4 ? 'Med' : 'Thick'}
+                </button>
+              ))}
+            </div>
+
+            <div className="annotation-divider" />
+
+            {/* Actions: Undo, Clear, Screenshot, Close */}
+            <div className="annotation-toolbar-group">
+              <button
+                onClick={() => setAnnotations(prev => prev.slice(0, -1))}
+                className="btn-annotate-action"
+                disabled={annotations.length === 0}
+                title="Undo last drawing"
+              >
+                ↩️ Undo
+              </button>
+              <button
+                onClick={() => {
+                  setAnnotations([]);
+                  sendControlData({
+                    type: 'annotation-event',
+                    payload: { type: 'clear' }
+                  });
+                }}
+                className="btn-annotate-action danger"
+                disabled={annotations.length === 0}
+                title="Clear all drawings"
+              >
+                🧹 Clear
+              </button>
+              <button
+                onClick={handleCaptureScreenshot}
+                className="btn-annotate-action"
+                title="Download Screenshot with Drawings"
+              >
+                📸 Save
+              </button>
+              <button
+                onClick={() => setIsAnnotating(false)}
+                className="btn-annotate-close"
+                title="Exit Annotation Mode"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div
+          ref={containerRef}
+          className="video-container"
+          tabIndex={0} // Makes container focusable to receive keyboard events
+          onClick={focusControl}
+          onWheel={handleWheel}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onMouseLeave={handleMouseLeave}
+        >
+          {/* Interactive Transparent Annotation & Laser Pointer Canvas */}
+          <canvas
+            ref={annotationCanvasRef}
+            className={`annotation-canvas ${annotationTool === 'laser' && isAnnotating ? 'laser-mode' : ''}`}
+            style={{
+              display: (isAnnotating || annotations.length > 0) ? 'block' : 'none',
+              pointerEvents: isAnnotating ? 'auto' : 'none'
+            }}
+            onMouseDown={handleAnnotationMouseDown}
+            onMouseMove={handleAnnotationMouseMove}
+            onMouseUp={handleAnnotationMouseUp}
+            onMouseLeave={handleAnnotationMouseLeave}
+          />
+
+          {/* Drag & Drop Visual Glow Overlay */}
+          {isDraggingOver && (
+            <div className="file-drop-overlay">
+              <div className="file-drop-card">
+                <div className="file-drop-icon">📥</div>
+                <h3>Drop File to Upload</h3>
+                <p>Streaming directly to remote PC's <strong>Downloads</strong> folder</p>
+              </div>
+            </div>
+          )}
+
+          {/* Zero-Latency Local Virtual Cursor Dot & Pointer */}
+          <div
+            ref={localCursorRef}
+            className="remote-virtual-cursor"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              pointerEvents: 'none',
+              opacity: 0,
+              zIndex: 20,
+              willChange: 'transform'
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.85))' }}>
+              <path d="M4 3L11.5 21L14.5 13.5L22 10.5L4 3Z" fill="#3b82f6" stroke="#ffffff" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            <div className="cursor-pulse-ring" />
+          </div>
+
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            onMouseMove={handleMouseMove}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onDoubleClick={handleDoubleClick}
+            onContextMenu={handleContextMenu}
+            onWheel={handleWheel}
+            style={{
+              objectFit: 'fill',
+              width: '100%',
+              height: '100%',
+              display: (isWebRtcActive || !socketFrame) ? 'block' : 'none',
+              background: '#000'
+            }}
+          />
+
+          {!isWebRtcActive && socketFrame && (
+            <img
+              src={socketFrame}
+              alt="Remote Screen Stream"
               onMouseMove={handleMouseMove}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseLeave}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleContextMenu}
-              onWheel={handleWheel}
               style={{
                 objectFit: 'fill',
                 width: '100%',
                 height: '100%',
-                display: isWebRtcActive ? 'block' : 'none',
+                display: 'block',
+                userSelect: 'none',
                 background: '#000'
               }}
             />
-
-            {(!isWebRtcActive || !remoteStreamRef.current) && socketFrame && (
-              <img
-                src={socketFrame}
-                alt="Remote Screen Stream"
-                onMouseMove={handleMouseMove}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseLeave}
-                onDoubleClick={handleDoubleClick}
-                onContextMenu={handleContextMenu}
-                style={{
-                  objectFit: 'fill',
-                  width: '100%',
-                  height: '100%',
-                  display: 'block',
-                  userSelect: 'none',
-                  background: '#000'
-                }}
-              />
-            )}
-          </div>
+          )}
         </div>
+      </div>
 
       {/* Bidirectional Clipboard Toast Notification Banner */}
       {clipboardToast && (
@@ -4910,7 +5451,7 @@ function App() {
             <strong>{clipboardToast.isSelf ? 'Clipboard Sent to Remote' : 'Clipboard Synced from Remote PC'}</strong>
             <p>{clipboardToast.text}</p>
           </div>
-          <button 
+          <button
             onClick={() => {
               if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(clipboardToast.text);
@@ -4937,8 +5478,8 @@ function App() {
                 </div>
               </div>
             </div>
-            <button 
-              onClick={() => setFileTransfer(null)} 
+            <button
+              onClick={() => setFileTransfer(null)}
               className="btn-file-toast-close"
               title="Dismiss banner"
             >
@@ -4947,12 +5488,12 @@ function App() {
           </div>
 
           <div className="file-progress-track">
-            <div 
-              className="file-progress-fill" 
-              style={{ 
+            <div
+              className="file-progress-fill"
+              style={{
                 width: `${fileTransfer.progress}%`,
-                background: fileTransfer.isComplete 
-                  ? 'linear-gradient(90deg, #10b981 0%, #34d399 100%)' 
+                background: fileTransfer.isComplete
+                  ? 'linear-gradient(90deg, #10b981 0%, #34d399 100%)'
                   : 'linear-gradient(90deg, #38bdf8 0%, #818cf8 100%)'
               }}
             />
@@ -4960,8 +5501,8 @@ function App() {
 
           <div className="file-toast-footer">
             <span style={{ wordBreak: 'break-all', maxWidth: '80%' }}>
-              {fileTransfer.isComplete 
-                ? `✅ Saved: ${fileTransfer.savedPath || 'Downloads'}` 
+              {fileTransfer.isComplete
+                ? `✅ Saved: ${fileTransfer.savedPath || 'Downloads'}`
                 : `Transferring ${fileTransfer.progress}%...`}
             </span>
             <strong>{fileTransfer.progress}%</strong>
@@ -4986,14 +5527,14 @@ function App() {
                   <div>🔗 <strong>Controller will auto-reconnect</strong> with zero extra clicks</div>
                 </div>
                 <div className="reboot-modal-actions">
-                  <button 
-                    onClick={() => setShowRebootModal(false)} 
+                  <button
+                    onClick={() => setShowRebootModal(false)}
                     className="reboot-btn-cancel"
                   >
                     Cancel
                   </button>
-                  <button 
-                    onClick={handleInitiateReboot} 
+                  <button
+                    onClick={handleInitiateReboot}
                     className="reboot-btn-confirm"
                   >
                     🔄 Restart & Auto-Reconnect
@@ -5017,8 +5558,8 @@ function App() {
                 <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 12 }}>
                   Your session will automatically resume the instant the machine boots.
                 </p>
-                <button 
-                  onClick={handleCancelRebootWaiting} 
+                <button
+                  onClick={handleCancelRebootWaiting}
                   className="reboot-btn-cancel"
                   style={{ marginTop: 16, width: '100%' }}
                 >
@@ -5112,6 +5653,184 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Two-Factor Authentication (2FA) Management Modal */}
+      {showMfaModal && (
+        <div className="specs-modal-overlay" onClick={() => setShowMfaModal(false)}>
+          <div className="specs-modal-container" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+            <div className="specs-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.2rem' }}>🛡️</span>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f8fafc' }}>Two-Factor Authentication (2FA)</h3>
+              </div>
+              <button className="specs-modal-close-btn" onClick={() => setShowMfaModal(false)}>✕</button>
+            </div>
+
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {mfaModalError && (
+                <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '10px 14px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                  ⚠️ {mfaModalError}
+                </div>
+              )}
+              {mfaModalSuccess && (
+                <div style={{ background: 'rgba(52, 211, 153, 0.15)', border: '1px solid rgba(52, 211, 153, 0.4)', color: '#6ee7b7', padding: '10px 14px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                  ✅ {mfaModalSuccess}
+                </div>
+              )}
+
+              {/* Step 1: Active 2FA Status Overview */}
+              {mfaModalStep === 'status' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🛡️</div>
+                    <div style={{ color: '#34d399', fontSize: '1rem', fontWeight: 700 }}>2FA Protection Active</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: '6px', lineHeight: 1.5 }}>
+                      Your Administrator account is securely protected with Time-based One-Time Passwords (TOTP).
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                    <button
+                      type="button"
+                      className="tab-btn"
+                      style={{ flex: 1, padding: '10px' }}
+                      onClick={() => handleInitMfaSetup()}
+                    >
+                      🔄 Reconfigure App
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-btn"
+                      style={{ flex: 1, padding: '10px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                      onClick={() => setMfaModalStep('disable')}
+                    >
+                      ✕ Disable 2FA
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: 2FA Setup with QR Code & Secret */}
+              {mfaModalStep === 'setup' && (
+                <form onSubmit={handleConfirmMfaSetup} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.5 }}>
+                    Scan this QR code using <b>Google Authenticator</b> or <b>Microsoft Authenticator</b> on your phone.
+                  </div>
+
+                  {mfaQrCode && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '10px', background: '#ffffff', borderRadius: '12px', width: 'fit-content', margin: '0 auto', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
+                      <img src={mfaQrCode} alt="2FA QR Code" style={{ width: '180px', height: '180px', display: 'block' }} />
+                    </div>
+                  )}
+
+                  {mfaSecret && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: '4px', fontWeight: 600 }}>Manual Secret Key</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          readOnly
+                          className="room-input"
+                          style={{ flex: 1, fontSize: '0.85rem', fontFamily: 'monospace', letterSpacing: '1px', background: 'rgba(0,0,0,0.3)', color: '#38bdf8' }}
+                          value={mfaSecret}
+                        />
+                        <button
+                          type="button"
+                          className="tab-btn"
+                          style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                          onClick={() => {
+                            navigator.clipboard.writeText(mfaSecret);
+                            setMfaCopied(true);
+                            setTimeout(() => setMfaCopied(false), 2000);
+                          }}
+                        >
+                          {mfaCopied ? '✓ Copied' : '📋 Copy'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#f8fafc', marginBottom: '6px', fontWeight: 600 }}>Enter 6-Digit Code from App *</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      className="room-input"
+                      style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontSize: '1.4rem', letterSpacing: '6px', fontWeight: 700, color: '#38bdf8' }}
+                      placeholder="000000"
+                      value={mfaConfirmCode}
+                      onChange={e => setMfaConfirmCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className="tab-btn"
+                      style={{ padding: '8px 16px' }}
+                      onClick={() => setShowMfaModal(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="primary-btn"
+                      style={{ padding: '8px 20px', background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                      disabled={mfaModalLoading || mfaConfirmCode.length < 6}
+                    >
+                      {mfaModalLoading ? 'Activating...' : '🛡️ Confirm & Enable 2FA'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Step 3: Disable 2FA Form */}
+              {mfaModalStep === 'disable' && (
+                <form onSubmit={handleDisableMfa} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ color: '#fca5a5', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                    To disable Two-Factor Authentication, please enter your current account password to confirm your identity.
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#94a3b8', marginBottom: '6px', fontWeight: 600 }}>Current Password *</label>
+                    <input
+                      type="password"
+                      className="room-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                      placeholder="Enter current password"
+                      value={mfaDisablePassword}
+                      onChange={e => setMfaDisablePassword(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className="tab-btn"
+                      style={{ padding: '8px 16px' }}
+                      onClick={() => setMfaModalStep('status')}
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      style={{ padding: '8px 20px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                      disabled={mfaModalLoading || !mfaDisablePassword}
+                    >
+                      {mfaModalLoading ? 'Disabling...' : 'Confirm Disable 2FA'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}

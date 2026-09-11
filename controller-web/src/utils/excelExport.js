@@ -137,16 +137,17 @@ export function exportRegisteredClientsToExcel(clients = []) {
     'Phone / WhatsApp': c.phone || 'N/A',
     'Email Address': c.email || 'N/A',
     'Desktops Required': c.desktopCount || '1-5 PCs',
+    'Approval Status': String(c.status || 'approved').toUpperCase(),
     'Role': c.role || 'Client',
-    'Registration Date': c.registeredAt ? new Date(c.registeredAt).toLocaleString() : 'N/A'
+    'Registration Date': c.registeredAt ? new Date(c.registeredAt).toLocaleString() : (c.createdAt ? new Date(c.createdAt).toLocaleString() : 'N/A')
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [
-    { 'S.No': 1, 'Client Name': 'No registrations yet', 'Company / Org': '', 'Phone / WhatsApp': '', 'Email Address': '', 'Desktops Required': '', 'Role': '', 'Registration Date': '' }
+    { 'S.No': 1, 'Client Name': 'No registrations yet', 'Company / Org': '', 'Phone / WhatsApp': '', 'Email Address': '', 'Desktops Required': '', 'Approval Status': '', 'Role': '', 'Registration Date': '' }
   ]);
   ws['!cols'] = [
     { wch: 8 }, { wch: 22 }, { wch: 24 }, { wch: 20 },
-    { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 22 }
+    { wch: 28 }, { wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 22 }
   ];
 
   XLSX.utils.book_append_sheet(workbook, ws, 'Registered Clients');
