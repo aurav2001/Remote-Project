@@ -307,11 +307,12 @@ class InputHelper {
             keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
             ReleaseAllModifiers();
 
-            Thread.Sleep(100);
+            Thread.Sleep(150);
             SyncDesktop();
-            PressKeyWithScan(VK_ESCAPE);
-            Thread.Sleep(50);
             PressKeyWithScan(VK_SPACE);
+            Thread.Sleep(150);
+            PressKeyWithScan(VK_ESCAPE);
+            Thread.Sleep(150);
 
             // Click middle of screen to ensure password input focus
             int screenW = GetSystemMetrics(0);
@@ -323,6 +324,8 @@ class InputHelper {
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 
             Console.WriteLine("SAS_UNLOCK_DISPATCHED");
+            Thread.Sleep(250);
+            CaptureDesktopFrame();
         } catch (Exception ex) {
             Console.WriteLine("SAS_ERROR: " + ex.Message);
         }
@@ -333,25 +336,13 @@ class InputHelper {
         try {
             SyncDesktop();
 
-            // 1. Wake screen and clear lock screen curtain / previous error dialogs
-            PressKeyWithScan(VK_ESCAPE);
-            Thread.Sleep(50);
+            // 1. Wake screen and clear lock screen curtain / dismiss screensaver
             PressKeyWithScan(VK_SPACE);
-            Thread.Sleep(150);
+            Thread.Sleep(200);
+            PressKeyWithScan(VK_ESCAPE);
+            Thread.Sleep(200);
 
-            // 2. Also simulate Ctrl+Alt+Del in case SAS policy requires it
-            try { SendSAS(false); } catch {}
-            keybd_event(VK_CONTROL, 0x1D, 0, 0);
-            keybd_event(VK_MENU, 0x38, 0, 0);
-            keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
-            Thread.Sleep(30);
-            keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_MENU, 0x38, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
-            ReleaseAllModifiers();
-            Thread.Sleep(150);
-
-            // 3. Click in center of screen where Windows Credential Provider PIN input box is located
+            // 2. Click in center of screen where Windows Credential Provider PIN/Password input box is located
             SyncDesktop();
             int screenW = GetSystemMetrics(0);
             int screenH = GetSystemMetrics(1);
@@ -362,30 +353,32 @@ class InputHelper {
             SetCursorPos(pinX, pinY);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-            Thread.Sleep(100);
+            Thread.Sleep(150);
 
-            // 4. Clear any existing characters in PIN box (Ctrl+A then Backspaces)
+            // 3. Clear any existing characters in PIN box (Ctrl+A then Backspaces)
             PressKeyCombo(VK_CONTROL, VK_A);
-            Thread.Sleep(30);
+            Thread.Sleep(40);
             PressKeyWithScan(VK_BACK);
             Thread.Sleep(20);
             for (int b = 0; b < 10; b++) {
                 PressKeyWithScan(VK_BACK);
                 Thread.Sleep(10);
             }
-            Thread.Sleep(50);
+            Thread.Sleep(60);
 
-            // 5. Type each PIN character
+            // 4. Type each PIN character
             TypeText(pin);
-            Thread.Sleep(100);
+            Thread.Sleep(120);
 
-            // 6. Submit Enter key
+            // 5. Submit Enter key
             SyncDesktop();
             PressKeyWithScan(VK_RETURN);
             Console.WriteLine("PIN_UNLOCK_COMPLETED");
 
-            // 7. Capture immediate frame for fast visual feedback
+            // 6. Capture immediate frames for fast visual feedback
             Thread.Sleep(250);
+            CaptureDesktopFrame();
+            Thread.Sleep(500);
             CaptureDesktopFrame();
         } catch (Exception ex) {
             Console.WriteLine("PIN_UNLOCK_ERROR: " + ex.Message);
@@ -415,20 +408,28 @@ class InputHelper {
 
             using (Bitmap bmp = new Bitmap(screenW, screenH, PixelFormat.Format32bppArgb)) {
                 using (Graphics g = Graphics.FromImage(bmp)) {
-                    IntPtr hdcDest = g.GetHdc();
-                    IntPtr hdcSrc = GetDC(IntPtr.Zero);
-                    bool needDelete = false;
-                    if (hdcSrc == IntPtr.Zero) {
-                        hdcSrc = CreateDC("DISPLAY", null, null, IntPtr.Zero);
-                        needDelete = true;
+                    bool copied = false;
+                    try {
+                        g.CopyFromScreen(0, 0, 0, 0, new Size(screenW, screenH), CopyPixelOperation.SourceCopy);
+                        copied = true;
+                    } catch {}
+
+                    if (!copied) {
+                        IntPtr hdcDest = g.GetHdc();
+                        IntPtr hdcSrc = GetDC(IntPtr.Zero);
+                        bool needDelete = false;
+                        if (hdcSrc == IntPtr.Zero) {
+                            hdcSrc = CreateDC("DISPLAY", null, null, IntPtr.Zero);
+                            needDelete = true;
+                        }
+                        BitBlt(hdcDest, 0, 0, screenW, screenH, hdcSrc, 0, 0, SRCCOPY);
+                        if (needDelete) {
+                            DeleteDC(hdcSrc);
+                        } else {
+                            ReleaseDC(IntPtr.Zero, hdcSrc);
+                        }
+                        g.ReleaseHdc(hdcDest);
                     }
-                    BitBlt(hdcDest, 0, 0, screenW, screenH, hdcSrc, 0, 0, SRCCOPY);
-                    if (needDelete) {
-                        DeleteDC(hdcSrc);
-                    } else {
-                        ReleaseDC(IntPtr.Zero, hdcSrc);
-                    }
-                    g.ReleaseHdc(hdcDest);
                 }
 
                 Bitmap outputBmp = bmp;

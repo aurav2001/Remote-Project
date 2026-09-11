@@ -11,6 +11,9 @@ app.commandLine.appendSwitch('high-dpi-support', '1');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+app.commandLine.appendSwitch('enable-usermedia-screen-capturing');
+app.commandLine.appendSwitch('auto-select-desktop-capture-source', 'Entire screen');
 app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay');
 app.commandLine.appendSwitch('enable-features', 'VaapiVideoEncoder,VaapiVideoDecoder,WebRtcHWDecoding,WebRtcHWEncoding');
 
@@ -571,13 +574,21 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     try {
-      session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-        desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-          callback({ video: sources[0] });
-        }).catch(() => {
-          callback({});
+      if (session.defaultSession) {
+        session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+          callback(true);
         });
-      });
+        session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+          return true;
+        });
+        session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+          desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+            callback({ video: sources[0] });
+          }).catch(() => {
+            callback({});
+          });
+        });
+      }
     } catch (e) { }
 
     startInputHelper();

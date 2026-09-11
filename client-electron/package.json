@@ -39,13 +39,13 @@
     "win": {
       "target": "nsis",
       "icon": "icon.png",
-      "requestedExecutionLevel": "requireAdministrator"
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": true,
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
-      "perMachine": true
+      "perMachine": false
     }
   }
 }
