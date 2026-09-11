@@ -127,8 +127,25 @@ function startInputHelper() {
     console.error('Failed to start input helper process:', err);
   });
 
+  let helperStdoutBuf = '';
   inputHelperProcess.stdout.on('data', (data) => {
-    console.log(`[InputHelper Stdout]: ${data.toString().trim()}`);
+    helperStdoutBuf += data.toString();
+    const lines = helperStdoutBuf.split('\n');
+    helperStdoutBuf = lines.pop(); // keep last partial chunk
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (line.startsWith('FRAME_JPG ')) {
+        const b64 = line.substring(10).trim();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('lock-screen-frame', {
+            frame: 'data:image/jpeg;base64,' + b64
+          });
+        }
+      } else {
+        console.log(`[InputHelper Stdout]: ${line}`);
+      }
+    }
   });
 
   inputHelperProcess.stderr.on('data', (data) => {
@@ -577,6 +594,7 @@ if (!gotTheLock) {
 }
 
 let isHostScreenLocked = false;
+let lockCaptureInterval = null;
 
 function setupPowerMonitor() {
   try {
@@ -589,11 +607,24 @@ function setupPowerMonitor() {
         mainWindow.webContents.send('host-lock-status', { isLocked: true });
       }
       sendInputHelperCommand('syncdesktop');
+
+      // Start live lock screen frame capture loop
+      if (lockCaptureInterval) clearInterval(lockCaptureInterval);
+      sendInputHelperCommand('captureframe');
+      lockCaptureInterval = setInterval(() => {
+        if (isHostScreenLocked) {
+          sendInputHelperCommand('captureframe');
+        }
+      }, 250);
     });
 
     powerMonitor.on('unlock-screen', () => {
       console.log('[PowerMonitor]: Windows screen UNLOCKED (Interactive user desktop active)');
       isHostScreenLocked = false;
+      if (lockCaptureInterval) {
+        clearInterval(lockCaptureInterval);
+        lockCaptureInterval = null;
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('host-lock-status', { isLocked: false });
       }
@@ -1268,6 +1299,12 @@ ipcMain.on('control-event', (event, data) => {
     } else if (type === 'keyup') {
       if (keyCode) {
         sendInputHelperCommand(`keyup ${keyCode}`);
+      }
+    } else if (type === 'unlockwithpin') {
+      const pin = data.pin || '';
+      console.log('[Main Process]: Executing native unlockwithpin');
+      if (pin) {
+        sendInputHelperCommand(`unlockwithpin ${pin}`);
       }
     } else if (type === 'type' || type === 'typepin' || type === 'text') {
       const text = data.text || data.pin || '';

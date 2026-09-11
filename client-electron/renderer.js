@@ -1019,6 +1019,25 @@ if (window.electronAPI && window.electronAPI.onHostLockStatus) {
   });
 }
 
+// Live Lock Screen Frame Streamer
+if (window.electronAPI && window.electronAPI.onLockScreenFrame) {
+  window.electronAPI.onLockScreenFrame((data) => {
+    if (data && data.frame) {
+      if (socket && socket.connected && currentRoomId) {
+        socket.emit('screen-frame', { roomId: currentRoomId, frame: data.frame });
+      }
+      if (activeDataChannel && activeDataChannel.readyState === 'open') {
+        try {
+          activeDataChannel.send(JSON.stringify({
+            type: 'screen-frame',
+            frame: data.frame
+          }));
+        } catch (e) { }
+      }
+    }
+  });
+}
+
 // Low-Latency & High-Clarity WebRTC SDP & Sender Bitrate Optimizers
 function optimizeSdp(sdp) {
   if (!sdp) return sdp;

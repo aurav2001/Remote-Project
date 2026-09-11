@@ -333,29 +333,16 @@ function App() {
     const pin = (remotePinInput || '').trim();
     if (!pin) return;
 
-    // 1. Wake screen and focus PIN field
-    handleTriggerUnlock();
+    sendControlData({
+      type: 'unlockwithpin',
+      pin
+    });
 
-    // 2. Type PIN characters into credential provider
-    setTimeout(() => {
-      sendControlData({
-        type: 'typepin',
-        text: pin
-      });
-
-      // 3. Submit Enter key
-      setTimeout(() => {
-        sendControlData({
-          type: 'enter'
-        });
-        setClipboardToast({
-          text: `🚀 PIN submitted to Remote PC!`,
-          isSelf: true
-        });
-        setTimeout(() => setClipboardToast(null), 3000);
-      }, 150 + (pin.length * 40));
-    }, 250);
-
+    setClipboardToast({
+      text: '🔑 Submitting PIN to Windows Lock Screen...',
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 3000);
     setRemotePinInput('');
   };
 
@@ -2218,6 +2205,8 @@ function App() {
           } else if (data.type === 'host-lock-status') {
             console.log('[Controller]: Remote Host Lock Status:', data.isLocked);
             setIsRemoteLocked(!!data.isLocked);
+          } else if (data.type === 'screen-frame' && data.frame) {
+            setSocketFrame(data.frame);
           }
         } catch (err) { }
       };
@@ -5568,12 +5557,12 @@ function App() {
               objectFit: 'fill',
               width: '100%',
               height: '100%',
-              display: (isWebRtcActive || !socketFrame) ? 'block' : 'none',
+              display: (!isRemoteLocked && (isWebRtcActive || !socketFrame)) ? 'block' : 'none',
               background: '#000'
             }}
           />
 
-          {!isWebRtcActive && socketFrame && (
+          {((!isWebRtcActive && socketFrame) || (isRemoteLocked && socketFrame)) && (
             <img
               src={socketFrame}
               alt="Remote Screen Stream"

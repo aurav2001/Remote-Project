@@ -4,6 +4,9 @@ using System.Globalization;
 using System.Diagnostics;
 using System.Threading;
 using System.Text;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 
 class InputHelper {
     [DllImport("user32.dll", SetLastError = true)]
@@ -33,10 +36,20 @@ class InputHelper {
     [DllImport("user32.dll", SetLastError = true)]
     static extern bool CloseDesktop(IntPtr hDesktop);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight, IntPtr hdcSrc, int nXSrc, int nYSrc, uint dwRop);
+
     [DllImport("sas.dll", SetLastError = true)]
     static extern void SendSAS(bool asUser);
 
     const uint DESKTOP_ALL_ACCESS = 0x01FF;
+    const uint SRCCOPY = 0x00CC0020;
 
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
@@ -112,7 +125,7 @@ class InputHelper {
             byte scan = (byte)MapVirtualKey((uint)vk, 0);
             uint ext = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
             keybd_event(vk, scan, ext, 0);
-            Thread.Sleep(25);
+            Thread.Sleep(30);
             keybd_event(vk, scan, ext | KEYEVENTF_KEYUP, 0);
         } catch {}
     }
@@ -127,7 +140,7 @@ class InputHelper {
                 uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                 keybd_event(vk, scan, flags, 0);
             }
-            Thread.Sleep(25);
+            Thread.Sleep(30);
             for (int i = keys.Length - 1; i >= 0; i--) {
                 byte vk = keys[i];
                 byte scan = (byte)MapVirtualKey((uint)vk, 0);
@@ -144,21 +157,18 @@ class InputHelper {
     static void TypeChar(char c) {
         try {
             SyncDesktop();
-            // 1. If it's a standard digit '0'-'9' (e.g. for PINs)
             if (c >= '0' && c <= '9') {
                 byte vk = (byte)(0x30 + (c - '0'));
                 byte scan = (byte)MapVirtualKey((uint)vk, 0);
                 keybd_event(vk, scan, 0, 0);
-                Thread.Sleep(20);
+                Thread.Sleep(30);
                 keybd_event(vk, scan, KEYEVENTF_KEYUP, 0);
-            }
-            // 2. Letters and symbols via Unicode & Scan code
-            else {
+            } else {
                 keybd_event(0, (byte)c, KEYEVENTF_UNICODE, 0);
-                Thread.Sleep(20);
+                Thread.Sleep(30);
                 keybd_event(0, (byte)c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0);
             }
-            Thread.Sleep(15);
+            Thread.Sleep(20);
         } catch {}
     }
 
@@ -178,12 +188,11 @@ class InputHelper {
     static void TriggerSasUnlock() {
         try {
             SyncDesktop();
-            // 1. Try Windows native SendSAS
             try {
                 SendSAS(false);
             } catch {}
 
-            // 2. Simulate Secure Attention Sequence (Ctrl + Alt + Delete) with exact hardware scan codes
+            // Secure Attention Sequence
             keybd_event(VK_CONTROL, 0x1D, 0, 0);
             keybd_event(VK_MENU, 0x38, 0, 0);
             keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
@@ -193,16 +202,107 @@ class InputHelper {
             keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
             ReleaseAllModifiers();
 
-            // 3. Dismiss lock screen wallpaper & focus PIN box
             Thread.Sleep(100);
             SyncDesktop();
             PressKeyWithScan(VK_SPACE);
             Thread.Sleep(50);
             PressKeyWithScan(VK_RETURN);
-            
+
+            // Click middle of screen to ensure password input focus
+            int screenW = GetSystemMetrics(0);
+            int screenH = GetSystemMetrics(1);
+            if (screenW <= 0) screenW = 1920;
+            if (screenH <= 0) screenH = 1080;
+            SetCursorPos(screenW / 2, (int)(screenH * 0.60));
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+
             Console.WriteLine("SAS_UNLOCK_DISPATCHED");
         } catch (Exception ex) {
             Console.WriteLine("SAS_ERROR: " + ex.Message);
+        }
+    }
+
+    static void UnlockWithPin(string pin) {
+        if (string.IsNullOrEmpty(pin)) return;
+        try {
+            SyncDesktop();
+            // 1. Wake screen and dismiss lock cover
+            TriggerSasUnlock();
+            Thread.Sleep(250);
+
+            // 2. Click in center where PIN field is located
+            SyncDesktop();
+            int screenW = GetSystemMetrics(0);
+            int screenH = GetSystemMetrics(1);
+            if (screenW <= 0) screenW = 1920;
+            if (screenH <= 0) screenH = 1080;
+            SetCursorPos(screenW / 2, (int)(screenH * 0.60));
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            Thread.Sleep(150);
+
+            // 3. Type each character
+            TypeText(pin);
+            Thread.Sleep(150);
+
+            // 4. Press Enter to submit
+            SyncDesktop();
+            PressKeyWithScan(VK_RETURN);
+            Console.WriteLine("PIN_UNLOCK_COMPLETED");
+        } catch (Exception ex) {
+            Console.WriteLine("PIN_UNLOCK_ERROR: " + ex.Message);
+        }
+    }
+
+    private static ImageCodecInfo GetEncoder(ImageFormat format) {
+        ImageCodecInfo[] codecs = ImageCodecInfo.GetImageDecoders();
+        foreach (ImageCodecInfo codec in codecs) {
+            if (codec.FormatID == format.Guid) {
+                return codec;
+            }
+        }
+        return null;
+    }
+
+    static void CaptureDesktopFrame() {
+        try {
+            SyncDesktop();
+            int screenW = GetSystemMetrics(0);
+            int screenH = GetSystemMetrics(1);
+            if (screenW <= 0) screenW = 1920;
+            if (screenH <= 0) screenH = 1080;
+
+            int targetW = screenW > 1280 ? 1280 : screenW;
+            int targetH = (int)Math.Round((double)targetW * screenH / screenW);
+
+            using (Bitmap bmp = new Bitmap(screenW, screenH, PixelFormat.Format32bppArgb)) {
+                using (Graphics g = Graphics.FromImage(bmp)) {
+                    IntPtr hdcDest = g.GetHdc();
+                    IntPtr hdcSrc = GetDC(IntPtr.Zero);
+                    BitBlt(hdcDest, 0, 0, screenW, screenH, hdcSrc, 0, 0, SRCCOPY);
+                    ReleaseDC(IntPtr.Zero, hdcSrc);
+                    g.ReleaseHdc(hdcDest);
+                }
+
+                using (Bitmap scaled = new Bitmap(targetW, targetH)) {
+                    using (Graphics gScaled = Graphics.FromImage(scaled)) {
+                        gScaled.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+                        gScaled.DrawImage(bmp, 0, 0, targetW, targetH);
+                    }
+
+                    using (MemoryStream ms = new MemoryStream()) {
+                        ImageCodecInfo jpgEncoder = GetEncoder(ImageFormat.Jpeg);
+                        EncoderParameters myEncoderParameters = new EncoderParameters(1);
+                        myEncoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 65L);
+                        scaled.Save(ms, jpgEncoder, myEncoderParameters);
+                        string b64 = Convert.ToBase64String(ms.ToArray());
+                        Console.WriteLine("FRAME_JPG " + b64);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            Console.WriteLine("CAPTURE_ERROR: " + ex.Message);
         }
     }
 
@@ -220,7 +320,14 @@ class InputHelper {
                 // Re-sync desktop before processing every input command
                 SyncDesktop();
 
-                if (command == "setdisplaybounds" && parts.Length >= 5) {
+                if (command == "captureframe") {
+                    CaptureDesktopFrame();
+                }
+                else if (command == "unlockwithpin" && parts.Length >= 2) {
+                    string pin = line.Substring(parts[0].Length).Trim();
+                    UnlockWithPin(pin);
+                }
+                else if (command == "setdisplaybounds" && parts.Length >= 5) {
                     currentDisplayX = int.Parse(parts[1]);
                     currentDisplayY = int.Parse(parts[2]);
                     currentDisplayW = int.Parse(parts[3]);
@@ -229,8 +336,8 @@ class InputHelper {
                 else if (command == "movenorm" && parts.Length >= 3) {
                     float nx = float.Parse(parts[1], CultureInfo.InvariantCulture);
                     float ny = float.Parse(parts[2], CultureInfo.InvariantCulture);
-                    int screenW = GetSystemMetrics(0); // Primary Screen Width
-                    int screenH = GetSystemMetrics(1); // Primary Screen Height
+                    int screenW = GetSystemMetrics(0);
+                    int screenH = GetSystemMetrics(1);
                     if (screenW <= 0) screenW = 1920;
                     if (screenH <= 0) screenH = 1080;
 

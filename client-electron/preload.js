@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHostLockStatus: (callback) => {
     ipcRenderer.on('host-lock-status', (event, data) => callback(data));
   },
+  onLockScreenFrame: (callback) => {
+    ipcRenderer.on('lock-screen-frame', (event, data) => callback(data));
+  },
   getLockStatus: () => ipcRenderer.invoke('get-lock-status'),
   triggerSasUnlock: () => ipcRenderer.invoke('trigger-sas-unlock')
 });
