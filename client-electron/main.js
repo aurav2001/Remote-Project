@@ -1306,6 +1306,9 @@ ipcMain.on('control-event', (event, data) => {
       if (pin) {
         sendInputHelperCommand(`unlockwithpin ${pin}`);
       }
+    } else if (type === 'trigger-sas-unlock' || type === 'wake-lock-screen' || type === 'unlock-screen') {
+      console.log('[Main Process]: Executing trigger-sas-unlock / wake-lock-screen');
+      sendInputHelperCommand('shortcut unlock');
     } else if (type === 'type' || type === 'typepin' || type === 'text') {
       const text = data.text || data.pin || '';
       if (text) {

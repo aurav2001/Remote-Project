@@ -1787,13 +1787,23 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Relay Input Control Events (mouse movement, click, keyboard press)
-  // These go from controller -> host
+  // Relay Host Lock Status (host -> controller)
+  socket.on('host-lock-status', (data) => {
+    const targetRoom = String(data?.roomId || socket.roomId || '').trim();
+    if (targetRoom && data) {
+      socket.to(targetRoom).emit('host-lock-status', data);
+    }
+  });
+
+  // Relay Input Control Events (mouse movement, click, keyboard press, unlockwithpin)
+  // Bidirectional: controller -> host, and host notifications -> controller
   socket.on('control-event', (data) => {
     const roomId = data?.roomId || socket.roomId;
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
-      if (room.host) {
+      if (socket.id === room.host && room.controller) {
+        io.to(room.controller).emit('control-event', data);
+      } else if (room.host) {
         io.to(room.host).emit('control-event', data);
       } else {
         socket.to(roomId).emit('control-event', data);

@@ -1003,17 +1003,21 @@ if (window.electronAPI && window.electronAPI.onHostLockStatus) {
     console.log('[Host]: Lock status changed:', data);
     const lockPayload = {
       type: 'host-lock-status',
-      isLocked: !!data?.isLocked
+      isLocked: !!data?.isLocked,
+      roomId: roomId
     };
     if (activeDataChannel && activeDataChannel.readyState === 'open') {
       try {
         activeDataChannel.send(JSON.stringify(lockPayload));
       } catch (e) { }
     }
-    if (socket && socket.connected && currentRoomId) {
-      socket.emit('data-channel-fallback', {
-        roomId: currentRoomId,
-        message: lockPayload
+    if (socket && socket.connected && roomId) {
+      socket.emit('host-lock-status', lockPayload);
+      socket.emit('control-event', lockPayload);
+    }
+    if (!data?.isLocked && localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = true;
       });
     }
   });
@@ -1023,8 +1027,8 @@ if (window.electronAPI && window.electronAPI.onHostLockStatus) {
 if (window.electronAPI && window.electronAPI.onLockScreenFrame) {
   window.electronAPI.onLockScreenFrame((data) => {
     if (data && data.frame) {
-      if (socket && socket.connected && currentRoomId) {
-        socket.emit('screen-frame', { roomId: currentRoomId, frame: data.frame });
+      if (socket && socket.connected && roomId) {
+        socket.emit('screen-frame', { roomId: roomId, frame: data.frame });
       }
       if (activeDataChannel && activeDataChannel.readyState === 'open') {
         try {

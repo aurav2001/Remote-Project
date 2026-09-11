@@ -321,8 +321,15 @@ function App() {
         dataChannelRef.current.send(JSON.stringify({ type: 'trigger-sas-unlock' }));
       } catch (e) {}
     }
+    if (socketRef.current && socketRef.current.connected) {
+      const room = activeRoomIdRef.current || targetRoomId.trim();
+      socketRef.current.emit('control-event', {
+        type: 'trigger-sas-unlock',
+        roomId: room
+      });
+    }
     setClipboardToast({
-      text: '🔑 Sent Unlock / Ctrl+Alt+Del signal to remote PC',
+      text: '🔑 Sent Wake Screen signal to remote PC',
       isSelf: true
     });
     setTimeout(() => setClipboardToast(null), 3000);
@@ -337,6 +344,15 @@ function App() {
       type: 'unlockwithpin',
       pin
     });
+
+    if (socketRef.current && socketRef.current.connected) {
+      const room = activeRoomIdRef.current || targetRoomId.trim();
+      socketRef.current.emit('control-event', {
+        type: 'unlockwithpin',
+        pin,
+        roomId: room
+      });
+    }
 
     setClipboardToast({
       text: '🔑 Submitting PIN to Windows Lock Screen...',
@@ -1905,9 +1921,9 @@ function App() {
       }
     });
 
-    // Receive Hybrid Canvas JPEG Frame Stream Fallback (only used when WebRTC P2P is inactive)
+    // Receive Screen Frame Stream (handles both fallback and live lock screen stream)
     socket.on('screen-frame', ({ frame }) => {
-      if (frame && !isWebRtcActiveRef.current) {
+      if (frame) {
         setSocketFrame(frame);
         setStatus('connected');
       }
@@ -1923,7 +1939,24 @@ function App() {
     // Receive host lock status via signaling fallback
     socket.on('host-lock-status', (data) => {
       if (data) {
-        setIsRemoteLocked(!!data.isLocked);
+        const locked = !!data.isLocked;
+        console.log('[Controller]: Received host-lock-status:', locked);
+        setIsRemoteLocked(locked);
+        if (!locked) {
+          setSocketFrame(null);
+        }
+      }
+    });
+
+    // Receive host control-event (e.g. host-lock-status relay)
+    socket.on('control-event', (data) => {
+      if (data && data.type === 'host-lock-status') {
+        const locked = !!data.isLocked;
+        console.log('[Controller]: Received host-lock-status via control-event:', locked);
+        setIsRemoteLocked(locked);
+        if (!locked) {
+          setSocketFrame(null);
+        }
       }
     });
 
@@ -2203,8 +2236,12 @@ function App() {
           } else if (data.type === 'system-diagnostics-response') {
             handleReceiveDiagnosticsReport(data);
           } else if (data.type === 'host-lock-status') {
-            console.log('[Controller]: Remote Host Lock Status:', data.isLocked);
-            setIsRemoteLocked(!!data.isLocked);
+            console.log('[Controller]: Remote Host Lock Status via DataChannel:', data.isLocked);
+            const locked = !!data.isLocked;
+            setIsRemoteLocked(locked);
+            if (!locked) {
+              setSocketFrame(null);
+            }
           } else if (data.type === 'screen-frame' && data.frame) {
             setSocketFrame(data.frame);
           }

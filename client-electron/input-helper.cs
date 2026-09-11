@@ -125,7 +125,7 @@ class InputHelper {
             byte scan = (byte)MapVirtualKey((uint)vk, 0);
             uint ext = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
             keybd_event(vk, scan, ext, 0);
-            Thread.Sleep(30);
+            Thread.Sleep(25);
             keybd_event(vk, scan, ext | KEYEVENTF_KEYUP, 0);
         } catch {}
     }
@@ -140,7 +140,7 @@ class InputHelper {
                 uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
                 keybd_event(vk, scan, flags, 0);
             }
-            Thread.Sleep(30);
+            Thread.Sleep(25);
             for (int i = keys.Length - 1; i >= 0; i--) {
                 byte vk = keys[i];
                 byte scan = (byte)MapVirtualKey((uint)vk, 0);
@@ -158,17 +158,34 @@ class InputHelper {
         try {
             SyncDesktop();
             if (c >= '0' && c <= '9') {
-                byte vk = (byte)(0x30 + (c - '0'));
+                byte vk = (byte)c;
                 byte scan = (byte)MapVirtualKey((uint)vk, 0);
                 keybd_event(vk, scan, 0, 0);
-                Thread.Sleep(30);
+                Thread.Sleep(25);
                 keybd_event(vk, scan, KEYEVENTF_KEYUP, 0);
+            } else if (c >= 'a' && c <= 'z') {
+                byte vk = (byte)(c - 'a' + 0x41);
+                byte scan = (byte)MapVirtualKey((uint)vk, 0);
+                keybd_event(vk, scan, 0, 0);
+                Thread.Sleep(25);
+                keybd_event(vk, scan, KEYEVENTF_KEYUP, 0);
+            } else if (c >= 'A' && c <= 'Z') {
+                byte vk = (byte)c;
+                byte scan = (byte)MapVirtualKey((uint)vk, 0);
+                byte shiftScan = (byte)MapVirtualKey((uint)VK_SHIFT, 0);
+                keybd_event(VK_SHIFT, shiftScan, 0, 0);
+                Thread.Sleep(15);
+                keybd_event(vk, scan, 0, 0);
+                Thread.Sleep(25);
+                keybd_event(vk, scan, KEYEVENTF_KEYUP, 0);
+                Thread.Sleep(15);
+                keybd_event(VK_SHIFT, shiftScan, KEYEVENTF_KEYUP, 0);
             } else {
                 keybd_event(0, (byte)c, KEYEVENTF_UNICODE, 0);
-                Thread.Sleep(30);
+                Thread.Sleep(25);
                 keybd_event(0, (byte)c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0);
             }
-            Thread.Sleep(20);
+            Thread.Sleep(15);
         } catch {}
     }
 
@@ -213,7 +230,7 @@ class InputHelper {
             int screenH = GetSystemMetrics(1);
             if (screenW <= 0) screenW = 1920;
             if (screenH <= 0) screenH = 1080;
-            SetCursorPos(screenW / 2, (int)(screenH * 0.60));
+            SetCursorPos(screenW / 2, (int)(screenH * 0.58));
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 
@@ -227,29 +244,43 @@ class InputHelper {
         if (string.IsNullOrEmpty(pin)) return;
         try {
             SyncDesktop();
-            // 1. Wake screen and dismiss lock cover
-            TriggerSasUnlock();
-            Thread.Sleep(250);
+            // 1. Wake screen and clear lock screen curtain / previous error dialogs
+            PressKeyWithScan(VK_ESCAPE);
+            Thread.Sleep(60);
+            PressKeyWithScan(VK_SPACE);
+            Thread.Sleep(200);
 
-            // 2. Click in center where PIN field is located
+            // 2. Click in center of screen where Windows Credential Provider PIN input box is located
             SyncDesktop();
             int screenW = GetSystemMetrics(0);
             int screenH = GetSystemMetrics(1);
             if (screenW <= 0) screenW = 1920;
             if (screenH <= 0) screenH = 1080;
-            SetCursorPos(screenW / 2, (int)(screenH * 0.60));
+            int pinX = screenW / 2;
+            int pinY = (int)(screenH * 0.58);
+            SetCursorPos(pinX, pinY);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-            Thread.Sleep(150);
+            Thread.Sleep(100);
 
-            // 3. Type each character
+            // 3. Clear any existing characters in PIN box (Ctrl+A then Backspace)
+            PressKeyCombo(VK_CONTROL, VK_A);
+            Thread.Sleep(30);
+            PressKeyWithScan(VK_BACK);
+            Thread.Sleep(50);
+
+            // 4. Type each PIN character
             TypeText(pin);
-            Thread.Sleep(150);
+            Thread.Sleep(100);
 
-            // 4. Press Enter to submit
+            // 5. Submit Enter key
             SyncDesktop();
             PressKeyWithScan(VK_RETURN);
             Console.WriteLine("PIN_UNLOCK_COMPLETED");
+
+            // 6. Capture frame immediately so controller gets instant visual feedback
+            Thread.Sleep(250);
+            CaptureDesktopFrame();
         } catch (Exception ex) {
             Console.WriteLine("PIN_UNLOCK_ERROR: " + ex.Message);
         }
@@ -285,19 +316,29 @@ class InputHelper {
                     g.ReleaseHdc(hdcDest);
                 }
 
-                using (Bitmap scaled = new Bitmap(targetW, targetH)) {
+                Bitmap outputBmp = bmp;
+                Bitmap scaled = null;
+                if (targetW != screenW || targetH != screenH) {
+                    scaled = new Bitmap(targetW, targetH);
                     using (Graphics gScaled = Graphics.FromImage(scaled)) {
                         gScaled.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
                         gScaled.DrawImage(bmp, 0, 0, targetW, targetH);
                     }
+                    outputBmp = scaled;
+                }
 
+                try {
                     using (MemoryStream ms = new MemoryStream()) {
                         ImageCodecInfo jpgEncoder = GetEncoder(ImageFormat.Jpeg);
                         EncoderParameters myEncoderParameters = new EncoderParameters(1);
-                        myEncoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 65L);
-                        scaled.Save(ms, jpgEncoder, myEncoderParameters);
+                        myEncoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 55L);
+                        outputBmp.Save(ms, jpgEncoder, myEncoderParameters);
                         string b64 = Convert.ToBase64String(ms.ToArray());
                         Console.WriteLine("FRAME_JPG " + b64);
+                    }
+                } finally {
+                    if (scaled != null) {
+                        scaled.Dispose();
                     }
                 }
             }
@@ -486,3 +527,4 @@ class InputHelper {
         }
     }
 }
+
