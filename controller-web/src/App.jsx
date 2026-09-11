@@ -215,6 +215,7 @@ function App() {
   const [clipboardToast, setClipboardToast] = useState(null);
   const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
   const [isRemoteLocked, setIsRemoteLocked] = useState(false);
+  const [remotePinInput, setRemotePinInput] = useState('');
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -325,6 +326,37 @@ function App() {
       isSelf: true
     });
     setTimeout(() => setClipboardToast(null), 3000);
+  };
+
+  const handleSendPinSubmit = (e) => {
+    if (e) e.preventDefault();
+    const pin = (remotePinInput || '').trim();
+    if (!pin) return;
+
+    // 1. Wake screen and focus PIN field
+    handleTriggerUnlock();
+
+    // 2. Type PIN characters into credential provider
+    setTimeout(() => {
+      sendControlData({
+        type: 'typepin',
+        text: pin
+      });
+
+      // 3. Submit Enter key
+      setTimeout(() => {
+        sendControlData({
+          type: 'enter'
+        });
+        setClipboardToast({
+          text: `🚀 PIN submitted to Remote PC!`,
+          isSelf: true
+        });
+        setTimeout(() => setClipboardToast(null), 3000);
+      }, 150 + (pin.length * 40));
+    }, 250);
+
+    setRemotePinInput('');
   };
 
   // Remote Reboot & Auto-Reconnect States
@@ -2571,6 +2603,37 @@ function App() {
       keyCode: e.keyCode
     });
   };
+
+  // Global Keyboard Listener: Captures physical keyboard strokes and sends to remote PC
+  useEffect(() => {
+    if (status !== 'connected') return;
+
+    const onGlobalKeyDown = (e) => {
+      const activeEl = document.activeElement;
+      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || activeEl?.isContentEditable) {
+        return;
+      }
+      handleKeyDown(e);
+    };
+
+    const onGlobalKeyUp = (e) => {
+      const activeEl = document.activeElement;
+      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || activeEl?.isContentEditable) {
+        return;
+      }
+      handleKeyUp(e);
+    };
+
+    window.addEventListener('keydown', onGlobalKeyDown);
+    window.addEventListener('keyup', onGlobalKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', onGlobalKeyDown);
+      window.removeEventListener('keyup', onGlobalKeyUp);
+    };
+  }, [status, isRemoteLocked]);
 
   // Focus container to capture keyboard inputs
   const focusControl = () => {
@@ -5455,8 +5518,9 @@ function App() {
             <div className="remote-lock-overlay-banner">
               <div className="lock-badge-pill">
                 <span className="lock-icon">🔒</span>
-                <span className="lock-title">Windows Lock Screen Active</span>
+                <span className="lock-title">Windows Lock Screen</span>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleTriggerUnlock();
@@ -5464,8 +5528,26 @@ function App() {
                   className="lock-unlock-btn"
                   title="Wake screen and trigger Ctrl+Alt+Del"
                 >
-                  🔑 Unlock / Send Ctrl+Alt+Del
+                  🔑 Wake Screen
                 </button>
+
+                <form
+                  onSubmit={handleSendPinSubmit}
+                  className="lock-pin-form"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="password"
+                    value={remotePinInput}
+                    onChange={(e) => setRemotePinInput(e.target.value)}
+                    placeholder="Enter PIN / Password..."
+                    className="lock-pin-input"
+                    autoFocus
+                  />
+                  <button type="submit" className="lock-pin-submit-btn" title="Submit PIN & Unlock">
+                    ↵ Unlock
+                  </button>
+                </form>
               </div>
             </div>
           )}

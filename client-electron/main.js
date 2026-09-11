@@ -1269,6 +1269,16 @@ ipcMain.on('control-event', (event, data) => {
       if (keyCode) {
         sendInputHelperCommand(`keyup ${keyCode}`);
       }
+    } else if (type === 'type' || type === 'typepin' || type === 'text') {
+      const text = data.text || data.pin || '';
+      if (text) {
+        const b64 = Buffer.from(text, 'utf-8').toString('base64');
+        sendInputHelperCommand(`typeb64 ${b64}`);
+      }
+    } else if (type === 'enter' || type === 'submit') {
+      sendInputHelperCommand('enter');
+    } else if (type === 'backspace') {
+      sendInputHelperCommand('backspace');
     } else if (type === 'releaseallmodifiers' || type === 'resetkeys') {
       sendInputHelperCommand('releaseallmodifiers');
     } else if (type === 'shortcut') {

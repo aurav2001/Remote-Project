@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Diagnostics;
 using System.Threading;
+using System.Text;
 
 class InputHelper {
     [DllImport("user32.dll", SetLastError = true)]
@@ -18,6 +19,9 @@ class InputHelper {
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
     [DllImport("user32.dll")]
+    static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
+    [DllImport("user32.dll")]
     static extern bool LockWorkStation();
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -29,19 +33,10 @@ class InputHelper {
     [DllImport("user32.dll", SetLastError = true)]
     static extern bool CloseDesktop(IntPtr hDesktop);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    static extern IntPtr GetThreadDesktop(int dwThreadId);
-
-    [DllImport("kernel32.dll")]
-    static extern int GetCurrentThreadId();
-
     [DllImport("sas.dll", SetLastError = true)]
     static extern void SendSAS(bool asUser);
 
     const uint DESKTOP_ALL_ACCESS = 0x01FF;
-    const uint DESKTOP_SWITCHDESKTOP = 0x0100;
-    const uint DESKTOP_WRITEOBJECTS = 0x0080;
-    const uint DESKTOP_READOBJECTS = 0x0001;
 
     const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     const uint MOUSEEVENTF_LEFTUP = 0x04;
@@ -54,6 +49,8 @@ class InputHelper {
     const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     const uint KEYEVENTF_KEYDOWN = 0x0000;
     const uint KEYEVENTF_KEYUP = 0x0002;
+    const uint KEYEVENTF_UNICODE = 0x0004;
+    const uint KEYEVENTF_SCANCODE = 0x0008;
 
     const byte VK_LWIN = 0x5B;     // 91
     const byte VK_CONTROL = 0x11;  // 17
@@ -63,7 +60,7 @@ class InputHelper {
     const byte VK_ESCAPE = 0x1B;   // 27
     const byte VK_SPACE = 0x20;    // 32
     const byte VK_RETURN = 0x0D;   // 13
-    const byte VK_F4 = 0x73;       // 115
+    const byte VK_BACK = 0x08;     // 8
     const byte VK_D = 0x44;        // 68
     const byte VK_E = 0x45;        // 69
     const byte VK_L = 0x4C;        // 76
@@ -77,17 +74,18 @@ class InputHelper {
     static int currentDisplayY = 0;
     static int currentDisplayW = 0;
     static int currentDisplayH = 0;
+    static IntPtr activeDesktop = IntPtr.Zero;
 
     // Dynamically switch current thread to whatever desktop is active (Winlogon, Default, ScreenSaver, UAC)
     static void SyncDesktop() {
         try {
             IntPtr hDesktop = OpenInputDesktop(0, false, DESKTOP_ALL_ACCESS);
-            if (hDesktop == IntPtr.Zero) {
-                hDesktop = OpenInputDesktop(0, false, 0x01FF);
-            }
-            if (hDesktop != IntPtr.Zero) {
+            if (hDesktop != IntPtr.Zero && hDesktop != activeDesktop) {
                 SetThreadDesktop(hDesktop);
-                CloseDesktop(hDesktop);
+                if (activeDesktop != IntPtr.Zero) {
+                    try { CloseDesktop(activeDesktop); } catch {}
+                }
+                activeDesktop = hDesktop;
             }
         } catch {}
     }
@@ -108,26 +106,34 @@ class InputHelper {
         } catch {}
     }
 
+    static void PressKeyWithScan(byte vk) {
+        try {
+            SyncDesktop();
+            byte scan = (byte)MapVirtualKey((uint)vk, 0);
+            uint ext = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
+            keybd_event(vk, scan, ext, 0);
+            Thread.Sleep(25);
+            keybd_event(vk, scan, ext | KEYEVENTF_KEYUP, 0);
+        } catch {}
+    }
+
     static void PressKeyCombo(params byte[] keys) {
         if (keys == null || keys.Length == 0) return;
         try {
             SyncDesktop();
-            // 1. Press keys down in order
             for (int i = 0; i < keys.Length; i++) {
                 byte vk = keys[i];
+                byte scan = (byte)MapVirtualKey((uint)vk, 0);
                 uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
-                keybd_event(vk, 0, flags, 0);
+                keybd_event(vk, scan, flags, 0);
             }
-            // 2. Exact 20ms debounce for Windows message pump registration
-            Thread.Sleep(20);
-            // 3. Release keys up in reverse order
+            Thread.Sleep(25);
             for (int i = keys.Length - 1; i >= 0; i--) {
                 byte vk = keys[i];
+                byte scan = (byte)MapVirtualKey((uint)vk, 0);
                 uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
-                keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
-                keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+                keybd_event(vk, scan, flags | KEYEVENTF_KEYUP, 0);
             }
-            // 4. Guarantee modifiers and delete are fully released
             Thread.Sleep(10);
             ReleaseAllModifiers();
         } catch (Exception ex) {
@@ -135,32 +141,64 @@ class InputHelper {
         }
     }
 
+    static void TypeChar(char c) {
+        try {
+            SyncDesktop();
+            // 1. If it's a standard digit '0'-'9' (e.g. for PINs)
+            if (c >= '0' && c <= '9') {
+                byte vk = (byte)(0x30 + (c - '0'));
+                byte scan = (byte)MapVirtualKey((uint)vk, 0);
+                keybd_event(vk, scan, 0, 0);
+                Thread.Sleep(20);
+                keybd_event(vk, scan, KEYEVENTF_KEYUP, 0);
+            }
+            // 2. Letters and symbols via Unicode & Scan code
+            else {
+                keybd_event(0, (byte)c, KEYEVENTF_UNICODE, 0);
+                Thread.Sleep(20);
+                keybd_event(0, (byte)c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0);
+            }
+            Thread.Sleep(15);
+        } catch {}
+    }
+
+    static void TypeText(string text) {
+        if (string.IsNullOrEmpty(text)) return;
+        try {
+            SyncDesktop();
+            for (int i = 0; i < text.Length; i++) {
+                TypeChar(text[i]);
+            }
+            Console.WriteLine("TYPED_TEXT_LEN: " + text.Length);
+        } catch (Exception ex) {
+            Console.WriteLine("TYPE_ERROR: " + ex.Message);
+        }
+    }
+
     static void TriggerSasUnlock() {
         try {
             SyncDesktop();
-            // 1. Try Windows native SendSAS if available
+            // 1. Try Windows native SendSAS
             try {
                 SendSAS(false);
             } catch {}
 
-            // 2. Simulate Secure Attention Sequence (Ctrl + Alt + Delete)
-            keybd_event(VK_CONTROL, 0, 0, 0);
-            keybd_event(VK_MENU, 0, 0, 0);
+            // 2. Simulate Secure Attention Sequence (Ctrl + Alt + Delete) with exact hardware scan codes
+            keybd_event(VK_CONTROL, 0x1D, 0, 0);
+            keybd_event(VK_MENU, 0x38, 0, 0);
             keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
-            keybd_event(VK_DELETE, 0, 0, 0);
             Thread.Sleep(50);
             keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_DELETE, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_MENU, 0x38, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
             ReleaseAllModifiers();
 
-            // 3. Dismiss lock screen cover / dismiss wallpaper to focus password/PIN box
-            Thread.Sleep(80);
+            // 3. Dismiss lock screen wallpaper & focus PIN box
+            Thread.Sleep(100);
             SyncDesktop();
-            keybd_event(VK_SPACE, 0, 0, 0);
-            Thread.Sleep(20);
-            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, 0);
+            PressKeyWithScan(VK_SPACE);
+            Thread.Sleep(50);
+            PressKeyWithScan(VK_RETURN);
             
             Console.WriteLine("SAS_UNLOCK_DISPATCHED");
         } catch (Exception ex) {
@@ -179,7 +217,7 @@ class InputHelper {
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
-                // Re-sync desktop before processing commands
+                // Re-sync desktop before processing every input command
                 SyncDesktop();
 
                 if (command == "setdisplaybounds" && parts.Length >= 5) {
@@ -240,17 +278,37 @@ class InputHelper {
                 }
                 else if (command == "keydown" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
+                    byte scan = (byte)MapVirtualKey((uint)vk, 0);
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
-                    keybd_event(vk, 0, flags, 0);
+                    keybd_event(vk, scan, flags, 0);
                 }
                 else if (command == "keyup" && parts.Length >= 2) {
                     byte vk = byte.Parse(parts[1]);
+                    byte scan = (byte)MapVirtualKey((uint)vk, 0);
                     uint flags = (vk >= 33 && vk <= 46) ? KEYEVENTF_EXTENDEDKEY : 0;
-                    keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0);
+                    keybd_event(vk, scan, flags | KEYEVENTF_KEYUP, 0);
                     if (vk == VK_DELETE) {
                         keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
                         keybd_event(VK_DELETE, 0, KEYEVENTF_KEYUP, 0);
                     }
+                }
+                else if (command == "typeb64" && parts.Length >= 2) {
+                    byte[] data = Convert.FromBase64String(parts[1]);
+                    string decoded = Encoding.UTF8.GetString(data);
+                    TypeText(decoded);
+                }
+                else if (command == "type" || command == "typepin") {
+                    string text = line.Substring(parts[0].Length).Trim();
+                    TypeText(text);
+                }
+                else if (command == "enter" || command == "submit") {
+                    PressKeyWithScan(VK_RETURN);
+                }
+                else if (command == "backspace") {
+                    PressKeyWithScan(VK_BACK);
+                }
+                else if (command == "space") {
+                    PressKeyWithScan(VK_SPACE);
                 }
                 else if (command == "releaseallmodifiers" || command == "resetkeys") {
                     ReleaseAllModifiers();
@@ -272,13 +330,11 @@ class InputHelper {
                 else if (command == "shortcut" && parts.Length >= 2) {
                     string sc = parts[1].ToLower().Replace("-", "").Replace("_", "");
                     if (sc == "ctrldel") {
-                        keybd_event(VK_CONTROL, 0, 0, 0);
+                        keybd_event(VK_CONTROL, 0x1D, 0, 0);
                         keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY, 0);
-                        keybd_event(VK_DELETE, 0, 0, 0);
                         Thread.Sleep(30);
                         keybd_event(VK_DELETE, 0x53, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
-                        keybd_event(VK_DELETE, 0, KEYEVENTF_KEYUP, 0);
-                        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                        keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0);
                         ReleaseAllModifiers();
                     }
                     else if (sc == "ctrlaltdel" || sc == "sas" || sc == "unlock") {
@@ -302,7 +358,7 @@ class InputHelper {
                         PressKeyCombo(VK_LWIN, VK_E);
                     }
                     else if (sc == "altf4") {
-                        PressKeyCombo(VK_MENU, VK_F4);
+                        PressKeyCombo(VK_MENU, 0x73);
                     }
                     else if (sc == "ctrlv" || sc == "paste") {
                         PressKeyCombo(VK_CONTROL, VK_V);
