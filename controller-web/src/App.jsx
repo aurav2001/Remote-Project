@@ -214,6 +214,7 @@ function App() {
   const [showKeysDropdown, setShowKeysDropdown] = useState(false);
   const [clipboardToast, setClipboardToast] = useState(null);
   const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
+  const [isRemoteLocked, setIsRemoteLocked] = useState(false);
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -307,6 +308,23 @@ function App() {
       isSelf: true
     });
     setTimeout(() => setClipboardToast(null), 2000);
+  };
+
+  const handleTriggerUnlock = () => {
+    sendControlData({
+      type: 'shortcut',
+      shortcut: 'unlock'
+    });
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      try {
+        dataChannelRef.current.send(JSON.stringify({ type: 'trigger-sas-unlock' }));
+      } catch (e) {}
+    }
+    setClipboardToast({
+      text: '🔑 Sent Unlock / Ctrl+Alt+Del signal to remote PC',
+      isSelf: true
+    });
+    setTimeout(() => setClipboardToast(null), 3000);
   };
 
   // Remote Reboot & Auto-Reconnect States
@@ -1883,6 +1901,13 @@ function App() {
       }
     });
 
+    // Receive host lock status via signaling fallback
+    socket.on('host-lock-status', (data) => {
+      if (data) {
+        setIsRemoteLocked(!!data.isLocked);
+      }
+    });
+
     // Receive remote terminal execution results via signaling fallback
     socket.on('terminal-result', (data) => {
       if (data) {
@@ -2158,6 +2183,9 @@ function App() {
             handleProcessTerminalOutput(data);
           } else if (data.type === 'system-diagnostics-response') {
             handleReceiveDiagnosticsReport(data);
+          } else if (data.type === 'host-lock-status') {
+            console.log('[Controller]: Remote Host Lock Status:', data.isLocked);
+            setIsRemoteLocked(!!data.isLocked);
           }
         } catch (err) { }
       };
@@ -4278,6 +4306,15 @@ function App() {
                 {isExportingExcel ? '⏳ Exporting...' : '📑 Excel'}
               </button>
 
+              {/* 1-Click Quick Unlock / Ctrl + Alt + Del Button */}
+              <button
+                onClick={handleTriggerUnlock}
+                className={`control-btn btn-unlock ${isRemoteLocked ? 'pulse-amber' : ''}`}
+                title="Send Unlock / Ctrl+Alt+Del signal to remote PC (wake up Lock Screen / focus PIN or Password box)"
+              >
+                🔑 {isRemoteLocked ? 'Unlock PC' : 'Ctrl+Alt+Del'}
+              </button>
+
               {/* 1-Click Quick Ctrl + Del Button */}
               <button
                 onClick={() => handleSendShortcut('ctrl-del', 'Ctrl + Del')}
@@ -4305,6 +4342,21 @@ function App() {
                     <div className="keys-dropdown-header">
                       <span>REMOTE KEY SHORTCUTS</span>
                     </div>
+
+                    <button
+                      onClick={() => {
+                        handleTriggerUnlock();
+                        setShowKeysDropdown(false);
+                      }}
+                      className="key-dropdown-item"
+                      title="Send Unlock signal / Ctrl+Alt+Del to wake lock screen"
+                    >
+                      <div className="key-badge highlight-amber">🔑 Unlock / SAS</div>
+                      <div className="key-info">
+                        <strong>Wake Lock Screen</strong>
+                        <small>Focus PIN / Password box</small>
+                      </div>
+                    </button>
 
                     <button
                       onClick={() => {
@@ -5398,6 +5450,25 @@ function App() {
             </svg>
             <div className="cursor-pulse-ring" />
           </div>
+
+          {isRemoteLocked && (
+            <div className="remote-lock-overlay-banner">
+              <div className="lock-badge-pill">
+                <span className="lock-icon">🔒</span>
+                <span className="lock-title">Windows Lock Screen Active</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTriggerUnlock();
+                  }}
+                  className="lock-unlock-btn"
+                  title="Wake screen and trigger Ctrl+Alt+Del"
+                >
+                  🔑 Unlock / Send Ctrl+Alt+Del
+                </button>
+              </div>
+            </div>
+          )}
 
           <video
             ref={videoRef}

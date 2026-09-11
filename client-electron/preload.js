@@ -28,5 +28,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeSystemReboot: (opts) => ipcRenderer.invoke('execute-system-reboot', opts),
   getDrivesAndQuickPaths: () => ipcRenderer.invoke('get-drives-and-quick-paths'),
   readDirectory: (targetPath) => ipcRenderer.invoke('read-directory', targetPath),
-  readFileChunk: (data) => ipcRenderer.invoke('read-file-chunk', data)
+  readFileChunk: (data) => ipcRenderer.invoke('read-file-chunk', data),
+  onHostLockStatus: (callback) => {
+    ipcRenderer.on('host-lock-status', (event, data) => callback(data));
+  },
+  getLockStatus: () => ipcRenderer.invoke('get-lock-status'),
+  triggerSasUnlock: () => ipcRenderer.invoke('trigger-sas-unlock')
 });

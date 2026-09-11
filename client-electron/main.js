@@ -1,6 +1,6 @@
-const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker, session } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker, powerMonitor, session } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const fs = require('fs');
 
 // Critical flags to prevent Chromium from throttling screen capture & timers in background
@@ -548,6 +548,7 @@ if (!gotTheLock) {
     startInputHelper();
     createWindow();
     createTray();
+    setupPowerMonitor();
 
     // Configure Windows Auto-Start on System Boot for seamless auto-reconnect after restart
     try {
@@ -574,6 +575,62 @@ if (!gotTheLock) {
     });
   });
 }
+
+let isHostScreenLocked = false;
+
+function setupPowerMonitor() {
+  try {
+    if (!powerMonitor) return;
+
+    powerMonitor.on('lock-screen', () => {
+      console.log('[PowerMonitor]: Windows screen LOCKED (Winlogon desktop active)');
+      isHostScreenLocked = true;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('host-lock-status', { isLocked: true });
+      }
+      sendInputHelperCommand('syncdesktop');
+    });
+
+    powerMonitor.on('unlock-screen', () => {
+      console.log('[PowerMonitor]: Windows screen UNLOCKED (Interactive user desktop active)');
+      isHostScreenLocked = false;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('host-lock-status', { isLocked: false });
+      }
+      sendInputHelperCommand('syncdesktop');
+    });
+
+    powerMonitor.on('suspend', () => {
+      console.log('[PowerMonitor]: System entering suspend/sleep');
+    });
+
+    powerMonitor.on('resume', () => {
+      console.log('[PowerMonitor]: System resumed from sleep');
+      sendInputHelperCommand('syncdesktop');
+    });
+
+    // Configure Windows Policy for Software SAS Generation so Ctrl+Alt+Del simulation works on lock screen
+    try {
+      exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f', (err) => {
+        if (!err) console.log('[PowerMonitor]: Configured Windows SoftwareSASGeneration policy.');
+      });
+    } catch (e) { }
+  } catch (e) {
+    console.warn('[PowerMonitor]: Failed to setup powerMonitor:', e);
+  }
+}
+
+// IPC Handler to query lock status
+ipcMain.handle('get-lock-status', () => {
+  return { isLocked: isHostScreenLocked };
+});
+
+// IPC Handler to trigger SAS unlock (Ctrl+Alt+Del & wake lock screen)
+ipcMain.handle('trigger-sas-unlock', () => {
+  console.log('[Main Process]: Triggering SAS Unlock via input helper');
+  sendInputHelperCommand('shortcut unlock');
+  return { success: true };
+});
 
 app.on('window-all-closed', () => {
   if (inputHelperProcess) {
@@ -913,7 +970,6 @@ $result | ConvertTo-Json -Depth 4 -Compress
 
 // --- LIVE SYSTEM HEALTH & METRICS ENGINE ---
 const os = require('os');
-const { exec } = require('child_process');
 
 let prevCpuTimes = null;
 function getCpuTimes() {

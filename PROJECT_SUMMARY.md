@@ -56,8 +56,8 @@
 | **2FA / TOTP Security** | Two-factor authentication with QR code scan for Google/Microsoft Authenticator | ✅ 100% Complete |
 | **Multi-Tenant Workspaces** | Company group filtering (USPL, G-TECH, PRITS, etc.) and max PC limit enforcement | ✅ 100% Complete |
 | **Excel Telemetry Export** | 1-Click export of full hardware specs, disk volumes, network IPs to .xlsx | ✅ 100% Complete |
-| **cPanel Deployment Bundles** | Lightweight zip (`cpanel-deploy-light.zip`) and full bundle with .exe installer | ✅ 100% Ready |
-| **Permanent Source Backup** | Clean 4.25 MB pure source backup (`BACKUP_SOURCE_ONLY_NO_NODE_MODULES_2026-09-09.zip`) | ✅ Saved & Locked |
+| **Windows Lock Screen Access** | Dynamic `OpenInputDesktop` + `SetThreadDesktop` sync, SAS `SendSAS` Ctrl+Alt+Del trigger, and PIN/Password entry on lock screen | ✅ 100% Complete & Stable |
+| **Permanent Source Backup** | Clean 4.25 MB pure source backup (`backup-pre-lockscreen-v1` tag & checkpoint) | ✅ Saved & Locked |
 
 ---
 

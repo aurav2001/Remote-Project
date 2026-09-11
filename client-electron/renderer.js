@@ -902,9 +902,20 @@ function setupDataChannel(channel) {
   if (!channel) return;
   activeDataChannel = channel;
   startDataChannelHeartbeat();
-  channel.onopen = () => {
+  channel.onopen = async () => {
     console.log('[Host]: DataChannel opened!');
     onStreamConnected();
+    if (window.electronAPI && window.electronAPI.getLockStatus) {
+      try {
+        const lockRes = await window.electronAPI.getLockStatus();
+        if (channel.readyState === 'open') {
+          channel.send(JSON.stringify({
+            type: 'host-lock-status',
+            isLocked: !!lockRes?.isLocked
+          }));
+        }
+      } catch (e) { }
+    }
   };
   channel.onmessage = (e) => {
     try {
@@ -949,6 +960,13 @@ function setupDataChannel(channel) {
         }
         return;
       }
+      if (data.type === 'trigger-sas-unlock' || data.type === 'unlock-screen' || data.type === 'wake-lock-screen') {
+        console.log('[Host]: Received SAS unlock / wake lock screen trigger from controller');
+        if (window.electronAPI && window.electronAPI.triggerSasUnlock) {
+          window.electronAPI.triggerSasUnlock();
+        }
+        return;
+      }
       if (data.type === 'system-reboot') {
         console.log('[Host]: Received remote system reboot command from controller (DataChannel)!');
         if (window.electronAPI && window.electronAPI.executeSystemReboot) {
@@ -977,6 +995,28 @@ function setupDataChannel(channel) {
       console.error('[Host]: Error parsing DataChannel event:', err);
     }
   };
+}
+
+// Power / Screen Lock Event Listeners
+if (window.electronAPI && window.electronAPI.onHostLockStatus) {
+  window.electronAPI.onHostLockStatus((data) => {
+    console.log('[Host]: Lock status changed:', data);
+    const lockPayload = {
+      type: 'host-lock-status',
+      isLocked: !!data?.isLocked
+    };
+    if (activeDataChannel && activeDataChannel.readyState === 'open') {
+      try {
+        activeDataChannel.send(JSON.stringify(lockPayload));
+      } catch (e) { }
+    }
+    if (socket && socket.connected && currentRoomId) {
+      socket.emit('data-channel-fallback', {
+        roomId: currentRoomId,
+        message: lockPayload
+      });
+    }
+  });
 }
 
 // Low-Latency & High-Clarity WebRTC SDP & Sender Bitrate Optimizers
