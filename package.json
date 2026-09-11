@@ -1,6 +1,6 @@
 {
   "name": "remoteg-all-in-one",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "RemoteG Desktop Host, Web Controller, and Signaling Server",
   "main": "server/index.js",
   "engines": {
@@ -17,6 +17,8 @@
   },
   "scripts": {
     "build": "npm --prefix controller-web install && npm --prefix controller-web run build && npm --prefix server install",
+    "build:all": "node sync-files.js",
+    "build:bump": "node sync-files.js --bump",
     "start": "node server/index.js"
   }
 }
