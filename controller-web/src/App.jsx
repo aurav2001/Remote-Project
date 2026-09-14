@@ -76,15 +76,102 @@ function App() {
   const [showSpecsModal, setShowSpecsModal] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
-  const [socketFrame, setSocketFrame] = useState(null);
+  // Socket/lock frames are written straight to the <img> via a ref — NOT React state —
+  // so incoming frames (5-10/sec) do NOT re-render the whole 6000-line App (huge CPU win).
+  // Only `hasSocketFrame` (a rarely-changing boolean) drives visibility of the <img>.
+  const imgRef = useRef(null);
+  const [hasSocketFrame, setHasSocketFrame] = useState(false);
+  const hasSocketFrameRef = useRef(false);
+  const clearSocketTimerRef = useRef(null);
+
+  const showSocketFrame = (frame) => {
+    if (!frame) return;
+    if (clearSocketTimerRef.current) { clearTimeout(clearSocketTimerRef.current); clearSocketTimerRef.current = null; }
+    if (imgRef.current) { try { imgRef.current.src = frame; } catch (e) {} }
+    if (!hasSocketFrameRef.current) { hasSocketFrameRef.current = true; setHasSocketFrame(true); }
+  };
+  const clearSocketFrame = () => {
+    if (clearSocketTimerRef.current) { clearTimeout(clearSocketTimerRef.current); clearSocketTimerRef.current = null; }
+    if (hasSocketFrameRef.current) { hasSocketFrameRef.current = false; setHasSocketFrame(false); }
+  };
+  // Delayed clear used on UNLOCK: keep the last frame visible ~800ms so the WebRTC video
+  // has time to start playing — prevents a black blink during the lock→desktop transition.
+  const clearSocketFrameDelayed = () => {
+    if (clearSocketTimerRef.current) return;
+    clearSocketTimerRef.current = setTimeout(() => {
+      clearSocketTimerRef.current = null;
+      hasSocketFrameRef.current = false;
+      setHasSocketFrame(false);
+    }, 800);
+  };
+
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const isWebRtcActiveRef = useRef(false);
+  const isRemoteLockedRef = useRef(false);
 
+  // videoRendering = the single source of truth for "the live WebRTC <video> is actually
+  // showing fresh desktop frames right now". When true we show the video; when false we
+  // show the socket image overlay (lock frames, or fallback frames, or the last frame held
+  // during a lock→desktop transition). This is what removes the post-unlock black gap:
+  // we keep the overlay up until the host confirms the live video track is swapped in
+  // (a 'video-live' message), instead of guessing with a blind timer.
+  const [videoRendering, setVideoRendering] = useState(false);
+  const videoRenderingRef = useRef(false);
+  const setVideoRenderingState = (on) => {
+    if (videoRenderingRef.current === on) return;
+    videoRenderingRef.current = on;
+    setVideoRendering(on);
+  };
+  // Confirm the live video has actually painted a fresh frame before hiding the overlay,
+  // using requestVideoFrameCallback (fires on the next presented frame). Guarantees the
+  // desktop is visibly rendering — zero black gap on the lock→desktop handoff.
+  const confirmVideoLiveAndShow = () => {
+    const v = videoRef.current;
+    if (v && typeof v.requestVideoFrameCallback === 'function') {
+      try { v.requestVideoFrameCallback(() => setVideoRenderingState(true)); return; } catch (e) {}
+    }
+    // Fallback (browser without rVFC): small delay to let the new frame paint.
+    setTimeout(() => setVideoRenderingState(true), 250);
+  };
+
+  // After unlock the <video> element often stays STALLED (it went static/black during lock
+  // and the browser stops rendering it) — which is why a page refresh "fixed" it. Re-attaching
+  // the same remote stream and calling play() kicks the decoder so it renders the live frames
+  // the host is now sending again, without any refresh.
+  const kickVideoElement = () => {
+    const v = videoRef.current;
+    if (v && remoteStreamRef.current) {
+      try {
+        v.srcObject = remoteStreamRef.current;
+        const p = v.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {}
+    }
+  };
+
+  const webrtcInactiveTimerRef = useRef(null);
   const setWebRtcActiveState = (active) => {
-    isWebRtcActiveRef.current = active;
-    setIsWebRtcActive(active);
     if (active) {
-      setSocketFrame(null);
+      // Going active: apply immediately and cancel any pending "go inactive".
+      if (webrtcInactiveTimerRef.current) { clearTimeout(webrtcInactiveTimerRef.current); webrtcInactiveTimerRef.current = null; }
+      isWebRtcActiveRef.current = true;
+      setIsWebRtcActive(true);
+      // On a normal (non-locked) connect the video is fresh, so let it show.
+      if (!isRemoteLockedRef.current) {
+        setVideoRenderingState(true);
+      }
+    } else {
+      // Going inactive: DEBOUNCE. WebRTC frequently blips 'disconnected' then recovers
+      // within a moment (especially right after unlock). Switching to the socket image on
+      // every blip is exactly what makes the screen flicker/blink between video and image.
+      // Only actually fall back if WebRTC stays down for ~1.5s.
+      if (webrtcInactiveTimerRef.current) return;
+      webrtcInactiveTimerRef.current = setTimeout(() => {
+        webrtcInactiveTimerRef.current = null;
+        isWebRtcActiveRef.current = false;
+        setIsWebRtcActive(false);
+        setVideoRenderingState(false); // WebRTC gone → show the socket fallback overlay
+      }, 1500);
     }
   };
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
@@ -215,6 +302,7 @@ function App() {
   const [clipboardToast, setClipboardToast] = useState(null);
   const [isSyncingClipboard, setIsSyncingClipboard] = useState(false);
   const [isRemoteLocked, setIsRemoteLocked] = useState(false);
+  useEffect(() => { isRemoteLockedRef.current = isRemoteLocked; }, [isRemoteLocked]);
   const [remotePinInput, setRemotePinInput] = useState('');
   const [shellType, setShellType] = useState('powershell'); // 'powershell' or 'cmd'
   const [terminalInput, setTerminalInput] = useState('');
@@ -1924,8 +2012,8 @@ function App() {
     // Receive Screen Frame Stream (handles both fallback and live lock screen stream)
     socket.on('screen-frame', ({ frame }) => {
       if (frame) {
-        setSocketFrame(frame);
-        setStatus('connected');
+        showSocketFrame(frame); // writes to <img> via ref, no root re-render
+        setStatus('connected'); // same-value setState is a no-op in React, so no per-frame re-render
       }
     });
 
@@ -1942,8 +2030,10 @@ function App() {
         const locked = !!data.isLocked;
         console.log('[Controller]: Received host-lock-status:', locked);
         setIsRemoteLocked(locked);
-        if (!locked) {
-          setSocketFrame(null);
+        if (locked) {
+          setVideoRenderingState(false); // video is now the frozen lock screen → show socket lock frames
+        } else {
+          kickVideoElement(); // resume the stalled <video> after unlock; overlay stays until 'video-live'
         }
       }
     });
@@ -1954,9 +2044,14 @@ function App() {
         const locked = !!data.isLocked;
         console.log('[Controller]: Received host-lock-status via control-event:', locked);
         setIsRemoteLocked(locked);
-        if (!locked) {
-          setSocketFrame(null);
+        if (locked) {
+          setVideoRenderingState(false);
+        } else {
+          kickVideoElement();
         }
+      } else if (data && (data.type === 'video-live' || data.type === 'screen-switched')) {
+        // Host confirmed the live desktop video track is swapped in → reveal the video.
+        confirmVideoLiveAndShow();
       }
     });
 
@@ -2239,11 +2334,15 @@ function App() {
             console.log('[Controller]: Remote Host Lock Status via DataChannel:', data.isLocked);
             const locked = !!data.isLocked;
             setIsRemoteLocked(locked);
-            if (!locked) {
-              setSocketFrame(null);
+            if (locked) {
+              setVideoRenderingState(false);
+            } else {
+              kickVideoElement();
             }
+          } else if (data.type === 'video-live' || data.type === 'screen-switched') {
+            confirmVideoLiveAndShow();
           } else if (data.type === 'screen-frame' && data.frame) {
-            setSocketFrame(data.frame);
+            showSocketFrame(data.frame); // ref-based, no root re-render
           }
         } catch (err) { }
       };
@@ -2608,61 +2707,9 @@ function App() {
     });
   };
 
-  // Keyboard events helper - emits virtual key codes
-  const handleKeyDown = (e) => {
-    if (status !== 'connected') return;
-
-    // Prevent default browser scrolling/navigation for key events when controlling
-    e.preventDefault();
-
-    sendControlData({
-      type: 'keydown',
-      key: e.key,
-      keyCode: e.keyCode
-    });
-  };
-
-  const handleKeyUp = (e) => {
-    if (status !== 'connected') return;
-    e.preventDefault();
-
-    sendControlData({
-      type: 'keyup',
-      key: e.key,
-      keyCode: e.keyCode
-    });
-  };
-
-  // Global Keyboard Listener: Captures physical keyboard strokes and sends to remote PC
-  useEffect(() => {
-    if (status !== 'connected') return;
-
-    const onGlobalKeyDown = (e) => {
-      const activeEl = document.activeElement;
-      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
-      if (tag === 'input' || tag === 'textarea' || activeEl?.isContentEditable) {
-        return;
-      }
-      handleKeyDown(e);
-    };
-
-    const onGlobalKeyUp = (e) => {
-      const activeEl = document.activeElement;
-      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
-      if (tag === 'input' || tag === 'textarea' || activeEl?.isContentEditable) {
-        return;
-      }
-      handleKeyUp(e);
-    };
-
-    window.addEventListener('keydown', onGlobalKeyDown);
-    window.addEventListener('keyup', onGlobalKeyUp);
-
-    return () => {
-      window.removeEventListener('keydown', onGlobalKeyDown);
-      window.removeEventListener('keyup', onGlobalKeyUp);
-    };
-  }, [status, isRemoteLocked]);
+  // NOTE: keyboard capture is handled by a single global listener elsewhere
+  // (handleGlobalKeyDown / handleGlobalKeyUp). A second duplicate listener used to live
+  // here and made every keystroke fire TWICE (double typing) — it has been removed.
 
   // Focus container to capture keyboard inputs
   const focusControl = () => {
@@ -4416,6 +4463,15 @@ function App() {
                 ⌨️ Ctrl+Del
               </button>
 
+              {/* 1-Click Lock Screen Button */}
+              <button
+                onClick={() => handleSendShortcut('win-l', 'Lock Screen (Win + L)')}
+                className="control-btn btn-ctrldel"
+                title="Lock the remote PC (Win + L)"
+              >
+                🔒 Lock PC
+              </button>
+
               {/* Remote Key Shortcuts Dropdown */}
               <div className="keys-dropdown-wrapper">
                 <button
@@ -5580,11 +5636,15 @@ function App() {
             </div>
           )}
 
+          {/* VIDEO stays ALWAYS mounted and ALWAYS visible at z-index 1. It is never given
+              display:none, so it is never torn down or repainted black — this is what removed
+              the flicker. All mouse input goes to the video layer. */}
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
+            onPlaying={() => { if (!isRemoteLockedRef.current) setVideoRenderingState(true); }}
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp}
@@ -5593,34 +5653,41 @@ function App() {
             onContextMenu={handleContextMenu}
             onWheel={handleWheel}
             style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              zIndex: 1,
               objectFit: 'fill',
               width: '100%',
               height: '100%',
-              display: (!isRemoteLocked && (isWebRtcActive || !socketFrame)) ? 'block' : 'none',
+              display: 'block',
               background: '#000'
             }}
           />
 
-          {((!isWebRtcActive && socketFrame) || (isRemoteLocked && socketFrame)) && (
-            <img
-              src={socketFrame}
-              alt="Remote Screen Stream"
-              onMouseMove={handleMouseMove}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-              onDoubleClick={handleDoubleClick}
-              onContextMenu={handleContextMenu}
-              style={{
-                objectFit: 'fill',
-                width: '100%',
-                height: '100%',
-                display: 'block',
-                userSelect: 'none',
-                background: '#000'
-              }}
-            />
-          )}
+          {/* IMAGE OVERLAY at z-index 2 with pointer-events:none — it only draws OVER the video
+              (lock frames / socket fallback / the last frame held during a lock→desktop
+              transition). Its src is set directly via imgRef (no per-frame React re-render),
+              and it's shown only while the live video isn't the thing to display. Because it
+              never captures mouse and the video underneath is never torn down, there is no
+              flicker and no black repaint. */}
+          <img
+            ref={imgRef}
+            alt="Remote Screen Stream"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              zIndex: 2,
+              pointerEvents: 'none',
+              objectFit: 'fill',
+              width: '100%',
+              height: '100%',
+              display: (hasSocketFrame && !videoRendering) ? 'block' : 'none',
+              userSelect: 'none',
+              background: '#000'
+            }}
+          />
         </div>
       </div>
 

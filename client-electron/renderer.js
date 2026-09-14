@@ -11,6 +11,7 @@ const btnEditGroup = document.getElementById('btn-edit-group');
 const SIGNALING_SERVER = 'https://remote.uniotechit.com';
 let socket = null;
 let localStream = null;
+let hostLocked = false; // true only while Windows is locked (drives lock-frame vs normal-frame gating)
 let peerConnection = null;
 let activeDataChannel = null;
 let heartbeatInterval = null;
@@ -662,6 +663,7 @@ function startHybridFrameStreaming() {
       return;
     }
     if (isSendingFrame) return; // Prevent frame backlog in socket buffer
+    if (hostLocked) return; // While locked, only the SYSTEM worker's lock frames go out (no competing black frames)
 
     if (hiddenVideo.videoWidth > 0) {
       isSendingFrame = true;
@@ -810,6 +812,7 @@ async function handleSwitchScreen(screenId) {
         localStream.getVideoTracks().forEach(t => t.stop());
       }
       localStream = newStream;
+      currentScreenSourceId = screenId; // remember active monitor (used for post-unlock re-capture)
 
       // Notify controller
       const notifyPayload = {
@@ -1023,10 +1026,37 @@ if (window.electronAPI && window.electronAPI.onHostLockStatus) {
       socket.emit('host-lock-status', lockPayload);
       socket.emit('control-event', lockPayload);
     }
-    if (!data?.isLocked && localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = true;
-      });
+    // IMPORTANT: do NOT disable the WebRTC video track or tear down the stream here.
+    // Doing that caused a permanent black screen. The controller already hides the
+    // live <video> while locked and shows the lock image instead, so we only need to
+    // stop the user-session SOCKET fallback frames from competing with the worker's
+    // lock frames — handled by the `hostLocked` gate inside the hybrid loop below.
+    hostLocked = !!data?.isLocked;
+    if (!hostLocked) {
+      // After unlock the user-session desktop capture is usually frozen/black and does
+      // NOT recover on its own — that is why a page refresh (which re-captures) fixed it.
+      // So here we re-acquire the desktop and hot-swap it onto the live WebRTC sender
+      // (exactly what handleSwitchScreen does), recovering the picture WITHOUT a refresh.
+      if (localStream) {
+        localStream.getVideoTracks().forEach(track => { track.enabled = true; });
+      }
+      try { if (typeof hiddenVideo !== 'undefined' && hiddenVideo) hiddenVideo.play().catch(() => {}); } catch (e) {}
+
+      // Keep sending socket fallback frames through the whole transition so the controller
+      // always has something live to show until the WebRTC track is confirmed swapped.
+      if (isControllerConnected) {
+        startHybridFrameStreaming();
+      }
+
+      // After ~500ms (desktop fully restored), REFRESH the Chromium desktopCapturer source
+      // IDs — after a lock they can go stale, and re-capturing with a stale id yields a black
+      // frame. Then hot-swap the fresh capture onto the live WebRTC sender. handleSwitchScreen
+      // sends 'screen-switched' when replaceTrack completes, which the controller treats as
+      // 'video-live' and only then reveals the video (no black gap, no blind timer).
+      setTimeout(async () => {
+        try { await loadSources(); } catch (e) {}
+        try { await handleSwitchScreen(currentScreenSourceId); } catch (e) { console.warn('[Host]: post-unlock recapture failed', e); }
+      }, 500);
     }
   });
 }
@@ -1205,6 +1235,13 @@ async function handleControllerJoined() {
 
   isInitiatingOffer = true;
   isControllerConnected = true;
+
+  // Start the lightweight socket fallback IMMEDIATELY so the controller sees the
+  // screen within ~1s instead of waiting ~10s for WebRTC ICE to finish. The hybrid
+  // loop auto-stops itself the moment the WebRTC P2P connection becomes connected.
+  if (!hostLocked) {
+    startHybridFrameStreaming();
+  }
 
   try {
     console.log('[Host]: Controller ready! Initiating WebRTC SDP offer.');

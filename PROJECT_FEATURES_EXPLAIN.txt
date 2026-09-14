@@ -1,0 +1,253 @@
+================================================================================
+  UnioTechIT (RemoteG) - REMOTE DESKTOP & RMM PLATFORM
+  PROJECT EXPLAIN SHEET  |  Version 1.1.21  |  https://remote.uniotechit.com
+================================================================================
+
+Ye file isliye hai taaki aap kisi ko bhi (client, interviewer, team member)
+ye project 5 minute me confidently explain kar sako. Har heading ke neeche
+bolne wale points diye gaye hain.
+
+--------------------------------------------------------------------------------
+1. ONE-LINE PITCH  (sabse pehle yahi bolna hai)
+--------------------------------------------------------------------------------
+"UnioTechIT ek full-stack Remote Desktop + RMM platform hai - koi bhi Windows PC
+ ko sirf browser se live dekho, control karo, monitor karo aur manage karo.
+ Na browser side koi software, na VPN - bas 6-digit code aur connect."
+
+Simple words me: TeamViewer / AnyDesk jaisa product, lekin apna khud ka banaya
+hua - web-based controller, WebRTC P2P streaming aur multi-company support ke
+saath.
+
+--------------------------------------------------------------------------------
+2. PROBLEM KYA SOLVE KARTA HAI
+--------------------------------------------------------------------------------
+- IT support team ko har baar client ke paas physically jaana padta hai.
+- Paid tools (TeamViewer/AnyDesk) mehnge hain aur per-device license lagta hai.
+- Lock screen aane ke baad zyada tools ka control chala jaata hai.
+- Companies ko apne devices ka centralized health / inventory data nahi milta.
+
+Hamara solution: ek hi platform me Remote Control + Monitoring + File Transfer +
+Terminal + Reporting, aur wo bhi self-hosted (data apne server par).
+
+--------------------------------------------------------------------------------
+3. SYSTEM ARCHITECTURE - 4 HISSE (ye diagram bol kar samjhao)
+--------------------------------------------------------------------------------
+
+     [ Web Controller ]  <=== WebRTC P2P (video + data) ===>  [ Host Agent ]
+        React + Vite                                           Electron (Win)
+        Admin browser                                                |
+              \                                                      | stdio / named pipe
+               \                                                     v
+                \___ Socket.IO signaling ___          [ C# Native Input Helper ]
+                                                            input-helper.exe
+                             |
+                    [ Node.js Server ]
+                 Express + Socket.IO + MySQL
+               (signaling, auth, relay fallback)
+
+  A) controller-web/   - React 19 + Vite 8 ka Admin Console (browser me chalta hai)
+  B) client-electron/  - Electron 28 Windows Host Agent (target PC par install)
+  C) server/           - Node.js signaling + REST API + relay server (cloud par)
+  D) input-helper.cs   - C# native Win32 helper (real hardware-level input)
+
+  Bolne ka point: "Video stream P2P jaata hai, server sirf handshake karata hai -
+  isliye latency ~15ms rehti hai aur server ka bandwidth bachta hai. Agar P2P
+  fail ho jaye to server automatically relay fallback ban jaata hai, isliye
+  connection kabhi tootta nahi."
+
+--------------------------------------------------------------------------------
+4. TECH STACK (interview me yahi poocha jaata hai)
+--------------------------------------------------------------------------------
+  Frontend    : React 19, Vite 8, Socket.IO-Client, Native WebRTC API, xlsx
+  Desktop App : Electron 28, Node.js, desktopCapturer, electron-builder (NSIS)
+  Native Layer: C# (.NET), User32.dll / GDI32 interop, Windows Service
+  Backend     : Node.js 20+/22, Express 4, Socket.IO 4, MySQL2, Nodemailer, QRCode
+  Database    : MySQL (cPanel) + local JSON fallback
+  Deployment  : Railway (Nixpacks auto-deploy) / cPanel Node.js app
+  Protocols   : WebRTC (VP8/H.264 + DataChannel), STUN/ICE, WebSocket, HTTP
+
+--------------------------------------------------------------------------------
+5. MAIN FEATURES - CONTROL & STREAMING
+--------------------------------------------------------------------------------
+ 5.1  Live Screen Streaming
+      - Full desktop, 60 FPS tak, ultra-low latency WebRTC video
+      - Hybrid fallback: WebRTC block ho to JPEG canvas frames socket se
+      - Edge-to-edge canvas, zero buffering (instant frame presentation)
+
+ 5.2  Real Mouse & Keyboard Control
+      - Click, double-click, right-click, drag & drop, scroll - sab chalta hai
+      - Native hardware input C# helper se (User32 SendInput + scan codes)
+      - Isliye Start Menu, Taskbar, UAC dialog aur games me bhi input jaata hai
+      - Normalized coordinates (movenorm) - kisi bhi resolution par accurate mapping
+
+ 5.3  Windows LOCK SCREEN Streaming + PIN Unlock   *** USP - zaroor bolo ***
+      - Normally Win+L ke baad screen capture freeze ho jaata hai (DWM suspend)
+      - Humne C# helper me OpenInputDesktop + SetThreadDesktop use kiya
+      - Winlogon desktop par switch karke GDI BitBlt se lock screen capture (5 FPS)
+      - Remote se PIN type karke PC unlock - hardware scan codes se
+      - Helper Windows Service (LocalSystem) ke roop me chalta hai, isliye
+        Winlogon desktop legally access hota hai - koi token stealing nahi
+
+ 5.4  Multi-Monitor Support
+      - Dual/triple monitor detect, 1-click display switch, resolution badges
+
+ 5.5  Remote Reboot + Auto-Reconnect
+      - Target PC ko reboot command, phir signaling room poll karke
+        boot hote hi session apne aap dobara connect
+
+--------------------------------------------------------------------------------
+6. MAIN FEATURES - MANAGEMENT & RMM
+--------------------------------------------------------------------------------
+ 6.1  Live Telemetry / Health Dashboard
+      - CPU %, RAM (GB + %), Disk C: space, Network upload/download speed,
+        Battery status, System uptime - har 2 second par live update
+      - Real-time graphs web controller ke Health drawer me
+
+ 6.2  Silent Remote Terminal
+      - PowerShell + CMD dono execute, target PC par koi window nahi khulti
+      - Ready presets: ipconfig, tasklist, systeminfo, ping, flushdns
+
+ 6.3  Remote File Explorer (dono taraf transfer)
+      - Drives (C:, D:) + quick paths (Desktop, Downloads, Documents, Pictures)
+      - Breadcrumb navigation, search filter, path bar
+      - Download: target PC -> admin browser, 64KB chunked streaming
+      - Upload: drag & drop ya button se, seedha remote folder me
+      - Dual-mode engine: Electron IPC, aur purane host par 1.2s me automatic
+        PowerShell fallback
+
+ 6.4  Bidirectional Clipboard Sync
+      - Admin aur target PC ke beech text dono taraf automatic sync
+
+ 6.5  Screen Annotation Suite
+      - Laser pointer, freehand pen, arrow, rectangle, highlighter, colors
+      - Target PC par transparent overlay window me dikhta hai (training ke liye)
+      - Annotated screenshot capture
+
+ 6.6  Excel Diagnostic Export
+      - Full system diagnostics collect karke .xlsx report download
+      - Registered clients ka data bhi Excel me export
+
+ 6.7  RDP Bridge & Console Handoff
+      - Windows Remote Desktop enable + connection details fetch
+      - tscon se RDP session wapas physical console screen par handoff
+
+--------------------------------------------------------------------------------
+7. MAIN FEATURES - SECURITY & MULTI-TENANCY
+--------------------------------------------------------------------------------
+ 7.1  Authentication
+      - Registration + Login API, HMAC-SHA256 signed session tokens
+      - Session verify endpoint, change password, logout
+
+ 7.2  Two-Factor Authentication (2FA / MFA)
+      - TOTP based - Google Authenticator / Microsoft Authenticator support
+      - QR code generate (qrcode lib), setup-init -> confirm -> enable flow
+      - Login ke baad 6-digit code screen, aur MFA disable option
+
+ 7.3  Company Groups (Multi-Tenant Isolation)
+      - Har company ka apna companyGroup workspace
+      - Ek company ke admin ko sirf apne hi devices dikhte hain
+
+ 7.4  Admin Approval Workflow
+      - Nayi company registration "pending" state me aati hai
+      - Super admin approve / deny / status change kar sakta hai
+      - Per-company PC limit set & upgrade, lead delete
+      - SMTP email notification + admin email test/status endpoints
+
+ 7.5  Access Control
+      - Har host PC ka 6-digit permanent access code
+      - Unattended access (bina user permission ke, IT support ke liye)
+      - URL se instant connect: ?code=123456
+
+--------------------------------------------------------------------------------
+8. HOST AGENT (Windows) KE SPECIAL POINTS
+--------------------------------------------------------------------------------
+ - Silent install: %LOCALAPPDATA%\Programs\UnioTechIT\ me, ZERO UAC prompt
+   (requestedExecutionLevel: asInvoker, oneClick installer)
+ - Zero media permission popup: Chromium flags + permission handler override
+   (use-fake-ui-for-media-stream, auto-select-desktop-capture-source)
+ - Auto-start on Windows login: app.setLoginItemSettings + Task Scheduler
+   (schtasks /sc ONLOGON /rl HIGHEST)
+ - System Tray me chalta hai - X dabane par band nahi hota, tray me chhup jaata hai
+ - Single instance lock - duplicate host process nahi chalta
+ - powerSaveBlocker - background me screen capture throttle nahi hoti
+ - HTTP heartbeat har 3 second - server ko pata rehta hai PC online hai
+
+--------------------------------------------------------------------------------
+9. WEB CONTROLLER UI - KYA-KYA DIKHTA HAI (demo ka order)
+--------------------------------------------------------------------------------
+ (1) Landing Page      : 3D holographic hero, live badges (<15ms latency,
+                         256-bit E2EE, Fleet Telemetry), feature cards,
+                         3-step setup guide, direct .exe download card
+ (2) Login Modal       : Glassmorphism popup, show/hide password, 2FA screen
+ (3) Device Dashboard  : Sab online PCs ka grid - live CPU/RAM/Battery,
+                         public + private IP, OS version, 1-Click Connect
+ (4) Live Session      : Full-screen video canvas
+ (5) Left Floating Dock: Health | Terminal | Files | Annotate |
+                         Displays | Actions | Terminate Session
+ (6) Admin Panel       : Registered companies, approve/deny, PC limit,
+                         Excel export
+
+--------------------------------------------------------------------------------
+10. BUILD & RELEASE AUTOMATION  (sync-files.js)
+--------------------------------------------------------------------------------
+ Ek command se pura release ban jaata hai - npm run build:bump
+   1. version.json ka patch version auto-bump (1.1.16 -> 1.1.17)
+   2. Version sync: root + client-electron + controller-web package.json
+   3. C# helper recompile (csc.exe -> input-helper.exe)
+   4. Electron NSIS installer build -> "UnioTechIT Setup <version>.exe"
+   5. Vite production build -> server/public me copy
+   6. 3 zip bundles: cpanel-deploy-light, cpanel-full-bundle, SOURCE_BACKUP
+
+ Deploy: git push origin main  ->  Railway auto-deploy (Nixpacks, Node 22)
+
+--------------------------------------------------------------------------------
+11. LIVE DEMO SCRIPT (5 min me kaise dikhana hai)
+--------------------------------------------------------------------------------
+  Step 1  remote.uniotechit.com kholo -> landing page + Login
+  Step 2  Dashboard -> online device card dikhao (live CPU/RAM chal raha hai)
+  Step 3  Connect dabao -> 1 second me live screen aa gayi
+  Step 4  Mouse chalao, notepad kholo, type karo - real control dikhao
+  Step 5  Health drawer kholo -> live graphs
+  Step 6  Terminal kholo -> ipconfig chalao
+  Step 7  Files kholo -> ek file download kar ke dikhao
+  Step 8  *** Target PC par Win+L dabao -> lock screen bhi stream ho rahi hai
+          -> remote se PIN daal ke unlock kar do (sabse bada wow moment)
+  Step 9  Excel report export kar ke dikhao
+
+--------------------------------------------------------------------------------
+12. TECHNICAL CHALLENGES JO SOLVE KIYE (ye bolo to impact padta hai)
+--------------------------------------------------------------------------------
+ 1) Lock screen freeze      -> Windows Service + Winlogon desktop switching
+                               + GDI BitBlt capture
+ 2) UAC / media popups      -> asInvoker install + Chromium permission
+                               handler override
+ 3) Quadruple click bug     -> Synthetic doubleclick hata kar natural
+                               mousedown/mouseup pairs stream kiye; Windows
+                               khud double-click detect karta hai
+ 4) WebRTC block ho jaana   -> Socket.IO JPEG frame relay + terminal/file
+                               fallback channel
+ 5) Start Menu par click    -> Browser-level input ki jagah C# native SendInput
+    kaam na karna              (desktop privileges ke saath)
+ 6) Multi-resolution        -> Normalized coordinate + letterbox aspect-ratio
+                               mapping
+ 7) Background throttling   -> powerSaveBlocker + Chromium throttle flags
+
+--------------------------------------------------------------------------------
+13. QUICK LINKS
+--------------------------------------------------------------------------------
+  Live Platform     : https://remote.uniotechit.com
+  Host Installer    : https://remote.uniotechit.com/UnioTechIT-Setup.exe
+  GitHub Repo       : https://github.com/aurav2001/Remote-Project
+  Deep Docs         : DEVELOPER_DOCS.md
+  Architecture Doc  : PROJECT_ARCHITECTURE_AND_FIXES.md
+  Full Summary      : REMOTEG_PROJECT_SUMMARY.md
+
+--------------------------------------------------------------------------------
+14. CLOSING LINE (aakhir me yahi bolo)
+--------------------------------------------------------------------------------
+ "Pure platform me 12,000+ lines of code hain - 4 alag technologies (React,
+  Electron, Node.js aur C#) ko ek saath jod kar ek production-ready remote
+  support product banaya hai, jo abhi live chal raha hai aur ek hi command se
+  build + deploy ho jaata hai."
+
+================================================================================

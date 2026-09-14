@@ -7,6 +7,9 @@ using System.Text;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.IO.Pipes;
+using System.Security.Principal;
+using System.Security.AccessControl;
 
 class InputHelper {
     [DllImport("user32.dll", SetLastError = true)]
@@ -14,6 +17,15 @@ class InputHelper {
 
     [DllImport("user32.dll")]
     static extern int GetSystemMetrics(int nIndex);
+
+    // DPI awareness — without this, GetSystemMetrics returns the DPI-SCALED (logical)
+    // resolution on displays scaled to 125%/150%, while the actual screen has more
+    // physical pixels, so screen capture ends up cut off on the right/bottom.
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();
+
+    [DllImport("shcore.dll")]
+    static extern int SetProcessDpiAwareness(int value); // 2 = PROCESS_PER_MONITOR_DPI_AWARE
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
@@ -136,7 +148,7 @@ class InputHelper {
         try {
             IntPtr hToken;
             if (OpenProcessToken(Process.GetCurrentProcess().Handle, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out hToken)) {
-                string[] privs = new string[] { "SeDebugPrivilege", "SeTcbPrivilege", "SeShutdownPrivilege", "SeIncreaseWorkingSetPrivilege" };
+                string[] privs = new string[] { "SeDebugPrivilege", "SeTcbPrivilege", "SeShutdownPrivilege", "SeIncreaseWorkingSetPrivilege", "SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege" };
                 foreach (string p in privs) {
                     try {
                         LUID luid;
@@ -408,11 +420,19 @@ class InputHelper {
 
             using (Bitmap bmp = new Bitmap(screenW, screenH, PixelFormat.Format32bppArgb)) {
                 using (Graphics g = Graphics.FromImage(bmp)) {
+                    // On the lock/secure desktop (Winlogon), Graphics.CopyFromScreen throws every
+                    // single frame — catching that CLR exception per frame is expensive. So when we
+                    // are NOT on the normal "Default" desktop, go straight to GDI BitBlt and skip it.
+                    bool onSecureDesktop = (lastReportedDesktop != null &&
+                        !lastReportedDesktop.Equals("Default", StringComparison.OrdinalIgnoreCase) &&
+                        lastReportedDesktop.Length > 0);
                     bool copied = false;
-                    try {
-                        g.CopyFromScreen(0, 0, 0, 0, new Size(screenW, screenH), CopyPixelOperation.SourceCopy);
-                        copied = true;
-                    } catch {}
+                    if (!onSecureDesktop) {
+                        try {
+                            g.CopyFromScreen(0, 0, 0, 0, new Size(screenW, screenH), CopyPixelOperation.SourceCopy);
+                            copied = true;
+                        } catch {}
+                    }
 
                     if (!copied) {
                         IntPtr hdcDest = g.GetHdc();
@@ -463,15 +483,9 @@ class InputHelper {
         }
     }
 
-    static void Main(string[] args) {
-        EnableTokenPrivileges();
-        SyncDesktop();
-        ReleaseAllModifiers();
-        Console.WriteLine("INPUT_HELPER_READY");
-        string line;
-        while ((line = Console.ReadLine()) != null) {
+    static void ProcessCommand(string line) {
             try {
-                if (string.IsNullOrEmpty(line)) continue;
+                if (string.IsNullOrEmpty(line)) return;
                 string[] parts = line.Split(' ');
                 string command = parts[0].ToLower();
 
@@ -644,7 +658,245 @@ class InputHelper {
             } catch (Exception ex) {
                 Console.WriteLine("ERROR: " + ex.Message);
             }
+    }
+
+    // ================= Entry point dispatch =================
+    // Default (no args): user-session input helper (stdin) — handles normal mouse/keyboard.
+    // --service     : plain SYSTEM loop (launched by a SYSTEM scheduled task in session 0).
+    //                 Its only job is to spawn the --lockworker as SYSTEM into the ACTIVE
+    //                 user session, so it can reach the Winlogon (lock) secure desktop.
+    // --lockworker  : runs as SYSTEM inside the active session. Captures the lock screen and
+    //                 injects the unlock PIN, talking to the host over a dedicated named pipe.
+    static void Main(string[] args) {
+        // NOTE: DPI awareness is applied ONLY inside the lock worker (RunLockWorker), not here.
+        // Making the normal input helper DPI-aware changed GetSystemMetrics and shifted the
+        // mouse coordinate mapping (cursor landed offset from the technician's pointer). The
+        // input helper must keep the same (logical) metrics it always used.
+        EnableTokenPrivileges();
+        string mode = (args != null && args.Length > 0) ? args[0].ToLower().TrimStart('-') : "";
+
+        if (mode == "service") { RunServiceLauncher(); return; }
+        if (mode == "lockworker") { RunLockWorker(); return; }
+
+        // Default user-session input helper (unchanged behaviour: reads stdin, writes stdout).
+        SyncDesktop();
+        ReleaseAllModifiers();
+        Console.WriteLine("INPUT_HELPER_READY");
+        string line;
+        while ((line = Console.ReadLine()) != null) {
+            ProcessCommand(line);
         }
+    }
+
+    // ===== SYSTEM lock worker (runs inside the active user session as SYSTEM) =====
+    const string LOCK_PIPE = "RemoteITLockPipe";
+
+    static void RunLockWorker() {
+        // DPI-aware ONLY here so the lock-screen capture is full physical resolution
+        // (no right/bottom cut on scaled displays). Does not affect input mapping.
+        try { SetProcessDpiAwareness(2); } catch { try { SetProcessDPIAware(); } catch {} }
+        LogDiag("worker", "Lock worker started. Identity=" + SafeIdentity());
+        // Until a host connects, swallow all output so writes to an invalid console never throw.
+        try { Console.SetOut(TextWriter.Null); } catch {}
+
+        // NOTE: The worker is fully PASSIVE. It does NOT run a background monitor and does
+        // NOT capture on its own. It only acts on explicit commands from the host over the
+        // pipe (captureframe / unlockwithpin / ...). Lock/unlock is detected by the host's
+        // Electron powerMonitor (reliable), which drives capture ONLY while locked. This is
+        // what keeps the worker completely idle during normal use — no autonomous SyncDesktop
+        // spam, no desktop-state flapping, and therefore no blink/flicker on connect.
+        // Single command thread also means no cross-thread desktop race while capturing.
+
+        // Accept host connections on the dedicated lock pipe (reconnect-safe loop).
+        while (true) {
+            try {
+                PipeSecurity ps = new PipeSecurity();
+                try {
+                    ps.AddAccessRule(new PipeAccessRule(
+                        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                        PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                        AccessControlType.Allow));
+                    ps.AddAccessRule(new PipeAccessRule(
+                        new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+                        PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                        AccessControlType.Allow));
+                } catch {}
+
+                using (NamedPipeServerStream pipe = new NamedPipeServerStream(
+                    LOCK_PIPE, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous, 65536, 65536, ps)) {
+                    LogDiag("worker", "Pipe created, waiting for host connection...");
+                    pipe.WaitForConnection();
+                    LogDiag("worker", "Host connected to lock pipe.");
+
+                    StreamWriter w = new StreamWriter(pipe, new UTF8Encoding(false));
+                    w.AutoFlush = true;
+                    StreamReader r = new StreamReader(pipe, new UTF8Encoding(false));
+
+                    try { Console.SetOut(w); } catch {}
+                    // Force a fresh desktop-state report to the newly connected host.
+                    lastReportedDesktop = "";
+                    try { SyncDesktop(); } catch {}
+                    Console.WriteLine("LOCKWORKER_READY");
+
+                    string line;
+                    while ((line = r.ReadLine()) != null) {
+                        LogDiag("worker", "cmd: " + (line.Length > 40 ? line.Substring(0, 40) + "..." : line) + " | desktop=" + lastReportedDesktop);
+                        ProcessCommand(line);
+                    }
+                }
+            } catch (Exception ex) { LogDiag("worker", "pipe loop error: " + ex.Message); }
+            try { Console.SetOut(TextWriter.Null); } catch {}
+            Thread.Sleep(500);
+        }
+    }
+
+    // ===== Diagnostic log (SYSTEM launcher + worker run detached, so log to a file) =====
+    static readonly object logLock = new object();
+    static void LogDiag(string tag, string msg) {
+        try {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "UnioTechIT");
+            try { Directory.CreateDirectory(dir); } catch {}
+            string file = Path.Combine(dir, "lockdiag.log");
+            lock (logLock) {
+                File.AppendAllText(file, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " [" + tag + "] " + msg + "\r\n");
+            }
+        } catch {}
+    }
+
+    // ===== SYSTEM launcher: spawns the lock worker into the active session =====
+    static PROCESS_INFORMATION currentWorker;
+    static uint currentWorkerSession = 0xFFFFFFFF;
+
+    static void RunServiceLauncher() {
+        LogDiag("service", "Launcher started. Identity=" + SafeIdentity());
+        while (true) {
+            try {
+                uint sid = WTSGetActiveConsoleSessionId();
+                if (sid != 0xFFFFFFFF) {
+                    bool needLaunch = (sid != currentWorkerSession);
+                    if (!needLaunch && currentWorker.dwProcessId != 0) {
+                        try {
+                            Process p = Process.GetProcessById((int)currentWorker.dwProcessId);
+                            if (p.HasExited) needLaunch = true;
+                        } catch { needLaunch = true; }
+                    } else if (currentWorker.dwProcessId == 0) {
+                        needLaunch = true;
+                    }
+                    if (needLaunch) {
+                        LogDiag("service", "Active console session=" + sid + " -> launching lock worker");
+                        LaunchWorkerInSession(sid);
+                    }
+                }
+            } catch (Exception ex) { LogDiag("service", "loop error: " + ex.Message); }
+            Thread.Sleep(3000);
+        }
+    }
+
+    static string SafeIdentity() {
+        try { return WindowsIdentity.GetCurrent().Name; } catch { return "?"; }
+    }
+
+    static void LaunchWorkerInSession(uint sessionId) {
+        IntPtr hToken = IntPtr.Zero;
+        IntPtr hDup = IntPtr.Zero;
+        try {
+            // Duplicate this SYSTEM process's own token and retarget it at the active session,
+            // then launch the worker as SYSTEM inside that interactive session.
+            if (!OpenProcessToken(Process.GetCurrentProcess().Handle, TOKEN_ALL_ACCESS, out hToken)) {
+                LogDiag("launch", "OpenProcessToken FAILED err=" + Marshal.GetLastWin32Error());
+                return;
+            }
+            if (!DuplicateTokenEx(hToken, MAXIMUM_ALLOWED, IntPtr.Zero,
+                    (int)SECURITY_IMPERSONATION_LEVEL_Impersonation, (int)TOKEN_TYPE_Primary, out hDup)) {
+                LogDiag("launch", "DuplicateTokenEx FAILED err=" + Marshal.GetLastWin32Error());
+                return;
+            }
+
+            uint sid = sessionId;
+            bool setOk = SetTokenInformation(hDup, TokenSessionId, ref sid, sizeof(uint));
+            if (!setOk) LogDiag("launch", "SetTokenInformation(session) warn err=" + Marshal.GetLastWin32Error());
+
+            STARTUPINFO si = new STARTUPINFO();
+            si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+            si.lpDesktop = "winsta0\\default";
+
+            string exe = Process.GetCurrentProcess().MainModule.FileName;
+            string cmd = "\"" + exe + "\" --lockworker";
+
+            PROCESS_INFORMATION pi;
+            bool ok = CreateProcessAsUser(hDup, null, cmd, IntPtr.Zero, IntPtr.Zero, false,
+                CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi);
+            if (ok) {
+                currentWorker = pi;
+                currentWorkerSession = sessionId;
+                LogDiag("launch", "CreateProcessAsUser OK pid=" + pi.dwProcessId + " session=" + sessionId);
+                try { CloseHandle(pi.hThread); } catch {}
+            } else {
+                LogDiag("launch", "CreateProcessAsUser FAILED err=" + Marshal.GetLastWin32Error() + " (1314=privilege not held)");
+            }
+        } catch (Exception ex) {
+            LogDiag("launch", "exception: " + ex.Message);
+        } finally {
+            if (hDup != IntPtr.Zero) { try { CloseHandle(hDup); } catch {} }
+            if (hToken != IntPtr.Zero) { try { CloseHandle(hToken); } catch {} }
+        }
+    }
+
+    // ===== P/Invoke for session-aware SYSTEM process launching =====
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WTSGetActiveConsoleSessionId();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool DuplicateTokenEx(IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes,
+        int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool SetTokenInformation(IntPtr TokenHandle, int TokenInformationClass, ref uint TokenInformation, uint TokenInformationLength);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool CreateProcessAsUser(IntPtr hToken, string lpApplicationName, string lpCommandLine,
+        IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags,
+        IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+    const uint TOKEN_ALL_ACCESS = 0xF01FF;
+    const uint MAXIMUM_ALLOWED = 0x02000000;
+    const int SECURITY_IMPERSONATION_LEVEL_Impersonation = 2;
+    const int TOKEN_TYPE_Primary = 1;
+    const int TokenSessionId = 12;
+    const uint CREATE_NO_WINDOW = 0x08000000;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct STARTUPINFO {
+        public int cb;
+        public string lpReserved;
+        public string lpDesktop;
+        public string lpTitle;
+        public int dwX;
+        public int dwY;
+        public int dwXSize;
+        public int dwYSize;
+        public int dwXCountChars;
+        public int dwYCountChars;
+        public int dwFillAttribute;
+        public int dwFlags;
+        public short wShowWindow;
+        public short cbReserved2;
+        public IntPtr lpReserved2;
+        public IntPtr hStdInput;
+        public IntPtr hStdOutput;
+        public IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_INFORMATION {
+        public IntPtr hProcess;
+        public IntPtr hThread;
+        public uint dwProcessId;
+        public uint dwThreadId;
     }
 }
 

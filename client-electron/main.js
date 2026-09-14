@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard, shell, Tray, Menu, powerSaveBlocker, powerMonitor, session } = require('electron');
 const path = require('path');
-const { spawn, exec } = require('child_process');
+const { spawn, exec, execFile } = require('child_process');
+const net = require('net');
 const fs = require('fs');
 
 // Critical flags to prevent Chromium from throttling screen capture & timers in background
@@ -136,36 +137,7 @@ function startInputHelper() {
     const lines = helperStdoutBuf.split('\n');
     helperStdoutBuf = lines.pop(); // keep last partial chunk
     for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      if (line.startsWith('FRAME_JPG ')) {
-        const b64 = line.substring(10).trim();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('lock-screen-frame', {
-            frame: 'data:image/jpeg;base64,' + b64
-          });
-        }
-      } else if (line === 'DESKTOP_IS_WINLOGON') {
-        if (!isHostScreenLocked) {
-          console.log('[InputHelper]: Detected active Winlogon lock screen desktop!');
-          isHostScreenLocked = true;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('host-lock-status', { isLocked: true });
-          }
-          startLockCaptureLoop();
-        }
-      } else if (line === 'DESKTOP_IS_DEFAULT') {
-        if (isHostScreenLocked) {
-          console.log('[InputHelper]: Detected interactive Default user desktop (Unlocked)!');
-          isHostScreenLocked = false;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('host-lock-status', { isLocked: false });
-          }
-          stopLockCaptureLoop();
-        }
-      } else {
-        console.log(`[InputHelper Stdout]: ${line}`);
-      }
+      handleHelperLine(rawLine);
     }
   });
 
@@ -186,6 +158,98 @@ function sendInputHelperCommand(cmd) {
   } else {
     console.warn('Input helper process not running. Re-initializing...');
   }
+}
+
+// ==================== SYSTEM Lock-Screen Worker Bridge ====================
+// The user-session input helper (above) handles all normal mouse/keyboard input.
+// The Windows lock screen lives on the secure Winlogon desktop, which only a
+// SYSTEM process running INSIDE the active session can capture or type into.
+// A SYSTEM scheduled task (installed elevated) launches "input-helper.exe --service",
+// which spawns "input-helper.exe --lockworker" as SYSTEM into the active session.
+// That worker talks to us over this dedicated named pipe: it streams lock-screen
+// frames (FRAME_JPG) + desktop state (DESKTOP_IS_WINLOGON/DEFAULT), and receives
+// unlock/PIN commands. Normal input never goes through here, so it can't break.
+const LOCK_PIPE_PATH = '\\\\.\\pipe\\RemoteITLockPipe';
+let lockPipeSocket = null;
+let lockPipeConnected = false;
+let lockPipeReconnectTimer = null;
+
+// Shared parser for helper output — used by both the user-session helper (stdout)
+// and the SYSTEM lock worker (pipe). Lock frames / lock state normally arrive here
+// from the lock worker, since the user-session helper cannot see the Winlogon desktop.
+function handleHelperLine(rawLine) {
+  const line = (rawLine || '').trim();
+  if (!line) return;
+  if (line.startsWith('FRAME_JPG ')) {
+    const b64 = line.substring(10).trim();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('lock-screen-frame', {
+        frame: 'data:image/jpeg;base64,' + b64
+      });
+    }
+  } else {
+    // Lock/unlock state is driven SOLELY by the Electron powerMonitor (see setupPowerMonitor),
+    // NOT by the worker's DESKTOP_IS_* lines. Acting on those here caused the lock status to
+    // flap and the viewer to blink between the live video and the lock image. So we ignore them.
+    console.log(`[Helper]: ${line}`);
+  }
+}
+
+function connectLockPipe() {
+  if (lockPipeConnected) return;
+  try {
+    const client = net.createConnection(LOCK_PIPE_PATH, () => {
+      console.log('[Main Process]: Connected to SYSTEM lock worker via named pipe.');
+      lockPipeConnected = true;
+      lockPipeSocket = client;
+      if (lockPipeReconnectTimer) { clearInterval(lockPipeReconnectTimer); lockPipeReconnectTimer = null; }
+    });
+    let buf = '';
+    client.on('data', (data) => {
+      buf += data.toString();
+      const parts = buf.split('\n');
+      buf = parts.pop();
+      for (const l of parts) handleHelperLine(l);
+    });
+    client.on('error', () => { lockPipeConnected = false; lockPipeSocket = null; });
+    client.on('close', () => {
+      lockPipeConnected = false;
+      lockPipeSocket = null;
+      if (!lockPipeReconnectTimer) lockPipeReconnectTimer = setInterval(connectLockPipe, 2000);
+    });
+  } catch (e) {
+    lockPipeConnected = false;
+  }
+}
+
+// Send a lock-screen command (capture / unlock / PIN) to the SYSTEM worker.
+function sendLockCommand(cmd) {
+  if (lockPipeConnected && lockPipeSocket && !lockPipeSocket.destroyed) {
+    try { lockPipeSocket.write(cmd + '\n'); return true; } catch (e) {}
+  }
+  connectLockPipe();
+  return false;
+}
+
+// Keep trying to attach to the lock worker's pipe (it may start slightly after us).
+function startLockPipeBridge() {
+  connectLockPipe();
+  if (!lockPipeReconnectTimer) {
+    lockPipeReconnectTimer = setInterval(connectLockPipe, 2000);
+  }
+}
+
+// The SYSTEM scheduled task "RemoteITLockService" is created by the elevated installer
+// (build/installer.nsh) and auto-starts at logon. This best-effort call just nudges it to
+// run immediately (e.g. right after first install). It is harmless if it fails — this app
+// runs un-elevated (asInvoker), and the task's ONLOGON trigger starts it regardless.
+function ensureLockService() {
+  try {
+    execFile('schtasks', ['/run', '/tn', 'RemoteITLockService'], { windowsHide: true }, () => {
+      // Give the SYSTEM launcher a moment to spawn the worker, then attach.
+      setTimeout(connectLockPipe, 1500);
+    });
+  } catch (e) { /* non-elevated or task absent — ONLOGON trigger will handle it */ }
 }
 
 let isQuitting = false;
@@ -592,6 +656,8 @@ if (!gotTheLock) {
     } catch (e) { }
 
     startInputHelper();
+    ensureLockService();
+    startLockPipeBridge();
     createWindow();
     createTray();
     setupPowerMonitor();
@@ -627,14 +693,17 @@ let lockCaptureInterval = null;
 
 function startLockCaptureLoop() {
   if (lockCaptureInterval) clearInterval(lockCaptureInterval);
-  sendInputHelperCommand('captureframe');
+  // Drive the (now passive, single-threaded) SYSTEM worker to capture the Winlogon
+  // desktop while locked. Only runs between powerMonitor lock/unlock, so the worker
+  // is completely idle during normal use (no competing frames = no blink).
+  sendLockCommand('captureframe');
   lockCaptureInterval = setInterval(() => {
     if (isHostScreenLocked) {
-      sendInputHelperCommand('captureframe');
+      sendLockCommand('captureframe');
     } else {
       stopLockCaptureLoop();
     }
-  }, 200); // 5 FPS smooth lock-screen stream
+  }, 350); // ~3 FPS — plenty for a static lock screen; lowers CPU + base64 memory churn
 }
 
 function stopLockCaptureLoop() {
@@ -682,9 +751,11 @@ function setupPowerMonitor() {
       sendInputHelperCommand('syncdesktop');
     }, 2500);
 
-    // Configure Windows Policy for Software SAS Generation so Ctrl+Alt+Del simulation works on lock screen
+    // Configure Windows Policy for Software SAS Generation so Ctrl+Alt+Del simulation works on lock screen.
+    // The elevated installer already sets this; this is a best-effort runtime fallback (fails silently
+    // when un-elevated). reg.exe is called directly (no cmd.exe wrapper) to stay AV-clean.
     try {
-      exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f', (err) => {
+      execFile('reg', ['add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'SoftwareSASGeneration', '/t', 'REG_DWORD', '/d', '3', '/f'], { windowsHide: true }, (err) => {
         if (!err) console.log('[PowerMonitor]: Configured Windows SoftwareSASGeneration policy.');
       });
     } catch (e) { }
@@ -700,8 +771,8 @@ ipcMain.handle('get-lock-status', () => {
 
 // IPC Handler to trigger SAS unlock (Ctrl+Alt+Del & wake lock screen)
 ipcMain.handle('trigger-sas-unlock', () => {
-  console.log('[Main Process]: Triggering SAS Unlock via input helper');
-  sendInputHelperCommand('shortcut unlock');
+  console.log('[Main Process]: Triggering SAS Unlock via SYSTEM lock worker');
+  sendLockCommand('shortcut unlock');
   return { success: true };
 });
 
@@ -1343,18 +1414,25 @@ ipcMain.on('control-event', (event, data) => {
       }
     } else if (type === 'unlockwithpin') {
       const pin = data.pin || '';
-      console.log('[Main Process]: Executing native unlockwithpin');
+      console.log('[Main Process]: Executing native unlockwithpin (lock worker)');
       if (pin) {
-        sendInputHelperCommand(`unlockwithpin ${pin}`);
+        // PIN must be typed on the Winlogon secure desktop → SYSTEM lock worker.
+        sendLockCommand(`unlockwithpin ${pin}`);
       }
     } else if (type === 'trigger-sas-unlock' || type === 'wake-lock-screen' || type === 'unlock-screen') {
-      console.log('[Main Process]: Executing trigger-sas-unlock / wake-lock-screen');
-      sendInputHelperCommand('shortcut unlock');
+      console.log('[Main Process]: Executing trigger-sas-unlock / wake-lock-screen (lock worker)');
+      sendLockCommand('shortcut unlock');
     } else if (type === 'type' || type === 'typepin' || type === 'text') {
       const text = data.text || data.pin || '';
       if (text) {
         const b64 = Buffer.from(text, 'utf-8').toString('base64');
-        sendInputHelperCommand(`typeb64 ${b64}`);
+        // While locked, typing goes to the Winlogon desktop via the SYSTEM worker;
+        // otherwise it is normal text input in the user session.
+        if (isHostScreenLocked) {
+          sendLockCommand(`typeb64 ${b64}`);
+        } else {
+          sendInputHelperCommand(`typeb64 ${b64}`);
+        }
       }
     } else if (type === 'enter' || type === 'submit') {
       sendInputHelperCommand('enter');
@@ -1363,7 +1441,10 @@ ipcMain.on('control-event', (event, data) => {
     } else if (type === 'releaseallmodifiers' || type === 'resetkeys') {
       sendInputHelperCommand('releaseallmodifiers');
     } else if (type === 'shortcut') {
-      const shortcut = data.shortcut || '';
+      // The controller sends hyphenated shortcut names (win-l, ctrl-del, win-d, alt-f4, ...)
+      // but the C# helper matches un-hyphenated tokens (winl, ctrldel, wind, altf4, ...).
+      // Normalize here so shortcuts — including "Lock PC" (win-l) — actually fire.
+      const shortcut = (data.shortcut || '').replace(/-/g, '').toLowerCase();
       console.log(`[Main Process]: Executing native key shortcut: ${shortcut}`);
       if (shortcut) {
         sendInputHelperCommand(`shortcut ${shortcut}`);

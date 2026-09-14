@@ -1,6 +1,6 @@
 {
   "name": "remoteg-all-in-one",
-  "version": "1.1.2",
+  "version": "1.1.36",
   "description": "RemoteG Desktop Host, Web Controller, and Signaling Server",
   "main": "server/index.js",
   "engines": {
