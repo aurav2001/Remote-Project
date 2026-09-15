@@ -92,12 +92,15 @@ function App() {
     if (!frame) return;
     if (imgRef.current) { try { imgRef.current.src = frame; } catch (e) {} }
     if (!overlayVisibleRef.current) { overlayVisibleRef.current = true; setOverlayVisible(true); }
-    // Reset the freshness timer — if no new frame arrives within 700ms, hide the overlay.
+    // Reset the freshness timer — if no new frame arrives within 700ms, hide overlay ONLY if WebRTC video is rendering
     if (overlayHideTimerRef.current) clearTimeout(overlayHideTimerRef.current);
     overlayHideTimerRef.current = setTimeout(() => {
-      overlayHideTimerRef.current = null;
-      overlayVisibleRef.current = false;
-      setOverlayVisible(false);
+      const v = videoRef.current;
+      if (v && v.videoWidth > 0 && !v.paused) {
+        overlayHideTimerRef.current = null;
+        overlayVisibleRef.current = false;
+        setOverlayVisible(false);
+      }
     }, 700);
   };
   // Kept as no-ops for call sites elsewhere; the freshness timer now handles hiding.
@@ -1531,19 +1534,24 @@ function App() {
     };
   }, []);
 
-  // Ensure video element plays live WebRTC stream cleanly
+  // Ensure video element plays live WebRTC stream cleanly with continuous watchdog
   useEffect(() => {
-    if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
-      if (videoRef.current.srcObject !== remoteStreamRef.current) {
-        console.log('Binding remote stream to video element srcObject');
-        videoRef.current.srcObject = remoteStreamRef.current;
+    const ensurePlay = () => {
+      if (status === 'connected' && videoRef.current && remoteStreamRef.current) {
+        if (videoRef.current.srcObject !== remoteStreamRef.current) {
+          console.log('Binding remote stream to video element srcObject');
+          videoRef.current.srcObject = remoteStreamRef.current;
+        }
+        if (videoRef.current.paused) {
+          videoRef.current.play().catch(err => {
+            if (err && err.name !== 'AbortError') console.warn('Video autoplay warning:', err);
+          });
+        }
       }
-      if (videoRef.current.paused) {
-        videoRef.current.play().catch(err => {
-          if (err && err.name !== 'AbortError') console.warn('Video autoplay warning:', err);
-        });
-      }
-    }
+    };
+    ensurePlay();
+    const watchdog = setInterval(ensurePlay, 500);
+    return () => clearInterval(watchdog);
   }, [status, isWebRtcActive]);
 
   // Check URL query parameters (?code=123456 or ?id=123456) for instant auto-connect
@@ -5696,7 +5704,7 @@ function App() {
               display:none, so it is never torn down or repainted black — this is what removed
               the flicker. All mouse input goes to the video layer. */}
           <video
-            ref={videoRef}
+            ref={setVideoRef}
             autoPlay
             playsInline
             muted

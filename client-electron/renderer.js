@@ -683,7 +683,7 @@ function startHybridFrameStreaming() {
 
     if (hiddenVideo.videoWidth > 0) {
       isSendingFrame = true;
-      const maxWidth = 960; // Lightweight resolution for ultra-low latency & zero lag
+      const maxWidth = 1280; // Crisp 720p HD fallback
       const targetWidth = Math.min(maxWidth, hiddenVideo.videoWidth);
       const targetHeight = Math.round(targetWidth * (hiddenVideo.videoHeight / hiddenVideo.videoWidth));
       if (streamCanvas.width !== targetWidth || streamCanvas.height !== targetHeight) {
@@ -691,11 +691,11 @@ function startHybridFrameStreaming() {
         streamCanvas.height = targetHeight;
       }
       streamCtx.drawImage(hiddenVideo, 0, 0, targetWidth, targetHeight);
-      const frameData = streamCanvas.toDataURL('image/jpeg', 0.40); // 40% quality reduces payload size by 85%
+      const frameData = streamCanvas.toDataURL('image/jpeg', 0.60); // 60% crisp JPEG
       socket.emit('screen-frame', { roomId, frame: frameData });
-      setTimeout(() => { isSendingFrame = false; }, 120);
+      setTimeout(() => { isSendingFrame = false; }, 80);
     }
-  }, 140); // ~7 FPS smooth fallback without congesting socket control clicks
+  }, 90); // ~11 FPS smooth HD fallback
 }
 
 function stopHybridFrameStreaming() {
@@ -1151,14 +1151,14 @@ async function tuneVideoSenderBitrate(pc) {
       if (!params.encodings || params.encodings.length === 0) {
         params.encodings = [{}];
       }
-      params.encodings[0].minBitrate = 2500000;   // 2.5 Mbps crisp floor (zero blur/pixelation)
-      params.encodings[0].maxBitrate = 10000000;  // 10 Mbps ceiling for true 1080p 60FPS HD
+      params.encodings[0].minBitrate = 500000;    // 500 kbps floor - guarantees stream NEVER freezes on bandwidth dips
+      params.encodings[0].maxBitrate = 8000000;   // 8 Mbps ceiling for ultra-sharp 1080p 60FPS
       params.encodings[0].maxFramerate = 60;
       params.encodings[0].networkPriority = 'high';
       params.encodings[0].priority = 'high';
       params.degradationPreference = 'maintain-resolution'; // NEVER downscale resolution or blur text!
       await videoSender.setParameters(params);
-      console.log('[Host]: Video sender tuned to 10 Mbps / 60 FPS Ultra-Crisp HD profile!');
+      console.log('[Host]: Video sender tuned to 8 Mbps / 60 FPS Ultra-Crisp profile!');
     }
   } catch (e) {
     console.warn('[Host]: Error tuning video sender parameters:', e);
