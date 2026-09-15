@@ -1126,12 +1126,12 @@ function optimizeSdp(sdp) {
       }
     }
     if (mLineIndex !== -1) {
-      lines.splice(mLineIndex + 1, 0, 'b=AS:8000', 'b=TIAS:8000000');
+      lines.splice(mLineIndex + 1, 0, 'b=AS:10000', 'b=TIAS:10000000');
     }
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('a=fmtp:')) {
         if (!lines[i].includes('x-google-min-bitrate')) {
-          lines[i] += ';x-google-min-bitrate=1000;x-google-max-bitrate=8000;x-google-start-bitrate=2500';
+          lines[i] += ';x-google-min-bitrate=2500;x-google-max-bitrate=10000;x-google-start-bitrate=4000';
         }
       }
     }
@@ -1151,21 +1151,14 @@ async function tuneVideoSenderBitrate(pc) {
       if (!params.encodings || params.encodings.length === 0) {
         params.encodings = [{}];
       }
-      // High-quality, reliable profile — the live desktop must always be sharp and actually
-      // rendering. (An earlier aggressive downgrade — 30fps / low min-bitrate / maintain-framerate
-      // — starved the encoder on a static desktop so the controller showed a frozen/blurry image
-      // even though input still worked. Restored the known-good sharp profile.)
-      // Clean adaptive profile — avoids encoder-queue overflow (which drops live frames)
-      // while still ramping to sharp 1080p. 'balanced' lets it trade a little resolution OR
-      // framerate as needed so the live desktop keeps flowing smoothly.
-      params.encodings[0].minBitrate = 1000000;   // 1 Mbps floor
-      params.encodings[0].maxBitrate = 8000000;   // 8 Mbps ceiling (crisp 1080p)
+      params.encodings[0].minBitrate = 2500000;   // 2.5 Mbps crisp floor (zero blur/pixelation)
+      params.encodings[0].maxBitrate = 10000000;  // 10 Mbps ceiling for true 1080p 60FPS HD
       params.encodings[0].maxFramerate = 60;
       params.encodings[0].networkPriority = 'high';
       params.encodings[0].priority = 'high';
-      params.degradationPreference = 'balanced';
+      params.degradationPreference = 'maintain-resolution'; // NEVER downscale resolution or blur text!
       await videoSender.setParameters(params);
-      console.log('[Host]: Video sender tuned to adaptive 1–8 Mbps / 60 FPS balanced profile.');
+      console.log('[Host]: Video sender tuned to 10 Mbps / 60 FPS Ultra-Crisp HD profile!');
     }
   } catch (e) {
     console.warn('[Host]: Error tuning video sender parameters:', e);

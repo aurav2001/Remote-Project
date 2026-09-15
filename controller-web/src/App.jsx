@@ -52,12 +52,12 @@ function optimizeSdp(sdp) {
       }
     }
     if (mLineIndex !== -1) {
-      lines.splice(mLineIndex + 1, 0, 'b=AS:4500', 'b=TIAS:4500000');
+      lines.splice(mLineIndex + 1, 0, 'b=AS:10000', 'b=TIAS:10000000');
     }
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('a=fmtp:')) {
         if (!lines[i].includes('x-google-min-bitrate')) {
-          lines[i] += ';x-google-min-bitrate=1200;x-google-max-bitrate=4500;x-google-start-bitrate=2500';
+          lines[i] += ';x-google-min-bitrate=2500;x-google-max-bitrate=10000;x-google-start-bitrate=4000';
         }
       }
     }
