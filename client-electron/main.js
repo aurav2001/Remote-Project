@@ -297,10 +297,15 @@ function createWindow() {
 
 // IPC Handler to minimize host window on remote connection
 ipcMain.handle('minimize-host-window', () => {
-  console.log('[Main Process]: Minimizing host window (keeps background video capture 100% active)...');
+  // CRITICAL: use hide() (to system tray), NOT minimize(). On Windows, a MINIMIZED window
+  // gets its DWM/Chromium compositor render loop throttled to ~0 FPS, which freezes the
+  // desktopCapturer video — the classic "first frame shows, then the screen freezes" bug.
+  // hide() keeps the window off-screen without triggering that minimize throttle, so the
+  // background capture keeps producing live frames.
+  console.log('[Main Process]: Hiding host window to tray (keeps background video capture live)...');
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.minimize();
+      mainWindow.hide();
     }
   } catch (e) { }
 });

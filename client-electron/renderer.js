@@ -71,12 +71,12 @@ async function getOrInitCompanyGroup() {
   if (window.electronAPI && window.electronAPI.getCompanyGroup) {
     try {
       savedGroup = await window.electronAPI.getCompanyGroup();
-    } catch(e) {}
+    } catch (e) { }
   }
   if (!savedGroup) {
     try {
       savedGroup = localStorage.getItem('remoteg_company_group');
-    } catch(e) {}
+    } catch (e) { }
   }
   companyGroup = (savedGroup || 'USPL').trim().toUpperCase();
   if (companyGroupText) {
@@ -96,11 +96,11 @@ async function updateCompanyGroup(newGroup) {
   if (window.electronAPI && window.electronAPI.setCompanyGroup) {
     try {
       await window.electronAPI.setCompanyGroup(cleanGroup);
-    } catch(e) {}
+    } catch (e) { }
   }
   try {
     localStorage.setItem('remoteg_company_group', cleanGroup);
-  } catch(e) {}
+  } catch (e) { }
   if (socket && socket.connected) {
     socket.emit('update-company-group', { roomId, companyGroup: cleanGroup });
   }
@@ -132,12 +132,12 @@ async function getOrInitPermanentCode() {
   if (window.electronAPI && window.electronAPI.getPermanentCode) {
     try {
       savedCode = await window.electronAPI.getPermanentCode();
-    } catch(e) {}
+    } catch (e) { }
   }
   if (!savedCode || savedCode.length !== 6) {
     try {
       savedCode = localStorage.getItem('remoteg_permanent_access_code');
-    } catch (e) {}
+    } catch (e) { }
   }
   if (!savedCode || savedCode.length !== 6) {
     savedCode = generateRoomId();
@@ -156,11 +156,11 @@ async function resetPermanentCode() {
   if (window.electronAPI && window.electronAPI.setPermanentCode) {
     try {
       await window.electronAPI.setPermanentCode(newCode);
-    } catch(e) {}
+    } catch (e) { }
   }
   try {
     localStorage.setItem('remoteg_permanent_access_code', newCode);
-  } catch (e) {}
+  } catch (e) { }
   roomId = String(newCode).trim();
   if (roomIdText) {
     roomIdText.innerText = roomId;
@@ -216,8 +216,8 @@ async function registerHostOnServer() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId, systemInfo, companyGroup, liveMetrics: cachedLiveMetrics })
-    }).catch(() => {});
-  } catch(e) {}
+    }).catch(() => { });
+  } catch (e) { }
 }
 
 // Background 5s HTTP Keepalive Heartbeat
@@ -318,6 +318,10 @@ function initSocket() {
       }
       return;
     }
+    if (data.type === 'video-live') {
+      onControllerVideoLive();
+      return;
+    }
     if (data.type === 'get-screens-list') {
       sendScreensListToController();
       return;
@@ -375,14 +379,14 @@ function initSocket() {
     handleRequestSystemDiagnostics(data);
   });
 
-// When controller disconnects, reset peer connection & return to waiting state
+  // When controller disconnects, reset peer connection & return to waiting state
   socket.on('peer-disconnected', ({ role }) => {
     if (role === 'controller') {
       console.log('[Host]: Controller disconnected. Resetting peer connection.');
       isControllerConnected = false;
       stopHybridFrameStreaming();
       if (peerConnection) {
-        try { peerConnection.close(); } catch(e) {}
+        try { peerConnection.close(); } catch (e) { }
         peerConnection = null;
       }
       activeDataChannel = null;
@@ -405,7 +409,7 @@ function startDataChannelHeartbeat() {
     if (activeDataChannel && activeDataChannel.readyState === 'open') {
       try {
         activeDataChannel.send(JSON.stringify({ type: 'ping' }));
-      } catch (e) {}
+      } catch (e) { }
     }
   }, 3000);
 }
@@ -497,7 +501,7 @@ async function handleIncomingFileChunk(data) {
       if (activeDataChannel && activeDataChannel.readyState === 'open') {
         try {
           activeDataChannel.send(JSON.stringify(ackPayload));
-        } catch (e) {}
+        } catch (e) { }
       }
       if (socket && socket.connected) {
         socket.emit('file-transfer-ack', ackPayload);
@@ -515,7 +519,7 @@ function sendFileExplorerData(payload) {
     try {
       activeDataChannel.send(JSON.stringify(payload));
       sent = true;
-    } catch (e) {}
+    } catch (e) { }
   }
   if (!sent && socket && socket.connected && roomId) {
     socket.emit('file-explorer-event', { roomId, payload });
@@ -624,6 +628,16 @@ async function handleFileExplorerDownloadRequest(data) {
 // --- HYBRID JPEG FRAME STREAMER (Zero-drop lightweight fallback for strict NAT/Firewalls) ---
 let frameStreamingInterval = null;
 let isControllerConnected = false;
+// During a post-unlock recovery the WebRTC peer connection is still "connected" (it never
+// closed during lock), so the hybrid fallback would normally kill itself on the first tick
+// and send ZERO recovery frames. This flag keeps the fallback alive through the transition.
+let allowHybridDuringRecovery = false;
+// Only stop the socket fallback once the CONTROLLER confirms its WebRTC <video> is actually
+// painting live frames (a 'video-live' message). ICE reporting "connected" is NOT enough —
+// media can lag behind, and stopping the fallback then leaves the controller on a frozen
+// first frame ("initial image then freeze"). Until confirmed, the fallback keeps streaming.
+let controllerVideoConfirmed = false;
+let videoConfirmSafetyTimer = null;
 const hiddenVideo = document.createElement('video');
 hiddenVideo.muted = true;
 hiddenVideo.playsInline = true;
@@ -635,14 +649,16 @@ try {
   } else {
     window.addEventListener('DOMContentLoaded', () => document.body.appendChild(hiddenVideo));
   }
-} catch(e) {}
+} catch (e) { }
 
 const streamCanvas = document.createElement('canvas');
 const streamCtx = streamCanvas.getContext('2d', { alpha: false });
 
 function startHybridFrameStreaming() {
-  // If WebRTC direct P2P is already active and healthy, do not waste bandwidth on socket frames
-  if (peerConnection && (peerConnection.connectionState === 'connected' || peerConnection.iceConnectionState === 'connected')) {
+  // If WebRTC direct P2P is already active and healthy, do not waste bandwidth on socket frames.
+  // EXCEPTION: during post-unlock recovery keep the fallback alive even though the peer is
+  // still "connected" — otherwise there are zero recovery frames while the video is black.
+  if (!allowHybridDuringRecovery && controllerVideoConfirmed && peerConnection && (peerConnection.connectionState === 'connected' || peerConnection.iceConnectionState === 'connected')) {
     stopHybridFrameStreaming();
     return;
   }
@@ -650,7 +666,7 @@ function startHybridFrameStreaming() {
   if (frameStreamingInterval) clearInterval(frameStreamingInterval);
   if (localStream) {
     hiddenVideo.srcObject = localStream;
-    hiddenVideo.play().catch(e => {});
+    hiddenVideo.play().catch(e => { });
   }
 
   console.log('[Host]: Hybrid frame stream active (lightweight fallback mode)...');
@@ -658,7 +674,7 @@ function startHybridFrameStreaming() {
 
   frameStreamingInterval = setInterval(() => {
     if (!socket || !socket.connected || !roomId || !isControllerConnected) return;
-    if (peerConnection && (peerConnection.connectionState === 'connected' || peerConnection.iceConnectionState === 'connected')) {
+    if (!allowHybridDuringRecovery && controllerVideoConfirmed && peerConnection && (peerConnection.connectionState === 'connected' || peerConnection.iceConnectionState === 'connected')) {
       stopHybridFrameStreaming();
       return;
     }
@@ -690,6 +706,15 @@ function stopHybridFrameStreaming() {
   }
 }
 
+// Called when the controller confirms its WebRTC <video> is painting live frames.
+function onControllerVideoLive() {
+  if (controllerVideoConfirmed) return;
+  controllerVideoConfirmed = true;
+  if (videoConfirmSafetyTimer) { clearTimeout(videoConfirmSafetyTimer); videoConfirmSafetyTimer = null; }
+  console.log('[Host]: Controller confirmed WebRTC video is live — stopping socket fallback.');
+  stopHybridFrameStreaming();
+}
+
 // Core function to start screen sharing
 async function startSharing(sourceId) {
   if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
@@ -718,7 +743,7 @@ async function startSharing(sourceId) {
         }
       });
       console.log('[Host]: Screen captured via native desktopCapturer at true 1080p 60FPS Crisp HD!');
-    } catch(err) {
+    } catch (err) {
       console.warn('[Host]: Primary capture fallback:', err);
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -740,7 +765,7 @@ async function startSharing(sourceId) {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = true;
         if ('contentHint' in track) {
-          track.contentHint = 'detail';
+          track.contentHint = 'motion'; // continuous screen video (don't drop small cursor/typing changes)
         }
         console.log('[Host]: Desktop screen video track active (Ultra Sharp HD Mode):', track.id, 'readyState:', track.readyState);
       });
@@ -856,7 +881,7 @@ async function loadSources() {
       sources = await window.electronAPI.getScreenSources();
       cachedScreenSources = sources;
     }
-    
+
     if (screenSelect) {
       screenSelect.innerHTML = '';
       if (!sources || sources.length === 0) {
@@ -895,18 +920,13 @@ async function loadSources() {
     }
     try {
       await startSharing('screen:0:0');
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
 function onStreamConnected() {
-  stopHybridFrameStreaming();
   updateStatus('connected', 'Connected & Streaming');
   sendScreensListToController();
-  if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
-    console.log('[Host]: Triggering auto-minimize on stream connection...');
-    window.electronAPI.minimizeHostWindow().catch(err => console.warn('Minimize warning:', err));
-  }
 }
 
 function setupDataChannel(channel) {
@@ -938,6 +958,7 @@ function setupDataChannel(channel) {
         return;
       }
       if (data.type === 'pong') return;
+      if (data.type === 'video-live') { onControllerVideoLive(); return; }
       if (data.type === 'clipboard-sync' && data.text) {
         console.log('[Host]: Received remote controller clipboard text:', data.text.substring(0, 30));
         if (window.electronAPI && window.electronAPI.writeClipboard) {
@@ -1040,23 +1061,35 @@ if (window.electronAPI && window.electronAPI.onHostLockStatus) {
       if (localStream) {
         localStream.getVideoTracks().forEach(track => { track.enabled = true; });
       }
-      try { if (typeof hiddenVideo !== 'undefined' && hiddenVideo) hiddenVideo.play().catch(() => {}); } catch (e) {}
+      try { if (typeof hiddenVideo !== 'undefined' && hiddenVideo) hiddenVideo.play().catch(() => { }); } catch (e) { }
 
-      // Keep sending socket fallback frames through the whole transition so the controller
-      // always has something live to show until the WebRTC track is confirmed swapped.
+      // Keep sending socket fallback frames through the WHOLE transition. allowHybridDuringRecovery
+      // forces them out even though the peer connection is still "connected" (see the guards).
+      allowHybridDuringRecovery = true;
       if (isControllerConnected) {
         startHybridFrameStreaming();
       }
 
-      // After ~500ms (desktop fully restored), REFRESH the Chromium desktopCapturer source
-      // IDs — after a lock they can go stale, and re-capturing with a stale id yields a black
-      // frame. Then hot-swap the fresh capture onto the live WebRTC sender. handleSwitchScreen
-      // sends 'screen-switched' when replaceTrack completes, which the controller treats as
-      // 'video-live' and only then reveals the video (no black gap, no blind timer).
+      // After ~500ms (desktop fully restored), REFRESH the Chromium desktopCapturer source IDs
+      // — after a lock the old id goes stale and re-capturing with it yields a black frame. Use
+      // the FRESH first source id, not the stale currentScreenSourceId. Then hot-swap the fresh
+      // capture onto the live WebRTC sender; handleSwitchScreen sends 'screen-switched' when
+      // replaceTrack completes → controller confirms real frames → reveals video (no black gap).
       setTimeout(async () => {
-        try { await loadSources(); } catch (e) {}
-        try { await handleSwitchScreen(currentScreenSourceId); } catch (e) { console.warn('[Host]: post-unlock recapture failed', e); }
+        try { await loadSources(); } catch (e) { }
+        let freshId = currentScreenSourceId || 'screen:0:0';
+        try {
+          if (cachedScreenSources && cachedScreenSources.length > 0 && cachedScreenSources[0].id) {
+            freshId = cachedScreenSources[0].id;
+          }
+        } catch (e) { }
+        try { await handleSwitchScreen(freshId); } catch (e) { console.warn('[Host]: post-unlock recapture failed', e); }
+        // WebRTC now carries the fresh live track — stop the recovery fallback.
+        allowHybridDuringRecovery = false;
+        stopHybridFrameStreaming();
       }, 500);
+      // Safety: never leave recovery mode stuck on.
+      setTimeout(() => { allowHybridDuringRecovery = false; }, 6000);
     }
   });
 }
@@ -1098,7 +1131,7 @@ function optimizeSdp(sdp) {
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('a=fmtp:')) {
         if (!lines[i].includes('x-google-min-bitrate')) {
-          lines[i] += ';x-google-min-bitrate=2500;x-google-max-bitrate=8000;x-google-start-bitrate=4500';
+          lines[i] += ';x-google-min-bitrate=1000;x-google-max-bitrate=8000;x-google-start-bitrate=2500';
         }
       }
     }
@@ -1118,14 +1151,21 @@ async function tuneVideoSenderBitrate(pc) {
       if (!params.encodings || params.encodings.length === 0) {
         params.encodings = [{}];
       }
-      params.encodings[0].maxBitrate = 8000000; // 8 Mbps for ultra-sharp crystal clear 1080p
-      params.encodings[0].minBitrate = 2500000; // 2.5 Mbps floor to guarantee no blur/pixelation
+      // High-quality, reliable profile — the live desktop must always be sharp and actually
+      // rendering. (An earlier aggressive downgrade — 30fps / low min-bitrate / maintain-framerate
+      // — starved the encoder on a static desktop so the controller showed a frozen/blurry image
+      // even though input still worked. Restored the known-good sharp profile.)
+      // Clean adaptive profile — avoids encoder-queue overflow (which drops live frames)
+      // while still ramping to sharp 1080p. 'balanced' lets it trade a little resolution OR
+      // framerate as needed so the live desktop keeps flowing smoothly.
+      params.encodings[0].minBitrate = 1000000;   // 1 Mbps floor
+      params.encodings[0].maxBitrate = 8000000;   // 8 Mbps ceiling (crisp 1080p)
       params.encodings[0].maxFramerate = 60;
       params.encodings[0].networkPriority = 'high';
       params.encodings[0].priority = 'high';
-      params.degradationPreference = 'maintain-resolution'; // NEVER downscale resolution or blur text!
+      params.degradationPreference = 'balanced';
       await videoSender.setParameters(params);
-      console.log('[Host]: Video sender tuned to 8.0 Mbps 60FPS Ultra-Crisp HD profile!');
+      console.log('[Host]: Video sender tuned to adaptive 1–8 Mbps / 60 FPS balanced profile.');
     }
   } catch (e) {
     console.warn('[Host]: Error tuning video sender parameters:', e);
@@ -1137,7 +1177,7 @@ async function createPeerConnection() {
   if (peerConnection) {
     try {
       peerConnection.close();
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!localStream || !localStream.active || localStream.getVideoTracks().length === 0) {
@@ -1163,7 +1203,7 @@ async function createPeerConnection() {
   videoTracks.forEach(track => {
     track.enabled = true;
     if ('contentHint' in track) {
-      track.contentHint = 'detail';
+      track.contentHint = 'motion'; // continuous screen video (don't drop small cursor/typing changes)
     }
     console.log('[Host]: Adding Ultra-Sharp 1080p 60FPS video track to PeerConnection:', track.id);
     peerConnection.addTrack(track, localStream);
@@ -1199,7 +1239,6 @@ async function createPeerConnection() {
     console.log(`[Host]: Connection state changed to: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'connected') {
       onStreamConnected();
-      stopHybridFrameStreaming();
     } else if (peerConnection.connectionState === 'disconnected') {
       updateStatus('connecting', 'Network blip. Reconnecting stream...');
       if (isControllerConnected) startHybridFrameStreaming();
@@ -1217,7 +1256,6 @@ async function createPeerConnection() {
     console.log(`[Host]: ICE connection state changed to: ${peerConnection.iceConnectionState}`);
     if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
       onStreamConnected();
-      stopHybridFrameStreaming();
     } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
       if (isControllerConnected) startHybridFrameStreaming();
     }
@@ -1236,9 +1274,16 @@ async function handleControllerJoined() {
   isInitiatingOffer = true;
   isControllerConnected = true;
 
+  // New controller session: the WebRTC video isn't confirmed live yet, so keep the socket
+  // fallback running until the controller sends 'video-live'. Safety net: assume it's fine
+  // after 12s (so the fallback doesn't run forever if the confirm message is ever missed).
+  controllerVideoConfirmed = false;
+  if (videoConfirmSafetyTimer) clearTimeout(videoConfirmSafetyTimer);
+  videoConfirmSafetyTimer = setTimeout(() => { controllerVideoConfirmed = true; }, 12000);
+
   // Start the lightweight socket fallback IMMEDIATELY so the controller sees the
-  // screen within ~1s instead of waiting ~10s for WebRTC ICE to finish. The hybrid
-  // loop auto-stops itself the moment the WebRTC P2P connection becomes connected.
+  // screen within ~1s instead of waiting for WebRTC ICE. It keeps running until the
+  // controller confirms its live video is actually painting (no "freeze on first frame").
   if (!hostLocked) {
     startHybridFrameStreaming();
   }
@@ -1269,10 +1314,6 @@ async function handleControllerJoined() {
         offer: finalOffer
       });
     }
-
-    if (window.electronAPI && window.electronAPI.minimizeHostWindow) {
-      window.electronAPI.minimizeHostWindow().catch(err => {});
-    }
   } catch (err) {
     console.error('Error initiating WebRTC offer:', err);
   } finally {
@@ -1288,7 +1329,7 @@ if (window.electronAPI && window.electronAPI.onHostClipboardChanged) {
     if (activeDataChannel && activeDataChannel.readyState === 'open') {
       try {
         activeDataChannel.send(payload);
-      } catch (e) {}
+      } catch (e) { }
     }
     if (socket && socket.connected && roomId) {
       socket.emit('clipboard-sync', { roomId, text });
@@ -1304,7 +1345,7 @@ if (window.electronAPI && window.electronAPI.onSystemMetricsUpdate) {
     if (activeDataChannel && activeDataChannel.readyState === 'open') {
       try {
         activeDataChannel.send(payload);
-      } catch (e) {}
+      } catch (e) { }
     }
     if (socket && socket.connected && roomId) {
       socket.emit('system-metrics', { roomId, metrics });

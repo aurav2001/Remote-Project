@@ -76,34 +76,33 @@ function App() {
   const [showSpecsModal, setShowSpecsModal] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showHealthDrawer, setShowHealthDrawer] = useState(false);
-  // Socket/lock frames are written straight to the <img> via a ref — NOT React state —
-  // so incoming frames (5-10/sec) do NOT re-render the whole 6000-line App (huge CPU win).
-  // Only `hasSocketFrame` (a rarely-changing boolean) drives visibility of the <img>.
+  // FRESHNESS-DRIVEN OVERLAY.
+  // Socket/lock frames are written straight to the <img> via a ref (no per-frame React
+  // re-render — big CPU win). The overlay <img> is shown ONLY while socket frames are
+  // actively arriving (lock stream or fallback stream). The moment they stop for ~700ms
+  // (e.g. WebRTC took over, or a brief WebRTC blip), the overlay hides and reveals the
+  // live <video> underneath. This is what prevents a STALE frame from freezing the screen:
+  // the overlay can never linger on an old frame while the desktop keeps changing.
   const imgRef = useRef(null);
-  const [hasSocketFrame, setHasSocketFrame] = useState(false);
-  const hasSocketFrameRef = useRef(false);
-  const clearSocketTimerRef = useRef(null);
+  const [overlayVisible, setOverlayVisible] = useState(false);
+  const overlayVisibleRef = useRef(false);
+  const overlayHideTimerRef = useRef(null);
 
   const showSocketFrame = (frame) => {
     if (!frame) return;
-    if (clearSocketTimerRef.current) { clearTimeout(clearSocketTimerRef.current); clearSocketTimerRef.current = null; }
     if (imgRef.current) { try { imgRef.current.src = frame; } catch (e) {} }
-    if (!hasSocketFrameRef.current) { hasSocketFrameRef.current = true; setHasSocketFrame(true); }
+    if (!overlayVisibleRef.current) { overlayVisibleRef.current = true; setOverlayVisible(true); }
+    // Reset the freshness timer — if no new frame arrives within 700ms, hide the overlay.
+    if (overlayHideTimerRef.current) clearTimeout(overlayHideTimerRef.current);
+    overlayHideTimerRef.current = setTimeout(() => {
+      overlayHideTimerRef.current = null;
+      overlayVisibleRef.current = false;
+      setOverlayVisible(false);
+    }, 700);
   };
-  const clearSocketFrame = () => {
-    if (clearSocketTimerRef.current) { clearTimeout(clearSocketTimerRef.current); clearSocketTimerRef.current = null; }
-    if (hasSocketFrameRef.current) { hasSocketFrameRef.current = false; setHasSocketFrame(false); }
-  };
-  // Delayed clear used on UNLOCK: keep the last frame visible ~800ms so the WebRTC video
-  // has time to start playing — prevents a black blink during the lock→desktop transition.
-  const clearSocketFrameDelayed = () => {
-    if (clearSocketTimerRef.current) return;
-    clearSocketTimerRef.current = setTimeout(() => {
-      clearSocketTimerRef.current = null;
-      hasSocketFrameRef.current = false;
-      setHasSocketFrame(false);
-    }, 800);
-  };
+  // Kept as no-ops for call sites elsewhere; the freshness timer now handles hiding.
+  const clearSocketFrame = () => {};
+  const clearSocketFrameDelayed = () => {};
 
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const isWebRtcActiveRef = useRef(false);
@@ -125,13 +124,30 @@ function App() {
   // Confirm the live video has actually painted a fresh frame before hiding the overlay,
   // using requestVideoFrameCallback (fires on the next presented frame). Guarantees the
   // desktop is visibly rendering — zero black gap on the lock→desktop handoff.
+  const confirmVideoTimerRef = useRef(null);
   const confirmVideoLiveAndShow = () => {
     const v = videoRef.current;
-    if (v && typeof v.requestVideoFrameCallback === 'function') {
-      try { v.requestVideoFrameCallback(() => setVideoRenderingState(true)); return; } catch (e) {}
+    if (!v) { setVideoRenderingState(true); return; }
+    if (confirmVideoTimerRef.current) { clearTimeout(confirmVideoTimerRef.current); confirmVideoTimerRef.current = null; }
+    // ONLY hide the overlay once the live desktop is actually painted — videoWidth>0 means a
+    // frame decoded, !paused means it's playing. Never hide on a blind timer (that showed black).
+    let tries = 0;
+    const check = () => {
+      confirmVideoTimerRef.current = null;
+      if (v.videoWidth > 0 && !v.paused) {
+        setVideoRenderingState(true);
+        return;
+      }
+      if (++tries < 60) { // keep the lock/overlay frame up to ~9s while waiting for real frames
+        confirmVideoTimerRef.current = setTimeout(check, 150);
+      }
+      // If it never paints, we deliberately keep the overlay (socket fallback frames keep it
+      // live) rather than revealing a black video.
+    };
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      try { v.requestVideoFrameCallback(() => { if (v.videoWidth > 0 && !v.paused) setVideoRenderingState(true); }); } catch (e) {}
     }
-    // Fallback (browser without rVFC): small delay to let the new frame paint.
-    setTimeout(() => setVideoRenderingState(true), 250);
+    check();
   };
 
   // After unlock the <video> element often stays STALLED (it went static/black during lock
@@ -142,11 +158,45 @@ function App() {
     const v = videoRef.current;
     if (v && remoteStreamRef.current) {
       try {
+        // Reassigning the SAME stream is a no-op and does NOT restart a stalled Chromium
+        // decoder. Detach (null) first, then re-attach, to force the decoder to restart.
+        v.srcObject = null;
         v.srcObject = remoteStreamRef.current;
         const p = v.play();
         if (p && p.catch) p.catch(() => {});
       } catch (e) {}
     }
+  };
+
+  // Tell the host "my WebRTC video is actually painting live frames now" so it stops the
+  // socket fallback. We wait for a REAL painted frame (rVFC / videoWidth>0 && !paused) so the
+  // host never stops the fallback prematurely and leaves us on a frozen first frame.
+  const videoLiveSentRef = useRef(false);
+  const notifyHostVideoLiveWhenPainting = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    const send = () => {
+      setVideoRenderingState(true);
+      if (videoLiveSentRef.current) return;
+      videoLiveSentRef.current = true;
+      const payload = { type: 'video-live' };
+      try {
+        if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+          dataChannelRef.current.send(JSON.stringify(payload));
+        } else if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit('control-event', { ...payload, roomId: activeRoomIdRef.current || targetRoomId.trim() });
+        }
+      } catch (e) {}
+    };
+    let tries = 0;
+    const check = () => {
+      if (v.videoWidth > 0 && !v.paused) { send(); return; }
+      if (++tries < 80) setTimeout(check, 150);
+    };
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      try { v.requestVideoFrameCallback(() => { if (v.videoWidth > 0 && !v.paused) send(); }); } catch (e) {}
+    }
+    check();
   };
 
   const webrtcInactiveTimerRef = useRef(null);
@@ -1915,6 +1965,7 @@ function App() {
   const cleanup = () => {
     remoteStreamRef.current = null;
     pendingCandidatesRef.current = [];
+    videoLiveSentRef.current = false; // allow re-confirming video-live on the next connection
     setWebRtcActiveState(false);
     setLiveMetrics(null);
     setTerminalLogs([]);
@@ -2272,6 +2323,11 @@ function App() {
       }
       setWebRtcActiveState(true);
       setStatus('connected');
+
+      // Tell the HOST the moment our <video> actually paints a live frame, so it can stop the
+      // socket fallback. Until then the host keeps the fallback running, so the controller is
+      // never left on a frozen first frame ("initial image then freeze").
+      notifyHostVideoLiveWhenPainting();
     };
 
     // Listen for WebRTC DataChannel established by Host (Offerer)
@@ -5683,7 +5739,7 @@ function App() {
               objectFit: 'fill',
               width: '100%',
               height: '100%',
-              display: (hasSocketFrame && !videoRendering) ? 'block' : 'none',
+              display: overlayVisible ? 'block' : 'none',
               userSelect: 'none',
               background: '#000'
             }}
